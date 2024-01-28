@@ -1,0 +1,25 @@
+{
+  "name": "@video-editor/shared",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "description": "video editor shared libs",
+  "author": "",
+  "license": "ISC",
+  "keywords": [],
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "types/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "pnpm --parallel vite"
+  }
+}

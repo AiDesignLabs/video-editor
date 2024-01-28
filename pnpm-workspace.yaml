@@ -1,0 +1,6 @@
+packages:
+  - 'packages/*'
+  - 'packages/*/*' # 支持两层嵌套的子包
+  - playground
+  # exclude packages that are inside test directories
+  - '!**/test/**'
