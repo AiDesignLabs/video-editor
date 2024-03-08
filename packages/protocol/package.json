@@ -18,9 +18,14 @@
   "scripts": {
     "build:types": "vue-tsc --declaration --emitDeclarationOnly",
     "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:ci": "vitest --run"
   },
   "peerDependencies": {
     "@vue/reactivity": "^3.4.19"
+  },
+  "dependencies": {
+    "@video-editor/shared": "workspace:*"
   }
 }
