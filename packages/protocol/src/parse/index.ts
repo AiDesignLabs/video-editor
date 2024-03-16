@@ -1,12 +1,12 @@
 import type { IVideoProtocol } from '@video-editor/shared'
 
-type parseFn = (videoProtocolStr: string) => Object
+type parseFn = (videoProtocolStr: string) => object
 
 const parse: parseFn = (videoProtocolStr) => {
   if (typeof videoProtocolStr !== 'string')
     throw new TypeError('invalid protocol', { cause: videoProtocolStr })
 
-  let o: Object
+  let o: object
   // custom DSL need compile
   try {
     o = compile(videoProtocolStr)

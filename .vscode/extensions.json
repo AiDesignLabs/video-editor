@@ -5,7 +5,6 @@
     "antfu.goto-alias",
     "dbaeumer.vscode-eslint",
     "EditorConfig.EditorConfig",
-    "Vue.volar",
-    "Vue.vscode-typescript-vue-plugin"
+    "Vue.volar"
   ]
 }

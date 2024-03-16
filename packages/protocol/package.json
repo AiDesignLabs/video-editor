@@ -26,6 +26,10 @@
     "@vue/reactivity": "^3.4.19"
   },
   "dependencies": {
-    "@video-editor/shared": "workspace:*"
+    "@video-editor/shared": "workspace:*",
+    "ajv": "^8.12.0",
+    "ajv-errors": "^3.0.0",
+    "ajv-formats": "^2.1.1",
+    "ajv-keywords": "^5.1.0"
   }
 }

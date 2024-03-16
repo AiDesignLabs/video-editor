@@ -50,19 +50,19 @@ export interface IFramesSegment extends ISegment {
   background?: `rgba(${number},${number},${number},${number})`
 }
 
-interface IVideoFramesSegment extends IFramesSegment {
+export interface IVideoFramesSegment extends IFramesSegment {
   type: 'video'
   fromTime?: number // from time in video where to start, default 0
   volume?: number // volume of the video, value between [0, 1], default 1
   playRate?: number // play rate of the video, value between [0.1, 100], default 1
 }
 
-interface IImageFramesSegment extends IFramesSegment {
+export interface IImageFramesSegment extends IFramesSegment {
   type: 'image'
   format: 'img' | 'gif'
 }
 
-interface I3DFramesSegment extends IFramesSegment {
+export interface I3DFramesSegment extends IFramesSegment {
   type: '3D'
 }
 
