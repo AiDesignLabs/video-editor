@@ -4,6 +4,7 @@ export const POSITIVE_NUMBER_SUFFIX = 'must be >= 0'
 export const INVALID_START_TIME = `startTime ${POSITIVE_NUMBER_SUFFIX}`
 export const INVALID_END_TIME = `endTime ${POSITIVE_NUMBER_SUFFIX}`
 export const INVALID_ID = 'id must be a string'
+export const INVALID_URL = 'url must be a string and a valid uri'
 
 export const INVALID_RGBA = 'must be a string and a valid rgba color'
 
