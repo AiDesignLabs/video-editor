@@ -1,9 +1,9 @@
-import type { IFramesSegmentUnion, IVideoProtocol } from '@video-editor/shared'
+import type { IFramesSegmentUnion, ITextSegment, IVideoProtocol } from '@video-editor/shared'
 import Ajv from 'ajv'
 import ajvErrors from 'ajv-errors'
 import ajvKeywords from 'ajv-keywords'
 import ajvFormats from 'ajv-formats'
-import { framesSegmentRule, videoProtocolBasicRule } from './rules'
+import { framesSegmentRule, textSegmentRule, videoProtocolBasicRule } from './rules'
 
 export function createVerify() {
   const ajv = new Ajv({ allErrors: true, strict: 'log' })
@@ -16,6 +16,7 @@ export function createVerify() {
 
   const validateBasic = ajv.compile(videoProtocolBasicRule)
   const validateFramesSegment = ajv.compile(framesSegmentRule)
+  const validateTextSegment = ajv.compile(textSegmentRule)
 
   const verifyBasic = (o: object) => {
     if (validateBasic(o) === false)
@@ -31,5 +32,12 @@ export function createVerify() {
     return o as IFramesSegmentUnion
   }
 
-  return { verifyBasic, verifyFramesSegment }
+  const verifyTextSegment = (o: object) => {
+    if (validateTextSegment(o) === false)
+      throw new Error(ajv.errorsText(validateTextSegment.errors))
+
+    return o as ITextSegment
+  }
+
+  return { verifyBasic, verifyFramesSegment, verifyTextSegment }
 }

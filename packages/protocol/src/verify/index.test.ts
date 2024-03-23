@@ -1,5 +1,5 @@
-import type { IVideoFramesSegment } from '@video-editor/shared'
-import { INVALID_ANIMATION_TYPE, INVALID_END_TIME, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_TRACKS, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_FRAMES_SEGMENT, generateMissingRequiredReg, generateTypeErrorPrefixReg } from './rules'
+import type { ITextSegment, IVideoFramesSegment } from '@video-editor/shared'
+import { INVALID_ANIMATION_TYPE, INVALID_END_TIME, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_TEXT_BASIC_ALIGN_TYPE, INVALID_TRACKS, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_FRAMES_SEGMENT, generateMissingRequiredReg, generateTypeErrorPrefixReg } from './rules'
 import { createVerify } from './index'
 
 describe('verify basic info of video protocol', () => {
@@ -92,7 +92,7 @@ describe('verify basic info of video protocol', () => {
 })
 
 describe('verify segment of video protocol', () => {
-  const { verifyFramesSegment } = createVerify()
+  const { verifyFramesSegment, verifyTextSegment } = createVerify()
 
   describe('frames segment', () => {
     const videoFramesSegment: IVideoFramesSegment = { id: '1', startTime: 0, endTime: 500, type: 'video', url: 'https://example.com/video.mp4' }
@@ -248,6 +248,177 @@ describe('verify segment of video protocol', () => {
             const o2 = { ...videoFramesSegment, type: 'video', background: 'rgba(0,0,0,2)' }
             expect(verifyFramesSegment(o2)).toEqual(o2)
           })
+        })
+      })
+    })
+  })
+
+  describe('text segment', () => {
+    const textSegment: ITextSegment = { id: '1', startTime: 0, endTime: 500, texts: [{ content: 'hello wendraw' }] }
+    test('valid text frames segment', () => {
+      const o = verifyTextSegment(textSegment)
+      expect(o).toEqual(textSegment)
+    })
+
+    describe('invalid text segment', () => {
+      test('with invalid object', () => {
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-expect-error
+        expect(() => verifyTextSegment('')).toThrowError(TYPE_ERROR_FRAMES_SEGMENT)
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-expect-error
+        expect(() => verifyTextSegment(1)).toThrowError(TYPE_ERROR_FRAMES_SEGMENT)
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-expect-error
+        expect(() => verifyTextSegment(null)).toThrowError(TYPE_ERROR_FRAMES_SEGMENT)
+        expect(() => verifyTextSegment([])).toThrowError(TYPE_ERROR_FRAMES_SEGMENT)
+      })
+
+      describe('missing attributes', () => {
+        test('missing id', () => {
+          const o = { startTime: 0, endTime: 500, texts: [{ content: 'hello wendraw' }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg('id'))
+        })
+
+        test('missing startTime', () => {
+          const o = { id: '1', endTime: 500, texts: [{ content: 'hello wendraw' }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg('startTime'))
+        })
+
+        test('missing endTime', () => {
+          const o = { id: '1', startTime: 0, texts: [{ content: 'hello wendraw' }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg('endTime'))
+        })
+
+        test('missing texts', () => {
+          const o = { id: '1', startTime: 0, endTime: 500 }
+          expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg('texts'))
+        })
+
+        test('missing multiple attributes', () => {
+          const o = { id: '1', startTime: 0 }
+          expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'texts']))
+        })
+
+        test('missing all attributes', () => {
+          expect(() => verifyTextSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'texts']))
+        })
+      })
+    })
+
+    describe('invalid values', () => {
+      test('invalid id', () => {
+        const o = { ...textSegment, id: 1 }
+        expect(() => verifyTextSegment(o)).toThrowError(INVALID_ID)
+      })
+
+      test('invalid startTime', () => {
+        const o = { ...textSegment, startTime: -1 }
+        expect(() => verifyTextSegment(o)).toThrowError(INVALID_START_TIME)
+      })
+
+      test('invalid endTime', () => {
+        const o = { ...textSegment, endTime: -1 }
+        expect(() => verifyTextSegment(o)).toThrowError(INVALID_END_TIME)
+      })
+
+      describe('invalid texts', () => {
+        test('invalid type', () => {
+          const o = { ...textSegment, texts: '' }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts', 'array'))
+        })
+
+        test('invalid empty length', () => {
+          const o1 = { ...textSegment, texts: [] }
+          expect(() => verifyTextSegment(o1)).toThrowError('data/texts must NOT have fewer than 1 items')
+        })
+
+        test('miss content', () => {
+          const o = { ...textSegment, texts: [{}] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg('content', { path: '/texts/0' }))
+        })
+
+        test('invalid content', () => {
+          const o = { ...textSegment, texts: [{ content: 1 }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts/0/content', 'string'))
+        })
+
+        test('invalid align', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', align: 'invalid' }] }
+          expect(() => verifyTextSegment(o)).toThrowError(INVALID_TEXT_BASIC_ALIGN_TYPE)
+        })
+
+        test('invalid dropShadow', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', dropShadow: 'invalid' }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts/0/dropShadow', 'object'))
+
+          const o1 = { ...textSegment, texts: [{ content: 'hello wendraw', dropShadow: {} }] }
+          expect(() => verifyTextSegment(o1)).toThrowError(generateMissingRequiredReg(['color'], { path: '/texts/0/dropShadow' }))
+        })
+
+        test('invalid fontFamily', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', fontFamily: 1 }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts/0/fontFamily', 'string'))
+        })
+
+        test('invalid fontSize', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', fontSize: '1' }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts/0/fontSize', 'number'))
+        })
+
+        test('invalid fontWeight', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', fontWeight: 1 }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts/0/fontWeight', 'string'))
+
+          const o1 = { ...textSegment, texts: [{ content: 'hello wendraw', fontWeight: 'invalid' }] }
+          expect(() => verifyTextSegment(o1)).toThrowError()
+        })
+
+        test('invalid fontStyle', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', fontStyle: 1 }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts/0/fontStyle', 'string'))
+
+          const o1 = { ...textSegment, texts: [{ content: 'hello wendraw', fontStyle: 'invalid' }] }
+          expect(() => verifyTextSegment(o1)).toThrowError()
+        })
+
+        test('invalid underline', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', underline: 1 }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts/0/underline', 'boolean'))
+        })
+
+        test('invalid fill', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', fill: 1 }] }
+          expect(() => verifyTextSegment(o)).toThrowError()
+
+          const o1 = { ...textSegment, texts: [{ content: 'hello wendraw', fill: 'invalid' }] }
+          expect(() => verifyTextSegment(o1)).toThrowError(INVALID_RGBA)
+        })
+
+        test('invalid letterSpacing', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', letterSpacing: '1' }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts/0/letterSpacing', 'number'))
+        })
+
+        test('invalid leading', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', leading: '1' }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts/0/leading', 'number'))
+        })
+
+        test('invalid stroke', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', stroke: 'invalid' }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts/0/stroke', 'object'))
+
+          const o1 = { ...textSegment, texts: [{ content: 'hello wendraw', stroke: {} }] }
+          expect(() => verifyTextSegment(o1)).toThrowError(generateMissingRequiredReg(['color', 'width'], { path: '/texts/0/stroke' }))
+        })
+
+        test('invalid background', () => {
+          const o = { ...textSegment, texts: [{ content: 'hello wendraw', background: 'invalid' }] }
+          expect(() => verifyTextSegment(o)).toThrowError(generateTypeErrorPrefixReg('/texts/0/background', 'object'))
+
+          const o1 = { ...textSegment, texts: [{ content: 'hello wendraw', background: {} }] }
+          expect(() => verifyTextSegment(o1)).toThrowError(generateMissingRequiredReg(['color'], { path: '/texts/0/background' }))
         })
       })
     })

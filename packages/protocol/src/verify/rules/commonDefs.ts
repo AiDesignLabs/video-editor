@@ -1,7 +1,9 @@
-import type { IAnimation, IFramesSegmentUnion, IPalette, ITransform, ITransition } from '@video-editor/shared'
+import type { IAnimation, IBackground, IDropShadow, IFramesSegmentUnion, IPalette, IStroke, ITextBasic, ITransform, ITransition } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
+import { INVALID_RGBA } from './common'
 
 export const INVALID_ANIMATION_TYPE = 'data/animation/type must be a string and one of ["in", "out", "combo"]'
+export const INVALID_TEXT_BASIC_ALIGN_TYPE = 'data/align must be a string and one of ["left", "center", "right", "justify"]'
 
 type Definition = NonNullable<JSONSchemaType<IFramesSegmentUnion>['definitions']>[string]
 
@@ -65,4 +67,76 @@ export const commonPaletteDefs: GDefinition<IPalette> = {
     grain: { type: 'number', minimum: 0, maximum: 1 },
   },
   required: ['temperature', 'hue', 'saturation', 'brightness', 'contrast', 'shine', 'highlight', 'shadow', 'sharpness', 'vignette', 'fade', 'grain'],
+}
+
+export const commonDropShadowDefs: GDefinition<IDropShadow> = {
+  type: 'object',
+  properties: {
+    color: { type: 'string', pattern: '^rgba\\([0-9]+,[0-9]+,[0-9]+,[0-9]+\\)$', nullable: true },
+    opacity: { type: 'number', minimum: 0, maximum: 1 },
+    blur: { type: 'number', minimum: 0, maximum: 100 },
+    distance: { type: 'number' },
+    angle: { type: 'number' },
+  },
+  required: ['color'],
+  errorMessage: {
+    properties: {
+      color: INVALID_RGBA,
+    },
+  },
+}
+
+export const commonStrokeDefs: GDefinition<IStroke> = {
+  type: 'object',
+  properties: {
+    color: { type: 'string', pattern: '^rgba\\([0-9]+,[0-9]+,[0-9]+,[0-9]+\\)$', nullable: true },
+    width: { type: 'number' },
+    opacity: { type: 'number', minimum: 0, maximum: 1 },
+  },
+  required: ['color', 'width'],
+  errorMessage: {
+    properties: {
+      color: INVALID_RGBA,
+    },
+  },
+}
+
+export const commonBackgroundDefs: GDefinition<IBackground> = {
+  type: 'object',
+  properties: {
+    color: { type: 'string', pattern: '^rgba\\([0-9]+,[0-9]+,[0-9]+,[0-9]+\\)$', nullable: true },
+    opacity: { type: 'number', minimum: 0, maximum: 1 },
+  },
+  required: ['color'],
+  errorMessage: {
+    properties: {
+      color: INVALID_RGBA,
+    },
+  },
+}
+
+export const commonTextBasicDefs: GDefinition<ITextBasic> = {
+  type: 'object',
+  properties: {
+    content: { type: 'string' },
+    align: { type: 'string', enum: ['left', 'center', 'right', 'justify'] },
+    dropShadow: { $ref: '#/definitions/IDropShadow' },
+    fontFamily: { type: ['string', 'array'] }, // string or string[]
+    fontSize: { type: 'number' },
+    fontWeight: { type: 'string', enum: ['normal', 'bold', 'bolder', 'lighter', '100', '200', '300', '400', '500', '600', '700', '800', '900'] },
+    fontStyle: { type: 'string', enum: ['normal', 'italic', 'oblique'] },
+    underline: { type: 'boolean' },
+    fill: { type: 'string', pattern: '^rgba\\([0-9]+,[0-9]+,[0-9]+,[0-9]+\\)$', nullable: true },
+    letterSpacing: { type: 'number' },
+    leading: { type: 'number' },
+    stroke: { $ref: '#/definitions/IStroke' },
+    background: { $ref: '#/definitions/IBackground' },
+  },
+  required: ['content'],
+  errorMessage: {
+    properties: {
+      align: INVALID_TEXT_BASIC_ALIGN_TYPE,
+      fill: INVALID_RGBA,
+    },
+  },
 }
