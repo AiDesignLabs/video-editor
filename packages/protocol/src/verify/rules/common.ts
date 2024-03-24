@@ -8,6 +8,10 @@ export const INVALID_URL = 'url must be a string and a valid uri'
 
 export const INVALID_RGBA = 'must be a string and a valid rgba color'
 
+export const INVALID_IMAGE_FORMAT = 'image type format must be a string and one of ["img", "gif"]'
+
+export const INVALID_FILL_MODE = 'type fillMode must be a string and one of ["none", "contain", "cover", "stretch"]'
+
 export function generateMissingRequiredReg(attr: string[] | string, opts?: {
   path?: string
   match?: 'all' | 'start' | 'end'
