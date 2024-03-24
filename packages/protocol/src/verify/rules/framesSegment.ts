@@ -1,11 +1,10 @@
 import type { IFramesSegmentUnion } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
-import { INVALID_END_TIME, INVALID_FILL_MODE, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_URL, POSITIVE_NUMBER_SUFFIX, TYPE_ERROR_PREFIX } from './common'
+import { INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FROM_TIME, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_URL, TYPE_ERROR_PREFIX } from './common'
 import { commonAnimationDefs, commonPaletteDefs, commonTransformDefs, commonTransitionDefs } from './commonDefs'
 
 export const TYPE_ERROR_FRAMES_SEGMENT = `${TYPE_ERROR_PREFIX} object`
 export const INVALID_FRAMES_SEGMENT_TYPE = 'type must be a string and one of ["image", "video", "3D"]'
-export const INVALID_FROM_TIME = `fromTime ${POSITIVE_NUMBER_SUFFIX}`
 
 const CommonDefinitions = {
   ITransform: commonTransformDefs,

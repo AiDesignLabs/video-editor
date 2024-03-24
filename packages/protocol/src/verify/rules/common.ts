@@ -12,6 +12,8 @@ export const INVALID_IMAGE_FORMAT = 'image type format must be a string and one 
 
 export const INVALID_FILL_MODE = 'type fillMode must be a string and one of ["none", "contain", "cover", "stretch"]'
 
+export const INVALID_FROM_TIME = `fromTime ${POSITIVE_NUMBER_SUFFIX}`
+
 export function generateMissingRequiredReg(attr: string[] | string, opts?: {
   path?: string
   match?: 'all' | 'start' | 'end'

@@ -1,5 +1,5 @@
-import type { IImageSegment, ITextSegment, IVideoFramesSegment } from '@video-editor/shared'
-import { INVALID_ANIMATION_TYPE, INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_TEXT_BASIC_ALIGN_TYPE, INVALID_TRACKS, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_FRAMES_SEGMENT, TYPE_ERROR_IMAGE_SEGMENT, TYPE_ERROR_TEXT_SEGMENT, generateMissingRequiredReg, generateTypeErrorPrefixReg } from './rules'
+import type { IAudioSegment, IImageSegment, ITextSegment, IVideoFramesSegment } from '@video-editor/shared'
+import { INVALID_ANIMATION_TYPE, INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_TEXT_BASIC_ALIGN_TYPE, INVALID_TRACKS, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_AUDIO_SEGMENT, TYPE_ERROR_FRAMES_SEGMENT, TYPE_ERROR_IMAGE_SEGMENT, TYPE_ERROR_TEXT_SEGMENT, generateMissingRequiredReg, generateTypeErrorPrefixReg } from './rules'
 import { createVerify } from './index'
 
 describe('verify basic info of video protocol', () => {
@@ -92,7 +92,7 @@ describe('verify basic info of video protocol', () => {
 })
 
 describe('verify segment of video protocol', () => {
-  const { verifyFramesSegment, verifyTextSegment, verifyPhotoSegment } = createVerify()
+  const { verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment } = createVerify()
 
   describe('frames segment', () => {
     const videoFramesSegment: IVideoFramesSegment = { id: '1', startTime: 0, endTime: 500, type: 'video', url: 'https://example.com/video.mp4' }
@@ -538,6 +538,107 @@ describe('verify segment of video protocol', () => {
           const o1 = { ...imageSegment, type: 'video', palette: {} }
           expect(() => verifyPhotoSegment(o1)).toThrowError(generateMissingRequiredReg(['temperature', 'hue', 'saturation', 'brightness', 'contrast', 'shine', 'highlight', 'shadow', 'sharpness', 'vignette', 'fade', 'grain'], { path: '/palette' }))
         })
+      })
+    })
+  })
+
+  describe('audio segment', () => {
+    const audioSegment: IAudioSegment = { id: '1', startTime: 0, endTime: 500, url: 'https://example.com/audio.mp3' }
+    test('valid audio segment', () => {
+      const o = verifyAudioSegment(audioSegment)
+      expect(o).toEqual(audioSegment)
+    })
+
+    describe('invalid audio segment', () => {
+      test('with invalid object', () => {
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-expect-error
+        expect(() => verifyAudioSegment('')).toThrowError(TYPE_ERROR_AUDIO_SEGMENT)
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-expect-error
+        expect(() => verifyAudioSegment(1)).toThrowError(TYPE_ERROR_AUDIO_SEGMENT)
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-expect-error
+        expect(() => verifyAudioSegment(null)).toThrowError(TYPE_ERROR_AUDIO_SEGMENT)
+        expect(() => verifyAudioSegment([])).toThrowError(TYPE_ERROR_AUDIO_SEGMENT)
+      })
+    })
+
+    describe('missing attributes', () => {
+      test('missing id', () => {
+        const o = { startTime: 0, endTime: 500, url: 'https://example.com/audio.mp3' }
+        expect(() => verifyAudioSegment(o)).toThrowError(generateMissingRequiredReg('id'))
+      })
+
+      test('missing startTime', () => {
+        const o = { id: '1', endTime: 500, url: 'https://example.com/audio.mp3' }
+        expect(() => verifyAudioSegment(o)).toThrowError(generateMissingRequiredReg('startTime'))
+      })
+
+      test('missing endTime', () => {
+        const o = { id: '1', startTime: 0, url: 'https://example.com/audio.mp3' }
+        expect(() => verifyAudioSegment(o)).toThrowError(generateMissingRequiredReg('endTime'))
+      })
+
+      test('missing url', () => {
+        const o = { id: '1', startTime: 0, endTime: 500 }
+        expect(() => verifyAudioSegment(o)).toThrowError(generateMissingRequiredReg('url'))
+      })
+
+      test('missing multiple attributes', () => {
+        const o = { id: '1', startTime: 0 }
+        expect(() => verifyAudioSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'url']))
+      })
+
+      test('missing all attributes', () => {
+        expect(() => verifyAudioSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'url']))
+      })
+    })
+
+    describe('invalid values', () => {
+      test('invalid id', () => {
+        const o = { ...audioSegment, id: 1 }
+        expect(() => verifyAudioSegment(o)).toThrowError(INVALID_ID)
+      })
+
+      test('invalid startTime', () => {
+        const o = { ...audioSegment, startTime: -1 }
+        expect(() => verifyAudioSegment(o)).toThrowError(INVALID_START_TIME)
+      })
+
+      test('invalid endTime', () => {
+        const o = { ...audioSegment, endTime: -1 }
+        expect(() => verifyAudioSegment(o)).toThrowError(INVALID_END_TIME)
+      })
+
+      test('invalid url', () => {
+        const o = { ...audioSegment, url: 'invalid' }
+        expect(() => verifyAudioSegment(o)).toThrowError(INVALID_URL)
+      })
+
+      test('invalid type fromTime', () => {
+        const o = { ...audioSegment, fromTime: -1 }
+        expect(() => verifyAudioSegment(o)).toThrowError(INVALID_FROM_TIME)
+      })
+
+      test('invalid type volume', () => {
+        const o = { ...audioSegment, volume: -1 }
+        expect(() => verifyAudioSegment(o)).toThrowError(generateTypeErrorPrefixReg('/volume', '>= 0'))
+      })
+
+      test('invalid type playRate', () => {
+        const o = { ...audioSegment, playRate: 0 }
+        expect(() => verifyAudioSegment(o)).toThrowError(generateTypeErrorPrefixReg('/playRate', '>= 0.1'))
+      })
+
+      test('invalid type fadeInDuration', () => {
+        const o = { ...audioSegment, fadeInDuration: -1 }
+        expect(() => verifyAudioSegment(o)).toThrowError(generateTypeErrorPrefixReg('/fadeInDuration', '>= 0'))
+      })
+
+      test('invalid type fadeOutDuration', () => {
+        const o = { ...audioSegment, fadeOutDuration: -1 }
+        expect(() => verifyAudioSegment(o)).toThrowError(generateTypeErrorPrefixReg('/fadeOutDuration', '>= 0'))
       })
     })
   })
