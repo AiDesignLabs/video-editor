@@ -121,7 +121,12 @@ export const commonTextBasicDefs: GDefinition<ITextBasic> = {
     content: { type: 'string' },
     align: { type: 'string', enum: ['left', 'center', 'right', 'justify'] },
     dropShadow: { $ref: '#/definitions/IDropShadow' },
-    fontFamily: { type: ['string', 'array'] }, // string or string[]
+    fontFamily: {
+      anyOf: [
+        { type: 'string' },
+        { type: 'array', items: { type: 'string' } },
+      ],
+    },
     fontSize: { type: 'number' },
     fontWeight: { type: 'string', enum: ['normal', 'bold', 'bolder', 'lighter', '100', '200', '300', '400', '500', '600', '700', '800', '900'] },
     fontStyle: { type: 'string', enum: ['normal', 'italic', 'oblique'] },

@@ -817,6 +817,11 @@ describe('verify segment of video protocol', () => {
           const o = { ...filterSegment, url: 'invalid' }
           expect(() => verifyEffectSegment(o)).toThrowError(INVALID_URL)
         })
+
+        test('invalid intensity', () => {
+          const o = { ...filterSegment, intensity: -1 }
+          expect(() => verifyFilterSegment(o)).toThrowError(generateTypeErrorPrefixReg('/intensity', '>= 0'))
+        })
       })
     })
   })
