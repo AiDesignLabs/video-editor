@@ -1,9 +1,9 @@
 import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageSegment, ITextSegment, IVideoFramesSegment } from '@video-editor/shared'
-import { INVALID_ANIMATION_TYPE, INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_TEXT_BASIC_ALIGN_TYPE, INVALID_TRACKS, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_AUDIO_SEGMENT, TYPE_ERROR_EFFECT_SEGMENT, TYPE_ERROR_FILTER_SEGMENT, TYPE_ERROR_FRAMES_SEGMENT, TYPE_ERROR_IMAGE_SEGMENT, TYPE_ERROR_TEXT_SEGMENT, generateMissingRequiredReg, generateTypeErrorPrefixReg } from './rules'
-import { createVerify } from './index'
+import { INVALID_ANIMATION_TYPE, INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_TEXT_BASIC_ALIGN_TYPE, INVALID_TRACKS, INVALID_TRACK_TYPE, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_AUDIO_SEGMENT, TYPE_ERROR_EFFECT_SEGMENT, TYPE_ERROR_FILTER_SEGMENT, TYPE_ERROR_FRAMES_SEGMENT, TYPE_ERROR_IMAGE_SEGMENT, TYPE_ERROR_TEXT_SEGMENT, TYPE_ERROR_TRACK, generateMissingRequiredReg, generateTypeErrorPrefixReg } from './rules'
+import { createValidator } from './index'
 
 describe('verify basic info of video protocol', () => {
-  const { verifyBasic } = createVerify()
+  const { verifyBasic } = createValidator()
   const videoProtocol = { version: '0.0.1', width: 500, height: 500, fps: 25, tracks: [] }
   test('valid video protocol', () => {
     const o = verifyBasic(videoProtocol)
@@ -92,7 +92,7 @@ describe('verify basic info of video protocol', () => {
 })
 
 describe('verify segment of video protocol', () => {
-  const { verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment } = createVerify()
+  const { verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment } = createValidator()
 
   describe('frames segment', () => {
     const videoFramesSegment: IVideoFramesSegment = { id: '1', startTime: 0, endTime: 500, type: 'video', url: 'https://example.com/video.mp4' }
@@ -822,6 +822,83 @@ describe('verify segment of video protocol', () => {
           const o = { ...filterSegment, intensity: -1 }
           expect(() => verifyFilterSegment(o)).toThrowError(generateTypeErrorPrefixReg('/intensity', '>= 0'))
         })
+      })
+    })
+  })
+})
+
+describe('verify track', () => {
+  const track = { trackId: '1', trackType: 'frames', children: [] }
+
+  const { verifyTrack } = createValidator()
+
+  test('valid track', () => {
+    const o = verifyTrack(track)
+    expect(o).toEqual(track)
+  })
+
+  describe('invalid track', () => {
+    test('with invalid object', () => {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-expect-error
+      expect(() => verifyTrack('')).toThrowError(TYPE_ERROR_TRACK)
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-expect-error
+      expect(() => verifyTrack(1)).toThrowError(TYPE_ERROR_TRACK)
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-expect-error
+      expect(() => verifyTrack(null)).toThrowError(TYPE_ERROR_TRACK)
+      expect(() => verifyTrack([])).toThrowError(TYPE_ERROR_TRACK)
+    })
+
+    describe('missing attributes', () => {
+      test('missing trackId', () => {
+        const o = { trackType: 'frames', children: [] }
+        expect(() => verifyTrack(o)).toThrowError(generateMissingRequiredReg('trackId'))
+      })
+
+      test('missing trackType', () => {
+        const o = { trackId: '1', children: [] }
+        expect(() => verifyTrack(o)).toThrowError(generateMissingRequiredReg('trackType'))
+      })
+
+      test('missing children', () => {
+        const o = { trackId: '1', trackType: 'frames' }
+        expect(() => verifyTrack(o)).toThrowError(generateMissingRequiredReg('children'))
+      })
+
+      test('missing multiple attributes', () => {
+        const o = { trackId: '1' }
+        expect(() => verifyTrack(o)).toThrowError(generateMissingRequiredReg(['trackType', 'children']))
+      })
+
+      test('missing all attributes', () => {
+        expect(() => verifyTrack({})).toThrowError(generateMissingRequiredReg(['trackId', 'trackType', 'children']))
+      })
+    })
+
+    describe('invalid values', () => {
+      test('invalid trackId', () => {
+        const o = { ...track, trackId: 1 }
+        expect(() => verifyTrack(o)).toThrowError(INVALID_ID)
+      })
+
+      test('invalid trackType', () => {
+        const o = { ...track, trackType: 'invalid' }
+        expect(() => verifyTrack(o)).toThrowError(INVALID_TRACK_TYPE)
+      })
+
+      test('invalid children', () => {
+        const o = { ...track, children: '' }
+        expect(() => verifyTrack(o)).toThrowError(generateTypeErrorPrefixReg('/children', 'array'))
+
+        const o1 = { ...track, children: [1] }
+        expect(() => verifyTrack(o1)).toThrowError(generateTypeErrorPrefixReg('/children/0', 'object'))
+      })
+
+      test('invalid isMain', () => {
+        const o = { ...track, isMain: 'invalid' }
+        expect(() => verifyTrack(o)).toThrowError(generateTypeErrorPrefixReg('/isMain', 'boolean'))
       })
     })
   })

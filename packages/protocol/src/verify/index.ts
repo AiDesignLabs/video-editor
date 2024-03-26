@@ -3,9 +3,9 @@ import Ajv from 'ajv'
 import ajvErrors from 'ajv-errors'
 import ajvKeywords from 'ajv-keywords'
 import ajvFormats from 'ajv-formats'
-import { audioSegmentRule, effectSegmentRule, filterSegmentRule, framesSegmentRule, imageSegmentRule, textSegmentRule, videoProtocolBasicRule } from './rules'
+import { audioSegmentRule, effectSegmentRule, filterSegmentRule, framesSegmentRule, imageSegmentRule, textSegmentRule, trackRule, videoProtocolBasicRule } from './rules'
 
-export function createVerify() {
+export function createValidator() {
   const ajv = new Ajv({ allErrors: true, strict: 'log' })
   // install ajv-errors plugin
   ajvErrors(ajv)
@@ -21,12 +21,13 @@ export function createVerify() {
   const validateAudioSegment = ajv.compile(audioSegmentRule)
   const validateEffectSegment = ajv.compile(effectSegmentRule)
   const validateFilterSegment = ajv.compile(filterSegmentRule)
+  const validateTrack = ajv.compile(trackRule)
 
   const verifyBasic = (o: object) => {
     if (validateBasic(o) === false)
       throw new Error(ajv.errorsText(validateBasic.errors))
 
-    return o as IVideoProtocol
+    return o as Omit<IVideoProtocol, 'tracks'> & { tracks: object[] }
   }
 
   const verifyFramesSegment = (o: object) => {
@@ -71,5 +72,12 @@ export function createVerify() {
     return o as IFilterSegment
   }
 
-  return { verifyBasic, verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment }
+  const verifyTrack = (o: object) => {
+    if (validateTrack(o) === false)
+      throw new Error(ajv.errorsText(validateTrack.errors))
+
+    return o as Omit<IVideoProtocol['tracks'][number], 'children'> & { children: object[] }
+  }
+
+  return { verifyBasic, verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment, verifyTrack }
 }
