@@ -79,5 +79,27 @@ export function createValidator() {
     return o as Omit<IVideoProtocol['tracks'][number], 'children'> & { children: object[] }
   }
 
-  return { verifyBasic, verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment, verifyTrack }
+  const verify = (o: object): IVideoProtocol => {
+    const validBasic = verifyBasic(o)
+    const verifyTrackMap = {
+      frames: verifyFramesSegment,
+      text: verifyTextSegment,
+      image: verifyPhotoSegment,
+      audio: verifyAudioSegment,
+      effect: verifyEffectSegment,
+      filter: verifyFilterSegment,
+    }
+
+    const tracks = validBasic.tracks.map(o => verifyTrack(o))
+    validBasic.tracks = tracks
+
+    for (const track of tracks) {
+      const children = track.children.map(o => verifyTrackMap[track.trackType](o))
+      track.children = children
+    }
+
+    return validBasic as IVideoProtocol
+  }
+
+  return { verify, verifyBasic, verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment, verifyTrack }
 }

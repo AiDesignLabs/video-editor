@@ -1,4 +1,4 @@
-import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageSegment, ITextSegment, IVideoFramesSegment } from '@video-editor/shared'
+import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageSegment, ITextSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import { INVALID_ANIMATION_TYPE, INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_TEXT_BASIC_ALIGN_TYPE, INVALID_TRACKS, INVALID_TRACK_TYPE, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_AUDIO_SEGMENT, TYPE_ERROR_EFFECT_SEGMENT, TYPE_ERROR_FILTER_SEGMENT, TYPE_ERROR_FRAMES_SEGMENT, TYPE_ERROR_IMAGE_SEGMENT, TYPE_ERROR_TEXT_SEGMENT, TYPE_ERROR_TRACK, generateMissingRequiredReg, generateTypeErrorPrefixReg } from './rules'
 import { createValidator } from './index'
 
@@ -900,6 +900,97 @@ describe('verify track', () => {
         const o = { ...track, isMain: 'invalid' }
         expect(() => verifyTrack(o)).toThrowError(generateTypeErrorPrefixReg('/isMain', 'boolean'))
       })
+    })
+  })
+})
+
+describe('verify video protocol', () => {
+  const videoProtocol: IVideoProtocol = { version: '1.0.0', width: 1920, height: 1080, fps: 30, tracks: [] }
+  const framesSegment: IFramesSegmentUnion = { id: '1', startTime: 0, endTime: 500, type: 'image', format: 'img', url: 'https://example.com/image.png' }
+  const textSegment: ITextSegment = { id: '1', startTime: 0, endTime: 500, texts: [{ content: 'hello wendraw' }] }
+  const imageSegment: IImageSegment = { id: '1', startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png' }
+  const audioSegment: IAudioSegment = { id: '1', startTime: 0, endTime: 500, url: 'https://example.com/audio.mp3' }
+  const effectSegment: IEffectSegment = { id: '1', startTime: 0, endTime: 500, name: 'effect1', effectId: 'effect1Id' }
+  const filterSegment: IFilterSegment = { id: '1', startTime: 0, endTime: 500, name: 'filter1', filterId: 'filter1Id' }
+
+  const { verify } = createValidator()
+
+  describe('valid video protocol', () => {
+    test('with empty tracks', () => {
+      const o = verify(videoProtocol)
+      expect(o).toEqual(videoProtocol)
+    })
+
+    test('with frames segment', () => {
+      const o: IVideoProtocol = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'frames', children: [framesSegment] }] }
+      expect(verify(o)).toEqual(o)
+    })
+
+    test('with text segment', () => {
+      const o: IVideoProtocol = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'text', children: [textSegment] }] }
+      expect(verify(o)).toEqual(o)
+    })
+
+    test('with image segment', () => {
+      const o: IVideoProtocol = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'image', children: [imageSegment] }] }
+      expect(verify(o)).toEqual(o)
+    })
+
+    test('with audio segment', () => {
+      const o: IVideoProtocol = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'audio', children: [audioSegment] }] }
+      expect(verify(o)).toEqual(o)
+    })
+
+    test('with effect segment', () => {
+      const o: IVideoProtocol = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'effect', children: [effectSegment] }] }
+      expect(verify(o)).toEqual(o)
+    })
+
+    test('with filter segment', () => {
+      const o: IVideoProtocol = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'filter', children: [filterSegment] }] }
+      expect(verify(o)).toEqual(o)
+    })
+  })
+
+  describe('invalid video protocol', () => {
+    test('with invalid basic info', () => {
+      const o = { ...videoProtocol, version: 'invalid' }
+      expect(() => verify(o)).toThrowError(INVALID_VERSION)
+    })
+
+    test('with invalid frames segment', () => {
+      const o = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'frames', children: [{ ...framesSegment, type: 'invalid' }] }] }
+      expect(() => verify(o)).toThrowError(INVALID_FRAMES_SEGMENT_TYPE)
+    })
+
+    test('with invalid text segment', () => {
+      const o = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'text', children: [{ ...textSegment, texts: '' }] }] }
+      expect(() => verify(o)).toThrowError(generateTypeErrorPrefixReg('/texts', 'array'))
+    })
+
+    test('with invalid image segment', () => {
+      const o = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'image', children: [{ ...imageSegment, format: 'invalid' }] }] }
+      expect(() => verify(o)).toThrowError(INVALID_IMAGE_FORMAT)
+    })
+
+    test('with invalid audio segment', () => {
+      const o = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'audio', children: [{ ...audioSegment, url: 'invalid' }] }] }
+      expect(() => verify(o)).toThrowError(INVALID_URL)
+    })
+
+    test('with invalid effect segment', () => {
+      const o = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'effect', children: [{ ...effectSegment, effectId: 1 }] }] }
+      expect(() => verify(o)).toThrowError(generateTypeErrorPrefixReg('/effectId', 'string'))
+    })
+
+    test('with invalid filter segment', () => {
+      const o = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'filter', children: [{ ...filterSegment, filterId: 1 }] }] }
+      expect(() => verify(o)).toThrowError(generateTypeErrorPrefixReg('/filterId', 'string'))
+    })
+
+    test('with invalid track', () => {
+      const o = { ...videoProtocol, tracks: [{ trackId: -1, trackType: 'frames', children: [framesSegment] }] }
+      expect(() => verify(o)).toThrowError(INVALID_ID)
     })
   })
 })
