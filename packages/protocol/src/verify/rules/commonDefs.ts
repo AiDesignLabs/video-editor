@@ -7,7 +7,7 @@ export const INVALID_TEXT_BASIC_ALIGN_TYPE = 'data/align must be a string and on
 
 type Definition = NonNullable<JSONSchemaType<IFramesSegmentUnion>['definitions']>[string]
 
-// 排除掉 `oneOf` 字段，并将 `properties` 字段进行扩展
+// exclude `oneOf` field，and extends `properties` field
 type GDefinition<T> = Omit<Definition, 'oneOf'> & {
   properties: Required<Record<keyof T, Definition['properties'][string]>>
   oneOf?: Definition['oneOf']

@@ -1,6 +1,6 @@
 import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageSegment, ITextSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import { INVALID_ANIMATION_TYPE, INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_TEXT_BASIC_ALIGN_TYPE, INVALID_TRACKS, INVALID_TRACK_TYPE, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_AUDIO_SEGMENT, TYPE_ERROR_EFFECT_SEGMENT, TYPE_ERROR_FILTER_SEGMENT, TYPE_ERROR_FRAMES_SEGMENT, TYPE_ERROR_IMAGE_SEGMENT, TYPE_ERROR_TEXT_SEGMENT, TYPE_ERROR_TRACK, generateMissingRequiredReg, generateTypeErrorPrefixReg } from './rules'
-import { createValidator } from './index'
+import { DUPLICATE_SEGMENT_ID, DUPLICATE_TRACK_ID, createValidator } from './index'
 
 describe('verify basic info of video protocol', () => {
   const { verifyBasic } = createValidator()
@@ -991,6 +991,18 @@ describe('verify video protocol', () => {
     test('with invalid track', () => {
       const o = { ...videoProtocol, tracks: [{ trackId: -1, trackType: 'frames', children: [framesSegment] }] }
       expect(() => verify(o)).toThrowError(INVALID_ID)
+    })
+  })
+
+  describe('duplicate id', () => {
+    test('duplicate track id', () => {
+      const o: IVideoProtocol = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'frames', children: [{ ...framesSegment }] }, { trackId: '1', trackType: 'frames', children: [{ ...framesSegment }] }] }
+      expect(() => verify(o)).toThrowError(`${DUPLICATE_TRACK_ID} 1`)
+    })
+
+    test('duplicate segment id', () => {
+      const o1: IVideoProtocol = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'frames', children: [{ ...framesSegment }, { ...framesSegment }] }] }
+      expect(() => verify(o1)).toThrowError(`${DUPLICATE_SEGMENT_ID} 1`)
     })
   })
 })

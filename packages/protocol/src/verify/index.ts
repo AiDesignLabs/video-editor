@@ -5,6 +5,9 @@ import ajvKeywords from 'ajv-keywords'
 import ajvFormats from 'ajv-formats'
 import { audioSegmentRule, effectSegmentRule, filterSegmentRule, framesSegmentRule, imageSegmentRule, textSegmentRule, trackRule, videoProtocolBasicRule } from './rules'
 
+export const DUPLICATE_SEGMENT_ID = 'duplicate segment id'
+export const DUPLICATE_TRACK_ID = 'duplicate track id'
+
 export function createValidator() {
   const ajv = new Ajv({ allErrors: true, strict: 'log' })
   // install ajv-errors plugin
@@ -80,6 +83,8 @@ export function createValidator() {
   }
 
   const verify = (o: object): IVideoProtocol => {
+    const segmentIds = new Set<string>()
+    const trackIds = new Set<string>()
     const validBasic = verifyBasic(o)
     const verifyTrackMap = {
       frames: verifyFramesSegment,
@@ -90,11 +95,23 @@ export function createValidator() {
       filter: verifyFilterSegment,
     }
 
-    const tracks = validBasic.tracks.map(o => verifyTrack(o))
+    const tracks = validBasic.tracks.map((o) => {
+      const track = verifyTrack(o)
+      if (trackIds.has(track.trackId))
+        throw new Error(`${DUPLICATE_TRACK_ID} ${track.trackId}`)
+      trackIds.add(track.trackId)
+      return track
+    })
     validBasic.tracks = tracks
 
     for (const track of tracks) {
-      const children = track.children.map(o => verifyTrackMap[track.trackType](o))
+      const children = track.children.map((o) => {
+        const segment = verifyTrackMap[track.trackType](o)
+        if (segmentIds.has(segment.id))
+          throw new Error(`${DUPLICATE_SEGMENT_ID} ${segment.id}`)
+        segmentIds.add(segment.id)
+        return segment
+      })
       track.children = children
     }
 
