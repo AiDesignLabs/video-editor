@@ -1,7 +1,7 @@
 import type { IVideoProtocol } from '@video-editor/shared'
 import { parse } from './index'
 
-test('parse valid protocol', () => {
+it('parse valid protocol', () => {
   const videoProtocol: IVideoProtocol = {
     version: '0.0.1',
     width: 500,
@@ -13,30 +13,25 @@ test('parse valid protocol', () => {
   expect(o).toEqual(videoProtocol)
 })
 
-test('parse invalid protocol with empty string', () => {
+it('parse invalid protocol with empty string', () => {
   const fn = () => parse('')
   expect(fn).toThrowError('invalid protocol')
 })
 
-test('parse invalid protocol with not string', () => {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-expect-error
+it('parse invalid protocol with not string', () => {
+  // @ts-expect-error test invalid input
   expect(() => parse(null)).toThrowError('invalid protocol')
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-expect-error
+  // @ts-expect-error test invalid input
   expect(() => parse(undefined)).toThrowError('invalid protocol')
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-expect-error
+  // @ts-expect-error test invalid input
   expect(() => parse(1)).toThrowError('invalid protocol')
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-expect-error
+  // @ts-expect-error test invalid input
   expect(() => parse()).toThrowError('invalid protocol')
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-expect-error
+  // @ts-expect-error test invalid input
   expect(() => parse({})).toThrowError('invalid protocol')
 })
 
-test('parse invalid protocol with invalid Object string', () => {
+it('parse invalid protocol with invalid Object string', () => {
   expect(() => parse('a')).toThrowError('invalid protocol')
   expect(() => parse('1')).toThrowError('invalid protocol')
   expect(() => parse('[1]')).toThrowError('invalid protocol')

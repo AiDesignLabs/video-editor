@@ -1,7 +1,7 @@
 /**
  * NOTE: that without special explanation:
- * * the time related value is in ms
- * * the numerical value is normalized in range [0, 1] unless otherwise specified
+ * the time related value is in ms
+ * the numerical value is normalized in range [0, 1] unless otherwise specified
  */
 
 export interface IVideoProtocol {
@@ -18,7 +18,7 @@ export type ITrack<T extends ITrackType> = {
   children: TrackTypeMapSegment[T][]
 } & (T extends 'frames' ? {
   isMain?: boolean
-} : {})
+} : object)
 
 export type ITrackType = keyof TrackTypeMapSegment
 
@@ -35,7 +35,8 @@ export type TrackTypeMapTrack = {
   [Key in ITrackType]: ITrack<Key>;
 }
 
-type TrackUnion = TrackTypeMapTrack[ITrackType]
+export type TrackUnion = TrackTypeMapTrack[ITrackType]
+export type SegmentUnion = TrackTypeMapSegment[ITrackType]
 
 export interface IFramesSegment extends ISegment {
   type: 'image' | 'video' | '3D'
