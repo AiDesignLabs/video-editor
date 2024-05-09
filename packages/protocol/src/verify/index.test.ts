@@ -1,5 +1,5 @@
 import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageSegment, ITextSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
-import { INVALID_ANIMATION_TYPE, INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_TEXT_BASIC_ALIGN_TYPE, INVALID_TRACKS, INVALID_TRACK_TYPE, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_AUDIO_SEGMENT, TYPE_ERROR_EFFECT_SEGMENT, TYPE_ERROR_FILTER_SEGMENT, TYPE_ERROR_FRAMES_SEGMENT, TYPE_ERROR_IMAGE_SEGMENT, TYPE_ERROR_TEXT_SEGMENT, TYPE_ERROR_TRACK, generateMissingRequiredReg, generateTypeErrorPrefixReg } from './rules'
+import { INVALID_ANIMATION_TYPE, INVALID_AUDIO_SEGMENT_TYPE, INVALID_EFFECT_SEGMENT_TYPE, INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FILTER_SEGMENT_TYPE, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FRAMES_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_IMAGE_SEGMENT_TYPE, INVALID_RGBA, INVALID_START_TIME, INVALID_TEXT_BASIC_ALIGN_TYPE, INVALID_TEXT_SEGMENT_TYPE, INVALID_TRACKS, INVALID_TRACK_TYPE, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_AUDIO_SEGMENT, TYPE_ERROR_EFFECT_SEGMENT, TYPE_ERROR_FILTER_SEGMENT, TYPE_ERROR_FRAMES_SEGMENT, TYPE_ERROR_IMAGE_SEGMENT, TYPE_ERROR_TEXT_SEGMENT, TYPE_ERROR_TRACK, generateMissingRequiredReg, generateTypeErrorPrefixReg } from './rules'
 import { DUPLICATE_SEGMENT_ID, DUPLICATE_TRACK_ID, createValidator } from './index'
 
 describe('verify basic info of video protocol', () => {
@@ -92,7 +92,7 @@ describe('verify segment of video protocol', () => {
   const { verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment } = createValidator()
 
   describe('frames segment', () => {
-    const videoFramesSegment: IVideoFramesSegment = { id: '1', startTime: 0, endTime: 500, type: 'video', url: 'https://example.com/video.mp4' }
+    const videoFramesSegment: IVideoFramesSegment = { segmentType: 'frames', id: '1', startTime: 0, endTime: 500, type: 'video', url: 'https://example.com/video.mp4' }
     describe('valid frames segment', () => {
       it('valid video frames segment', () => {
         const o = verifyFramesSegment(videoFramesSegment)
@@ -113,42 +113,42 @@ describe('verify segment of video protocol', () => {
 
       describe('missing attributes', () => {
         it('missing id', () => {
-          const o = { startTime: 0, endTime: 500, type: 'video', url: 'https://example.com/video.mp4' }
+          const o = { startTime: 0, endTime: 500, type: 'video', url: 'https://example.com/video.mp4', segmentType: 'frames' }
           expect(() => verifyFramesSegment(o)).toThrowError(generateMissingRequiredReg('id'))
         })
 
         it('missing startTime', () => {
-          const o = { id: '1', endTime: 500, type: 'video', url: 'https://example.com/video.mp4' }
+          const o = { id: '1', endTime: 500, type: 'video', url: 'https://example.com/video.mp4', segmentType: 'frames' }
           expect(() => verifyFramesSegment(o)).toThrowError(generateMissingRequiredReg('startTime'))
         })
 
         it('missing endTime', () => {
-          const o = { id: '1', startTime: 0, type: 'video', url: 'https://example.com/video.mp4' }
+          const o = { id: '1', startTime: 0, type: 'video', url: 'https://example.com/video.mp4', segmentType: 'frames' }
           expect(() => verifyFramesSegment(o)).toThrowError(generateMissingRequiredReg('endTime'))
         })
 
         it('missing url', () => {
-          const o = { id: '1', startTime: 0, endTime: 500, type: 'video' }
+          const o = { id: '1', startTime: 0, endTime: 500, type: 'video', segmentType: 'frames' }
           expect(() => verifyFramesSegment(o)).toThrowError(generateMissingRequiredReg('url'))
         })
 
         it('missing type', () => {
-          const o = { id: '1', startTime: 0, endTime: 500, url: 'https://example.com/video.mp4' }
+          const o = { id: '1', startTime: 0, endTime: 500, url: 'https://example.com/video.mp4', segmentType: 'frames' }
           expect(() => verifyFramesSegment(o)).toThrowError(generateMissingRequiredReg('type', { match: 'end' }))
         })
 
         it('with type image missing format', () => {
-          const o = { id: '1', startTime: 0, endTime: 500, type: 'image', url: 'https://example.com/image.png' }
+          const o = { id: '1', startTime: 0, endTime: 500, type: 'image', url: 'https://example.com/image.png', segmentType: 'frames' }
           expect(() => verifyFramesSegment(o)).toThrowError(generateMissingRequiredReg('format', { match: 'start' }))
         })
 
         it('missing multiple attributes', () => {
           const o = { id: '1', startTime: 0, type: 'video' }
-          expect(() => verifyFramesSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'url']))
+          expect(() => verifyFramesSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'url', 'segmentType']))
         })
 
         it('missing all attributes', () => {
-          expect(() => verifyFramesSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'type', 'url'], { match: 'end' }))
+          expect(() => verifyFramesSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'type', 'url', 'segmentType'], { match: 'end' }))
         })
       })
 
@@ -175,7 +175,7 @@ describe('verify segment of video protocol', () => {
 
         it('invalid type', () => {
           const o = { ...videoFramesSegment, type: 'invalid' }
-          expect(() => verifyFramesSegment(o)).toThrowError(INVALID_FRAMES_SEGMENT_TYPE)
+          expect(() => verifyFramesSegment(o)).toThrowError(INVALID_FRAMES_TYPE)
         })
 
         it('invalid type image', () => {
@@ -242,13 +242,18 @@ describe('verify segment of video protocol', () => {
             const o2 = { ...videoFramesSegment, type: 'video', background: 'rgba(0,0,0,2)' }
             expect(verifyFramesSegment(o2)).toEqual(o2)
           })
+
+          it('invalid segmentType', () => {
+            const o = { ...videoFramesSegment, segmentType: 'invalid' }
+            expect(() => verifyFramesSegment(o)).toThrowError(INVALID_FRAMES_SEGMENT_TYPE)
+          })
         })
       })
     })
   })
 
   describe('text segment', () => {
-    const textSegment: ITextSegment = { id: '1', startTime: 0, endTime: 500, texts: [{ content: 'hello wendraw' }] }
+    const textSegment: ITextSegment = { segmentType: 'text', id: '1', startTime: 0, endTime: 500, texts: [{ content: 'hello wendraw' }] }
     it('valid text frames segment', () => {
       const o = verifyTextSegment(textSegment)
       expect(o).toEqual(textSegment)
@@ -267,32 +272,32 @@ describe('verify segment of video protocol', () => {
 
       describe('missing attributes', () => {
         it('missing id', () => {
-          const o = { startTime: 0, endTime: 500, texts: [{ content: 'hello wendraw' }] }
+          const o = { startTime: 0, endTime: 500, texts: [{ content: 'hello wendraw' }], segmentType: 'text' }
           expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg('id'))
         })
 
         it('missing startTime', () => {
-          const o = { id: '1', endTime: 500, texts: [{ content: 'hello wendraw' }] }
+          const o = { id: '1', endTime: 500, texts: [{ content: 'hello wendraw' }], segmentType: 'text' }
           expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg('startTime'))
         })
 
         it('missing endTime', () => {
-          const o = { id: '1', startTime: 0, texts: [{ content: 'hello wendraw' }] }
+          const o = { id: '1', startTime: 0, texts: [{ content: 'hello wendraw' }], segmentType: 'text' }
           expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg('endTime'))
         })
 
         it('missing texts', () => {
-          const o = { id: '1', startTime: 0, endTime: 500 }
+          const o = { id: '1', startTime: 0, endTime: 500, segmentType: 'text' }
           expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg('texts'))
         })
 
         it('missing multiple attributes', () => {
           const o = { id: '1', startTime: 0 }
-          expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'texts']))
+          expect(() => verifyTextSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'texts', 'segmentType']))
         })
 
         it('missing all attributes', () => {
-          expect(() => verifyTextSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'texts']))
+          expect(() => verifyTextSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'texts', 'segmentType']))
         })
       })
 
@@ -410,13 +415,18 @@ describe('verify segment of video protocol', () => {
             const o1 = { ...textSegment, texts: [{ content: 'hello wendraw', background: {} }] }
             expect(() => verifyTextSegment(o1)).toThrowError(generateMissingRequiredReg(['color'], { path: '/texts/0/background' }))
           })
+
+          it('invalid segmentType', () => {
+            const o = { ...textSegment, segmentType: 'invalid' }
+            expect(() => verifyTextSegment(o)).toThrowError(INVALID_TEXT_SEGMENT_TYPE)
+          })
         })
       })
     })
   })
 
   describe('image segment', () => {
-    const imageSegment: IImageSegment = { id: '1', startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png' }
+    const imageSegment: IImageSegment = { segmentType: 'image', id: '1', startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png' }
     it('valid image segment', () => {
       const o = verifyPhotoSegment(imageSegment)
       expect(o).toEqual(imageSegment)
@@ -435,37 +445,37 @@ describe('verify segment of video protocol', () => {
 
       describe('missing attributes', () => {
         it('missing id', () => {
-          const o = { startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png' }
+          const o = { startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png', segmentType: 'image' }
           expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg('id'))
         })
 
         it('missing startTime', () => {
-          const o = { id: '1', endTime: 500, format: 'img', url: 'https://example.com/image.png' }
+          const o = { id: '1', endTime: 500, format: 'img', url: 'https://example.com/image.png', segmentType: 'image' }
           expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg('startTime'))
         })
 
         it('missing endTime', () => {
-          const o = { id: '1', startTime: 0, format: 'img', url: 'https://example.com/image.png' }
+          const o = { id: '1', startTime: 0, format: 'img', url: 'https://example.com/image.png', segmentType: 'image' }
           expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg('endTime'))
         })
 
         it('missing format', () => {
-          const o = { id: '1', startTime: 0, endTime: 500, url: 'https://example.com/image.png' }
+          const o = { id: '1', startTime: 0, endTime: 500, url: 'https://example.com/image.png', segmentType: 'image' }
           expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg('format'))
         })
 
         it('missing url', () => {
-          const o = { id: '1', startTime: 0, endTime: 500, format: 'img' }
+          const o = { id: '1', startTime: 0, endTime: 500, format: 'img', segmentType: 'image' }
           expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg('url'))
         })
 
         it('missing multiple attributes', () => {
           const o = { id: '1', startTime: 0, format: 'img' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'url']))
+          expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'url', 'segmentType']))
         })
 
         it('missing all attributes', () => {
-          expect(() => verifyPhotoSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'format', 'url']))
+          expect(() => verifyPhotoSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'format', 'url', 'segmentType']))
         })
       })
 
@@ -526,12 +536,17 @@ describe('verify segment of video protocol', () => {
           const o1 = { ...imageSegment, type: 'video', palette: {} }
           expect(() => verifyPhotoSegment(o1)).toThrowError(generateMissingRequiredReg(['temperature', 'hue', 'saturation', 'brightness', 'contrast', 'shine', 'highlight', 'shadow', 'sharpness', 'vignette', 'fade', 'grain'], { path: '/palette' }))
         })
+
+        it('invalid segmentType', () => {
+          const o = { ...imageSegment, segmentType: 'invalid' }
+          expect(() => verifyPhotoSegment(o)).toThrowError(INVALID_IMAGE_SEGMENT_TYPE)
+        })
       })
     })
   })
 
   describe('audio segment', () => {
-    const audioSegment: IAudioSegment = { id: '1', startTime: 0, endTime: 500, url: 'https://example.com/audio.mp3' }
+    const audioSegment: IAudioSegment = { segmentType: 'audio', id: '1', startTime: 0, endTime: 500, url: 'https://example.com/audio.mp3' }
     it('valid audio segment', () => {
       const o = verifyAudioSegment(audioSegment)
       expect(o).toEqual(audioSegment)
@@ -550,32 +565,32 @@ describe('verify segment of video protocol', () => {
 
       describe('missing attributes', () => {
         it('missing id', () => {
-          const o = { startTime: 0, endTime: 500, url: 'https://example.com/audio.mp3' }
+          const o = { startTime: 0, endTime: 500, url: 'https://example.com/audio.mp3', segmentType: 'audio' }
           expect(() => verifyAudioSegment(o)).toThrowError(generateMissingRequiredReg('id'))
         })
 
         it('missing startTime', () => {
-          const o = { id: '1', endTime: 500, url: 'https://example.com/audio.mp3' }
+          const o = { id: '1', endTime: 500, url: 'https://example.com/audio.mp3', segmentType: 'audio' }
           expect(() => verifyAudioSegment(o)).toThrowError(generateMissingRequiredReg('startTime'))
         })
 
         it('missing endTime', () => {
-          const o = { id: '1', startTime: 0, url: 'https://example.com/audio.mp3' }
+          const o = { id: '1', startTime: 0, url: 'https://example.com/audio.mp3', segmentType: 'audio' }
           expect(() => verifyAudioSegment(o)).toThrowError(generateMissingRequiredReg('endTime'))
         })
 
         it('missing url', () => {
-          const o = { id: '1', startTime: 0, endTime: 500 }
+          const o = { id: '1', startTime: 0, endTime: 500, segmentType: 'audio' }
           expect(() => verifyAudioSegment(o)).toThrowError(generateMissingRequiredReg('url'))
         })
 
         it('missing multiple attributes', () => {
           const o = { id: '1', startTime: 0 }
-          expect(() => verifyAudioSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'url']))
+          expect(() => verifyAudioSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'url', 'segmentType']))
         })
 
         it('missing all attributes', () => {
-          expect(() => verifyAudioSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'url']))
+          expect(() => verifyAudioSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'url', 'segmentType']))
         })
       })
 
@@ -624,12 +639,17 @@ describe('verify segment of video protocol', () => {
           const o = { ...audioSegment, fadeOutDuration: -1 }
           expect(() => verifyAudioSegment(o)).toThrowError(generateTypeErrorPrefixReg('/fadeOutDuration', '>= 0'))
         })
+
+        it('invalid segmentType', () => {
+          const o = { ...audioSegment, segmentType: 'invalid' }
+          expect(() => verifyAudioSegment(o)).toThrowError(INVALID_AUDIO_SEGMENT_TYPE)
+        })
       })
     })
   })
 
   describe('effect segment', () => {
-    const effectSegment: IEffectSegment = { id: '1', startTime: 0, endTime: 500, name: 'effect1', effectId: 'effect1Id' }
+    const effectSegment: IEffectSegment = { segmentType: 'effect', id: '1', startTime: 0, endTime: 500, name: 'effect1', effectId: 'effect1Id' }
     it('valid effect segment', () => {
       const o = verifyEffectSegment(effectSegment)
       expect(o).toEqual(effectSegment)
@@ -648,37 +668,37 @@ describe('verify segment of video protocol', () => {
 
       describe('missing attributes', () => {
         it('missing id', () => {
-          const o = { startTime: 0, endTime: 500, name: 'effect1', effectId: 'effect1Id' }
+          const o = { startTime: 0, endTime: 500, name: 'effect1', effectId: 'effect1Id', segmentType: 'effect' }
           expect(() => verifyEffectSegment(o)).toThrowError(generateMissingRequiredReg('id'))
         })
 
         it('missing startTime', () => {
-          const o = { id: '1', endTime: 500, name: 'effect1', effectId: 'effect1Id' }
+          const o = { id: '1', endTime: 500, name: 'effect1', effectId: 'effect1Id', segmentType: 'effect' }
           expect(() => verifyEffectSegment(o)).toThrowError(generateMissingRequiredReg('startTime'))
         })
 
         it('missing endTime', () => {
-          const o = { id: '1', startTime: 0, name: 'effect1', effectId: 'effect1Id' }
+          const o = { id: '1', startTime: 0, name: 'effect1', effectId: 'effect1Id', segmentType: 'effect' }
           expect(() => verifyEffectSegment(o)).toThrowError(generateMissingRequiredReg('endTime'))
         })
 
         it('missing name', () => {
-          const o = { id: '1', startTime: 0, endTime: 500, effectId: 'effect1Id' }
+          const o = { id: '1', startTime: 0, endTime: 500, effectId: 'effect1Id', segmentType: 'effect' }
           expect(() => verifyEffectSegment(o)).toThrowError(generateMissingRequiredReg('name'))
         })
 
         it('missing effectId', () => {
-          const o = { id: '1', startTime: 0, endTime: 500, name: 'effect1' }
+          const o = { id: '1', startTime: 0, endTime: 500, name: 'effect1', segmentType: 'effect' }
           expect(() => verifyEffectSegment(o)).toThrowError(generateMissingRequiredReg('effectId'))
         })
 
         it('missing multiple attributes', () => {
           const o = { id: '1', startTime: 0, name: 'effect1' }
-          expect(() => verifyEffectSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'effectId']))
+          expect(() => verifyEffectSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'effectId', 'segmentType']))
         })
 
         it('missing all attributes', () => {
-          expect(() => verifyEffectSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'name', 'effectId']))
+          expect(() => verifyEffectSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'name', 'effectId', 'segmentType']))
         })
       })
 
@@ -712,12 +732,17 @@ describe('verify segment of video protocol', () => {
           const o = { ...effectSegment, url: 'invalid' }
           expect(() => verifyEffectSegment(o)).toThrowError(INVALID_URL)
         })
+
+        it('invalid segmentType', () => {
+          const o = { ...effectSegment, segmentType: 'invalid' }
+          expect(() => verifyEffectSegment(o)).toThrowError(INVALID_EFFECT_SEGMENT_TYPE)
+        })
       })
     })
   })
 
   describe('filter segment', () => {
-    const filterSegment: IFilterSegment = { id: '1', startTime: 0, endTime: 500, name: 'filter1', filterId: 'filter1Id' }
+    const filterSegment: IFilterSegment = { segmentType: 'filter', id: '1', startTime: 0, endTime: 500, name: 'filter1', filterId: 'filter1Id' }
     it('valid filter segment', () => {
       const o = verifyFilterSegment(filterSegment)
       expect(o).toEqual(filterSegment)
@@ -736,33 +761,38 @@ describe('verify segment of video protocol', () => {
 
       describe('missing attributes', () => {
         it('missing id', () => {
-          const o = { startTime: 0, endTime: 500, name: 'filter1', filterId: 'filter1Id' }
+          const o = { startTime: 0, endTime: 500, name: 'filter1', filterId: 'filter1Id', segmentType: 'filter' }
           expect(() => verifyFilterSegment(o)).toThrowError(generateMissingRequiredReg('id'))
         })
 
         it('missing startTime', () => {
-          const o = { id: '1', endTime: 500, name: 'filter1', filterId: 'filter1Id' }
+          const o = { id: '1', endTime: 500, name: 'filter1', filterId: 'filter1Id', segmentType: 'filter' }
           expect(() => verifyFilterSegment(o)).toThrowError(generateMissingRequiredReg('startTime'))
         })
 
         it('missing endTime', () => {
-          const o = { id: '1', startTime: 0, name: 'filter1', filterId: 'filter1Id' }
+          const o = { id: '1', startTime: 0, name: 'filter1', filterId: 'filter1Id', segmentType: 'filter' }
           expect(() => verifyFilterSegment(o)).toThrowError(generateMissingRequiredReg('endTime'))
         })
 
         it('missing name', () => {
-          const o = { id: '1', startTime: 0, endTime: 500, filterId: 'filter1Id' }
+          const o = { id: '1', startTime: 0, endTime: 500, filterId: 'filter1Id', segmentType: 'filter' }
           expect(() => verifyFilterSegment(o)).toThrowError(generateMissingRequiredReg('name'))
         })
 
         it('missing filterId', () => {
-          const o = { id: '1', startTime: 0, endTime: 500, name: 'filter1' }
+          const o = { id: '1', startTime: 0, endTime: 500, name: 'filter1', segmentType: 'filter' }
           expect(() => verifyFilterSegment(o)).toThrowError(generateMissingRequiredReg('filterId'))
+        })
+
+        it('missing segmentType', () => {
+          const o = { id: '1', startTime: 0, endTime: 500, name: 'filter1', filterId: 'filter1Id' }
+          expect(() => verifyFilterSegment(o)).toThrowError(generateMissingRequiredReg('segmentType'))
         })
 
         it('missing multiple attributes', () => {
           const o = { id: '1', startTime: 0, name: 'filter1' }
-          expect(() => verifyFilterSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'filterId']))
+          expect(() => verifyFilterSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'filterId', 'segmentType']))
         })
       })
 
@@ -800,6 +830,11 @@ describe('verify segment of video protocol', () => {
         it('invalid intensity', () => {
           const o = { ...filterSegment, intensity: -1 }
           expect(() => verifyFilterSegment(o)).toThrowError(generateTypeErrorPrefixReg('/intensity', '>= 0'))
+        })
+
+        it('invalid segmentType', () => {
+          const o = { ...filterSegment, segmentType: 'invalid' }
+          expect(() => verifyFilterSegment(o)).toThrowError(INVALID_FILTER_SEGMENT_TYPE)
         })
       })
     })
@@ -882,12 +917,12 @@ describe('verify track', () => {
 
 describe('verify video protocol', () => {
   const videoProtocol: IVideoProtocol = { version: '1.0.0', width: 1920, height: 1080, fps: 30, tracks: [] }
-  const framesSegment: IFramesSegmentUnion = { id: '1', startTime: 0, endTime: 500, type: 'image', format: 'img', url: 'https://example.com/image.png' }
-  const textSegment: ITextSegment = { id: '1', startTime: 0, endTime: 500, texts: [{ content: 'hello wendraw' }] }
-  const imageSegment: IImageSegment = { id: '1', startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png' }
-  const audioSegment: IAudioSegment = { id: '1', startTime: 0, endTime: 500, url: 'https://example.com/audio.mp3' }
-  const effectSegment: IEffectSegment = { id: '1', startTime: 0, endTime: 500, name: 'effect1', effectId: 'effect1Id' }
-  const filterSegment: IFilterSegment = { id: '1', startTime: 0, endTime: 500, name: 'filter1', filterId: 'filter1Id' }
+  const framesSegment: IFramesSegmentUnion = { segmentType: 'frames', id: '1', startTime: 0, endTime: 500, type: 'image', format: 'img', url: 'https://example.com/image.png' }
+  const textSegment: ITextSegment = { segmentType: 'text', id: '1', startTime: 0, endTime: 500, texts: [{ content: 'hello wendraw' }] }
+  const imageSegment: IImageSegment = { segmentType: 'image', id: '1', startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png' }
+  const audioSegment: IAudioSegment = { segmentType: 'audio', id: '1', startTime: 0, endTime: 500, url: 'https://example.com/audio.mp3' }
+  const effectSegment: IEffectSegment = { segmentType: 'effect', id: '1', startTime: 0, endTime: 500, name: 'effect1', effectId: 'effect1Id' }
+  const filterSegment: IFilterSegment = { segmentType: 'filter', id: '1', startTime: 0, endTime: 500, name: 'filter1', filterId: 'filter1Id' }
 
   const { verify } = createValidator()
 
@@ -936,7 +971,7 @@ describe('verify video protocol', () => {
 
     it('with invalid frames segment', () => {
       const o = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'frames', children: [{ ...framesSegment, type: 'invalid' }] }] }
-      expect(() => verify(o)).toThrowError(INVALID_FRAMES_SEGMENT_TYPE)
+      expect(() => verify(o)).toThrowError(INVALID_FRAMES_TYPE)
     })
 
     it('with invalid text segment', () => {

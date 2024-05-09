@@ -24,12 +24,18 @@ export type ITrackType = keyof TrackTypeMapSegment
 
 export interface TrackTypeMapSegment {
   frames: IFramesSegmentUnion
-  text: ITextSegment
-  image: IImageSegment
-  audio: IAudioSegment
-  effect: IEffectSegment
-  filter: IFilterSegment
+  text: TextSegment<'text'>
+  image: ImageSegment<'image'>
+  audio: AudioSegment<'audio'>
+  effect: EffectSegment<'effect'>
+  filter: FilterSegment<'filter'>
 }
+export type IFramesSegmentUnion = IVideoFramesSegment | IImageFramesSegment | I3DFramesSegment
+export type ITextSegment = TextSegment<'text'>
+export type IImageSegment = ImageSegment<'image'>
+export type IAudioSegment = AudioSegment<'audio'>
+export type IEffectSegment = EffectSegment<'effect'>
+export type IFilterSegment = FilterSegment<'filter'>
 
 export type TrackTypeMapTrack = {
   [Key in ITrackType]: ITrack<Key>;
@@ -38,7 +44,7 @@ export type TrackTypeMapTrack = {
 export type TrackUnion = TrackTypeMapTrack[ITrackType]
 export type SegmentUnion = TrackTypeMapSegment[ITrackType]
 
-export interface IFramesSegment extends ISegment {
+interface IFramesSegment extends ISegment<'frames'> {
   type: 'image' | 'video' | '3D'
   url: string
   transform?: ITransform
@@ -67,16 +73,16 @@ export interface I3DFramesSegment extends IFramesSegment {
   type: '3D'
 }
 
-export type IFramesSegmentUnion = IVideoFramesSegment | IImageFramesSegment | I3DFramesSegment
-
-export interface ITextSegment extends ISegment {
+interface TextSegment<T extends ITrackType> extends ISegment<T> {
+  segmentType: T
   texts: ITextBasic[]
   transform?: ITransform
   opacity?: number // 0-1
   animation?: IAnimation
 }
 
-export interface IImageSegment extends ISegment {
+interface ImageSegment<T extends ITrackType> extends ISegment<T> {
+  segmentType: T
   format: 'img' | 'gif'
   url: string
   fillMode?: IFillMode
@@ -85,7 +91,8 @@ export interface IImageSegment extends ISegment {
   palette?: IPalette
 }
 
-export interface IAudioSegment extends ISegment {
+interface AudioSegment<T extends ITrackType> extends ISegment<T> {
+  segmentType: T
   url: string
   fromTime?: number // from time in audio where to start, default 0
   volume?: number // volume of the audio, value between [0, 1], default 1
@@ -94,21 +101,24 @@ export interface IAudioSegment extends ISegment {
   playRate?: number // play rate of the audio, value between [0.1, 100], default 1
 }
 
-export interface IEffectSegment extends ISegment {
+interface EffectSegment<T extends ITrackType> extends ISegment<T> {
+  segmentType: T
   effectId: string
   name: string
 }
 
-export interface IFilterSegment extends ISegment {
+interface FilterSegment<T extends ITrackType> extends ISegment<T> {
+  segmentType: T
   filterId: string
   name: string
   intensity?: number // 0-1
 }
 
-export interface ISegment {
+export interface ISegment<T extends ITrackType> {
   id: string
   startTime: number
   endTime: number
+  segmentType: T
   url?: string
 }
 

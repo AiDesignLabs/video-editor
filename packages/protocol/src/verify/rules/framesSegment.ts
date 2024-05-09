@@ -4,7 +4,8 @@ import { INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FROM_TIME, INVALID_ID, INV
 import { commonAnimationDefs, commonPaletteDefs, commonTransformDefs, commonTransitionDefs } from './commonDefs'
 
 export const TYPE_ERROR_FRAMES_SEGMENT = `${TYPE_ERROR_PREFIX} object`
-export const INVALID_FRAMES_SEGMENT_TYPE = 'type must be a string and one of ["image", "video", "3D"]'
+export const INVALID_FRAMES_TYPE = 'type must be a string and one of ["image", "video", "3D"]'
+export const INVALID_FRAMES_SEGMENT_TYPE = 'type segmentType must be a string and equal to "frames"'
 
 const CommonDefinitions = {
   ITransform: commonTransformDefs,
@@ -25,6 +26,7 @@ export const framesSegmentRule: JSONSchemaType<IFramesSegmentUnion> = {
       oneOf: [{ const: 'image' }, { const: 'video' }, { const: '3D' }],
     },
     url: { type: 'string', format: 'uri' },
+    segmentType: { type: 'string', const: 'frames' },
     fromTime: { type: 'number', minimum: 0, nullable: true },
     transform: { $ref: '#/definitions/ITransform' },
     opacity: { type: 'number', minimum: 0, maximum: 1, nullable: true },
@@ -35,7 +37,7 @@ export const framesSegmentRule: JSONSchemaType<IFramesSegmentUnion> = {
     palette: { $ref: '#/definitions/IPalette' },
     background: { type: 'string', pattern: '^rgba\\([0-9]+,[0-9]+,[0-9]+,[0-9]+\\)$', nullable: true },
   },
-  required: ['id', 'startTime', 'endTime', 'type', 'url'],
+  required: ['id', 'startTime', 'endTime', 'type', 'url', 'segmentType'],
   if: { properties: { type: { const: 'image' } } },
   then: { required: ['format'], properties: { format: { type: 'string', enum: ['img', 'gif'] } } },
   else: { required: [] },
@@ -47,10 +49,11 @@ export const framesSegmentRule: JSONSchemaType<IFramesSegmentUnion> = {
       endTime: INVALID_END_TIME,
       format: INVALID_IMAGE_FORMAT,
       url: INVALID_URL,
-      type: INVALID_FRAMES_SEGMENT_TYPE,
+      type: INVALID_FRAMES_TYPE,
       fromTime: INVALID_FROM_TIME,
       background: `background${INVALID_RGBA}`,
       fillMode: INVALID_FILL_MODE,
+      segmentType: INVALID_FRAMES_SEGMENT_TYPE,
     },
   },
 }
