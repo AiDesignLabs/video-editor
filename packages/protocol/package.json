@@ -22,14 +22,13 @@
     "test": "vitest",
     "test:ci": "vitest --run"
   },
-  "peerDependencies": {
-    "@vue/reactivity": "^3.4.19"
-  },
   "dependencies": {
     "@video-editor/shared": "workspace:*",
+    "@vue/reactivity": "^3.4.19",
     "ajv": "^8.12.0",
     "ajv-errors": "^3.0.0",
     "ajv-formats": "^2.1.1",
-    "ajv-keywords": "^5.1.0"
+    "ajv-keywords": "^5.1.0",
+    "immer": "^10.1.1"
   }
 }
