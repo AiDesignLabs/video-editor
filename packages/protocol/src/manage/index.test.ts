@@ -237,6 +237,16 @@ describe('video protocol segment curd', () => {
         expect(segmentMap.value[video2Id]?.startTime).toBe(1500)
         expect(segmentMap.value[video2Id]?.endTime).toBe(2500)
       })
+
+      it('update invalid url', () => {
+        setSelectedSegment(video1Id)
+        expect(selectedSegment.value?.id).toBe(video1Id)
+        updateSegment((segment) => {
+          segment.url = 'invalid url'
+        })
+        expect(selectedSegment.value?.url).toBe(segment.url)
+        expect(segmentMap.value[video1Id]?.url).toBe(segment.url)
+      })
     })
   })
 })

@@ -1,4 +1,4 @@
-import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageSegment, ITextSegment, IVideoProtocol } from '@video-editor/shared'
+import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageSegment, ITextSegment, ITrackType, IVideoProtocol } from '@video-editor/shared'
 import Ajv from 'ajv'
 import ajvErrors from 'ajv-errors'
 import ajvKeywords from 'ajv-keywords'
@@ -82,10 +82,7 @@ export function createValidator() {
     return o as Omit<IVideoProtocol['tracks'][number], 'children'> & { children: object[] }
   }
 
-  const verify = (o: object): IVideoProtocol => {
-    const segmentIds = new Set<string>()
-    const trackIds = new Set<string>()
-    const validBasic = verifyBasic(o)
+  const verifySegment = (o: object & { segmentType: ITrackType }) => {
     const verifyTrackMap = {
       frames: verifyFramesSegment,
       text: verifyTextSegment,
@@ -94,6 +91,13 @@ export function createValidator() {
       effect: verifyEffectSegment,
       filter: verifyFilterSegment,
     }
+    return verifyTrackMap[o.segmentType](o)
+  }
+
+  const verify = (o: object): IVideoProtocol => {
+    const segmentIds = new Set<string>()
+    const trackIds = new Set<string>()
+    const validBasic = verifyBasic(o)
 
     const tracks = validBasic.tracks.map((o) => {
       const track = verifyTrack(o)
@@ -106,7 +110,7 @@ export function createValidator() {
 
     for (const track of tracks) {
       const children = track.children.map((o) => {
-        const segment = verifyTrackMap[track.trackType](o)
+        const segment = verifySegment({ ...o, segmentType: track.trackType })
         if (segmentIds.has(segment.id))
           throw new Error(`${DUPLICATE_SEGMENT_ID} ${segment.id}`)
         segmentIds.add(segment.id)
@@ -118,5 +122,5 @@ export function createValidator() {
     return validBasic as IVideoProtocol
   }
 
-  return { verify, verifyBasic, verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment, verifyTrack }
+  return { verify, verifyBasic, verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment, verifyTrack, verifySegment }
 }

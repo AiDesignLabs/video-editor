@@ -1,13 +1,16 @@
 import type { ITrack, ITrackType, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
 import type { DeepReadonly } from '@vue/reactivity'
 import { computed, reactive, ref } from '@vue/reactivity'
+import { createValidator } from '../verify'
 import type { PartialByKeys } from './utils'
 import { clone, findInsertSegmentIndex, genRandomId } from './utils'
 import { useHistory } from './immer'
 import type { IMappingVideoProtocol } from './type'
 
 export function createVideoProtocolManager(protocol: IVideoProtocol) {
-  const { videoBasicInfo, segments, tracks, updateProtocol } = normalizedProtocol(protocol)
+  const validator = createValidator()
+
+  const { videoBasicInfo, segments, tracks, updateProtocol, undo } = normalizedProtocol(validator.verify(protocol))
 
   const curTime = ref(0)
   const selectedSegmentId = ref<string>()
@@ -100,7 +103,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
   }
 
   function updateSegment(updater: (segment: SegmentUnion) => void, id?: string) {
-    return updateProtocol((protocol) => {
+    updateProtocol((protocol) => {
       const _id = id ?? selectedSegment.value?.id
       if (_id === undefined)
         return
@@ -108,23 +111,46 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
       if (segment)
         updater(segment)
     }, (patches, inversePatches, effect) => {
-      // update children segment time
-      const i = patches.findIndex(patch => patch.path.at(-1) === 'endTime')
-      if (i >= 0) {
-        // path: [ 'tracks', 'frames', 0, 'children', 0, 'endTime' ]
-        const [, trackType, trackIndex, , childIndex] = patches[i].path
-        effect((draft) => {
-          const tracks = draft.tracks[trackType as ITrackType]
-          if (typeof trackIndex !== 'number' || typeof childIndex !== 'number' || !tracks)
-            return
-          const diff = patches[i].value - inversePatches[i].value
-          for (let j = childIndex + 1; j < tracks[trackIndex].children.length; j++) {
-            const segment = tracks[trackIndex].children[j]
-            segment.startTime += diff
-            segment.endTime += diff
+      effect((draft) => {
+        // verify all modified segments
+        if (patches.every((patch, i) => {
+          // path: [ 'tracks', 'frames', 0, 'children', 0, 'endTime' ]
+          const [, trackType, trackIndex, , childIndex, attr] = patch.path
+          if (typeof trackIndex !== 'number' || typeof childIndex !== 'number')
+            return false
+          const segment = draft.tracks[trackType as ITrackType][trackIndex].children[childIndex]
+          try {
+            validator.verifySegment(segment)
           }
-        })
-      }
+          catch (error) {
+            // undo the update
+            // @ts-expect-error type is correct
+            segment[attr] = inversePatches[i].value
+            return false
+          }
+          return true
+        })) {
+          // update children segment time
+          const i = patches.findIndex(patch => patch.path.at(-1) === 'endTime')
+          if (i >= 0) {
+            // path: [ 'tracks', 'frames', 0, 'children', 0, 'endTime' ]
+            const [, trackType, trackIndex, , childIndex] = patches[i].path
+            const tracks = draft.tracks[trackType as ITrackType]
+            if (typeof trackIndex !== 'number' || typeof childIndex !== 'number' || !tracks)
+              return
+            const diff = patches[i].value - inversePatches[i].value
+            for (let j = childIndex + 1; j < tracks[trackIndex].children.length; j++) {
+              const segment = tracks[trackIndex].children[j]
+              segment.startTime += diff
+              segment.endTime += diff
+            }
+          }
+        }
+        else {
+          // rollback all changes
+          undo()
+        }
+      })
     })
   }
 
@@ -160,7 +186,7 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     if (track.children.length > 0)
       (mappingProtocol.tracks[track.trackType] as TrackTypeMapTrack[ITrackType][]).push(track)
   }
-  const { state: protocolState, update: updateProtocol, enable } = useHistory(mappingProtocol)
+  const { state: protocolState, update: updateProtocol, enable, redo, undo } = useHistory(mappingProtocol)
   enable()
 
   const videoBasicInfo = reactive({
@@ -190,6 +216,8 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     updateProtocol,
     tracks,
     segments,
+    redo,
+    undo,
   }
 }
 
