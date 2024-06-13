@@ -6,6 +6,7 @@ import type { PartialByKeys } from './utils'
 import { clone, findInsertSegmentIndex, genRandomId } from './utils'
 import { useHistory } from './immer'
 import type { IMappingVideoProtocol } from './type'
+import { checkSegment, handleSegmentUpdate } from './segment'
 
 export function createVideoProtocolManager(protocol: IVideoProtocol) {
   const validator = createValidator()
@@ -113,38 +114,8 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     }, (patches, inversePatches, effect) => {
       effect((draft) => {
         // verify all modified segments
-        if (patches.every((patch, i) => {
-          // path: [ 'tracks', 'frames', 0, 'children', 0, 'endTime' ]
-          const [, trackType, trackIndex, , childIndex, attr] = patch.path
-          if (typeof trackIndex !== 'number' || typeof childIndex !== 'number')
-            return false
-          const segment = draft.tracks[trackType as ITrackType][trackIndex].children[childIndex]
-          try {
-            validator.verifySegment(segment)
-          }
-          catch (error) {
-            // undo the update
-            // @ts-expect-error type is correct
-            segment[attr] = inversePatches[i].value
-            return false
-          }
-          return true
-        })) {
-          // update children segment time
-          const i = patches.findIndex(patch => patch.path.at(-1) === 'endTime')
-          if (i >= 0) {
-            // path: [ 'tracks', 'frames', 0, 'children', 0, 'endTime' ]
-            const [, trackType, trackIndex, , childIndex] = patches[i].path
-            const tracks = draft.tracks[trackType as ITrackType]
-            if (typeof trackIndex !== 'number' || typeof childIndex !== 'number' || !tracks)
-              return
-            const diff = patches[i].value - inversePatches[i].value
-            for (let j = childIndex + 1; j < tracks[trackIndex].children.length; j++) {
-              const segment = tracks[trackIndex].children[j]
-              segment.startTime += diff
-              segment.endTime += diff
-            }
-          }
+        if (checkSegment(patches, inversePatches, draft, validator)) {
+          handleSegmentUpdate(patches, inversePatches, draft)
         }
         else {
           // rollback all changes
