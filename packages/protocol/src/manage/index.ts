@@ -1,6 +1,6 @@
 import type { ITrack, ITrackType, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
 import type { DeepReadonly } from '@vue/reactivity'
-import { computed, reactive, ref } from '@vue/reactivity'
+import { computed, reactive, ref, toRaw } from '@vue/reactivity'
 import { createValidator } from '../verify'
 import type { PartialByKeys } from './utils'
 import { clone, findInsertSegmentIndex, genRandomId } from './utils'
@@ -10,7 +10,7 @@ import { checkSegment, handleSegmentUpdate } from './segment'
 export function createVideoProtocolManager(protocol: IVideoProtocol) {
   const validator = createValidator()
 
-  const { videoBasicInfo, segments, tracks, updateProtocol, undo } = normalizedProtocol(validator.verify(protocol))
+  const { videoBasicInfo, segments, tracks, updateProtocol, undo, exportProtocol } = normalizedProtocol(validator.verify(protocol))
 
   const curTime = ref(0)
   const selectedSegmentId = ref<string>()
@@ -134,6 +134,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     addSegment,
     removeSegment,
     updateSegment,
+    exportProtocol,
   }
 }
 
@@ -169,6 +170,16 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     return map
   })
 
+  const exportProtocol = () => {
+    updateProtocol((protocol) => {
+      protocol.version = videoBasicInfo.version
+      protocol.width = videoBasicInfo.width
+      protocol.height = videoBasicInfo.height
+      protocol.fps = videoBasicInfo.fps
+    })
+    return toRaw(protocolState.value)
+  }
+
   return {
     videoBasicInfo,
     updateProtocol,
@@ -176,6 +187,7 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     tracks,
     redo,
     undo,
+    exportProtocol,
   }
 }
 

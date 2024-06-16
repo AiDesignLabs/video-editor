@@ -9,7 +9,7 @@ describe('video protocol basic info', () => {
     fps: 30,
     tracks: [],
   }
-  const { videoBasicInfo } = createVideoProtocolManager(protocol)
+  const { videoBasicInfo, exportProtocol } = createVideoProtocolManager(protocol)
 
   it('get', () => {
     expect(videoBasicInfo.version).toBe('1.0.0')
@@ -33,6 +33,16 @@ describe('video protocol basic info', () => {
     it('version is readonly', () => {
       expect(() => videoBasicInfo.version = '1.0.1').toThrowError()
       expect(videoBasicInfo.version).toBe('1.0.0')
+    })
+
+    it('export', () => {
+      expect(exportProtocol()).toEqual({
+        version: '1.0.0',
+        width: 1280,
+        height: 720,
+        fps: 60,
+        tracks: [],
+      })
     })
   })
 })
@@ -254,6 +264,64 @@ describe('video protocol segment curd', () => {
         expect(selectedSegment.value?.url).toBe(segment.url)
         expect(segmentMap.value[video1Id]?.url).toBe(segment.url)
       })
+    })
+  })
+
+  describe('export protocol', () => {
+    it('happy path', () => {
+      const { addSegment, exportProtocol } = createVideoProtocolManager(protocol)
+      const segment: IVideoFramesSegment = {
+        id: '1',
+        startTime: 0,
+        endTime: 1000,
+        segmentType: 'frames',
+        type: 'video',
+        url: 'http://example.com/video.mp4',
+      }
+      expect(exportProtocol()).toEqual(protocol)
+
+      const insertId = addSegment(segment)
+      expect(insertId).toBe('1')
+
+      expect(exportProtocol()).toEqual({
+        version: '1.0.0',
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        tracks: [
+          {
+            isMain: true,
+            trackType: 'frames',
+            trackId: expect.any(String),
+            children: [segment],
+          },
+        ],
+      })
+    })
+
+    it('with multiple track, have level index', () => {
+      const { addSegment, exportProtocol } = createVideoProtocolManager(protocol)
+      const imageSegment: IImageSegment = {
+        id: '1',
+        startTime: 0,
+        endTime: 1000,
+        segmentType: 'image',
+        format: 'img',
+        url: 'http://example.com/image.jpg',
+      }
+      const textSegment: ITextSegment = {
+        id: '2',
+        startTime: 0,
+        endTime: 1000,
+        segmentType: 'text',
+        texts: [{ content: 'wendraw' }],
+      }
+      addSegment(imageSegment)
+      addSegment(textSegment)
+      addSegment(imageSegment)
+      addSegment(textSegment)
+
+      expect(exportProtocol().tracks.map(track => track.trackType)).toEqual(['image', 'text', 'image', 'text'])
     })
   })
 })
