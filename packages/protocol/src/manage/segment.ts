@@ -1,9 +1,8 @@
-import type { ITrackType } from '@video-editor/shared'
+import type { ITrackType, IVideoProtocol } from '@video-editor/shared'
 import type { Patch } from 'immer'
 import type { createValidator } from '../verify'
-import type { IMappingVideoProtocol } from './type'
 
-export function handleSegmentUpdate(patches: Patch[], inversePatches: Patch[], draft: IMappingVideoProtocol) {
+export function handleSegmentUpdate(patches: Patch[], inversePatches: Patch[], draft: IVideoProtocol) {
   for (let i = 0; i < patches.length; i++) {
     if (patches[i].path.at(-1) === 'endTime') {
       adjustSegmentEndTime(patches[i], inversePatches[i], draft)
@@ -12,11 +11,11 @@ export function handleSegmentUpdate(patches: Patch[], inversePatches: Patch[], d
   }
 }
 
-function adjustSegmentEndTime(patch: Patch, inversePatch: Patch, draft: IMappingVideoProtocol) {
+function adjustSegmentEndTime(patch: Patch, inversePatch: Patch, draft: IVideoProtocol) {
   // update children segment time
-  // path: [ 'tracks', 'frames', 0, 'children', 0, 'endTime' ]
-  const [, trackType, trackIndex, , childIndex] = patch.path
-  const tracks = draft.tracks[trackType as ITrackType]
+  // path: [ 'tracks', 0, 'children', 0, 'endTime' ]
+  const [, trackIndex, , childIndex] = patch.path
+  const tracks = draft.tracks
   if (typeof trackIndex !== 'number' || typeof childIndex !== 'number' || !tracks)
     return
   const diff = patch.value - inversePatch.value
@@ -27,13 +26,13 @@ function adjustSegmentEndTime(patch: Patch, inversePatch: Patch, draft: IMapping
   }
 }
 
-export function checkSegment(patches: Patch[], inversePatches: Patch[], draft: IMappingVideoProtocol, validator: ReturnType<typeof createValidator>) {
+export function checkSegment(patches: Patch[], inversePatches: Patch[], draft: IVideoProtocol, validator: ReturnType<typeof createValidator>) {
   return patches.every((patch, i) => {
-    // path: [ 'tracks', 'frames', 0, 'children', 0, 'endTime' ]
-    const [, trackType, trackIndex, , childIndex, attr] = patch.path
+    // path: [ 'tracks',  0, 'children', 0, 'endTime' ]
+    const [, trackIndex, , childIndex, attr] = patch.path
     if (typeof trackIndex !== 'number' || typeof childIndex !== 'number')
       return false
-    const segment = draft.tracks[trackType as ITrackType][trackIndex].children[childIndex]
+    const segment = draft.tracks[trackIndex].children[childIndex]
     try {
       validator.verifySegment(segment)
     }

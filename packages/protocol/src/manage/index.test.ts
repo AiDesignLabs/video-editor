@@ -89,7 +89,7 @@ describe('video protocol segment curd', () => {
       })
 
       it('with other segment', () => {
-        const { selectedSegment, setSelectedSegment, addSegment, trackMap, curTime } = createVideoProtocolManager(protocol)
+        const { selectedSegment, setSelectedSegment, addSegment, segmentMap, trackMap, curTime } = createVideoProtocolManager(protocol)
         const segment: ITextSegment = {
           id: '11',
           startTime: 0,
@@ -100,10 +100,15 @@ describe('video protocol segment curd', () => {
         const insertId = addSegment(segment)
         setSelectedSegment(insertId)
         expect(insertId).toBe('11')
+        expect(segmentMap.value[insertId]?.id).toBe('11')
         expect(selectedSegment.value?.startTime).toBe(0)
+        expect(selectedSegment.value?.id).toBe('11')
 
         curTime.value = 500
-        setSelectedSegment(addSegment(segment))
+        const newId = addSegment(segment)
+        setSelectedSegment(newId)
+        expect(segmentMap.value[newId]?.id).toBe(newId)
+        expect(selectedSegment.value?.id).toBe(newId)
         expect(selectedSegment.value?.startTime).toBe(500)
         expect(trackMap.value.text).toHaveLength(2)
       })
@@ -175,10 +180,12 @@ describe('video protocol segment curd', () => {
       url: 'http://example.com/video.mp4',
     }
     addSegment(segment)
+    expect(trackMap.value.frames).toHaveLength(1)
+    expect(segmentMap.value['1']?.id).toBe('1')
     expect(removeSegment('1')).toBe(true)
     expect(removeSegment('1')).toBe(false)
     expect(segmentMap.value['1']).toBeUndefined()
-    expect(trackMap.value.frames).toHaveLength(0)
+    expect(trackMap.value.frames).toBeUndefined()
   })
 
   describe('selected segment', () => {
