@@ -10,7 +10,7 @@ import { checkSegment, handleSegmentUpdate } from './segment'
 export function createVideoProtocolManager(protocol: IVideoProtocol) {
   const validator = createValidator()
 
-  const { videoBasicInfo, segments, tracks, updateProtocol, undo, exportProtocol } = normalizedProtocol(validator.verify(protocol))
+  const { videoBasicInfo, segments, tracks, updateProtocol, undo, exportProtocol, undoCount, redoCount } = normalizedProtocol(validator.verify(protocol))
 
   const curTime = ref(0)
   const selectedSegmentId = ref<string>()
@@ -59,6 +59,13 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
 
   const addSegment = (segment: PartialByKeys<TrackTypeMapSegment[ITrackType], 'id'>) => {
     const theSegment = normalizedSegment(segment)
+
+    try {
+      validator.verifySegment(theSegment)
+    }
+    catch (error) {
+      throw new Error('invalid segment data')
+    }
 
     return updateProtocol((protocol) => {
       if (theSegment.segmentType === 'frames') {
@@ -114,7 +121,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
       effect((draft) => {
         // verify all modified segments
         if (checkSegment(patches, inversePatches, draft, validator)) {
-          handleSegmentUpdate(patches, inversePatches, draft)
+          handleSegmentUpdate(patches, inversePatches, draft, undo)
         }
         else {
           // rollback all changes
@@ -135,11 +142,13 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     removeSegment,
     updateSegment,
     exportProtocol,
+    undoCount,
+    redoCount,
   }
 }
 
 function normalizedProtocol(protocol: IVideoProtocol) {
-  const { state: protocolState, update: updateProtocol, enable, redo, undo } = useHistory(clone(protocol))
+  const { state: protocolState, update: updateProtocol, enable, redo, undo, undoCount, redoCount } = useHistory(clone(protocol))
   enable()
 
   const videoBasicInfo = reactive({
@@ -187,6 +196,8 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     tracks,
     redo,
     undo,
+    undoCount,
+    redoCount,
     exportProtocol,
   }
 }

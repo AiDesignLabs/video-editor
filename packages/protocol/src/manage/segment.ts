@@ -1,14 +1,32 @@
-import type { ITrackType, IVideoProtocol } from '@video-editor/shared'
+import type { IVideoProtocol } from '@video-editor/shared'
 import type { Patch } from 'immer'
 import type { createValidator } from '../verify'
 
-export function handleSegmentUpdate(patches: Patch[], inversePatches: Patch[], draft: IVideoProtocol) {
+export function handleSegmentUpdate(patches: Patch[], inversePatches: Patch[], draft: IVideoProtocol, undo: () => void) {
   for (let i = 0; i < patches.length; i++) {
     if (patches[i].path.at(-1) === 'endTime') {
       adjustSegmentEndTime(patches[i], inversePatches[i], draft)
       break
     }
+    else if (patches[i].path.at(-1) === 'startTime') {
+      break
+    }
+    else if (patches[i].path.at(-1) === 'id') {
+      rollbackChange(patches[i], inversePatches[i], draft)
+      undo()
+    }
+    else if (patches[i].path.at(-1) === 'segmentType') {
+      rollbackChange(patches[i], inversePatches[i], draft)
+      undo()
+    }
   }
+}
+
+function rollbackChange(patch: Patch, inversePatch: Patch, draft: IVideoProtocol) {
+  // path: [ 'tracks', 0, 'children', 0, 'endTime' ]
+  const [p1, trackIndex, p2, childIndex, p3] = patch.path
+  // @ts-expect-error type is correct
+  draft[p1][trackIndex][p2][childIndex][p3] = inversePatch.value
 }
 
 function adjustSegmentEndTime(patch: Patch, inversePatch: Patch, draft: IVideoProtocol) {
