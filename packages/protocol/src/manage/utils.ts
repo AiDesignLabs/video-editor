@@ -21,6 +21,25 @@ export function findInsertSegmentIndex<T extends TrackTypeMapSegment[ITrackType]
   return nextIndex - 1
 }
 
+export function findInsertFramesSegmentIndex<T extends TrackTypeMapSegment['frames']>(arr: T[], curTime: number) {
+  if (arr.length === 0)
+    return 0
+
+  /**
+   * find the cross segment, the arr must sorted by startTime
+   * and the frames segment is continuous
+   */
+  const crossIndex = arr.findIndex(segment => segment.startTime <= curTime && curTime <= segment.endTime)
+
+  if (crossIndex === -1) // curTime is after the last segment
+    return arr.length
+
+  // cross time at right half time segment will be the next segment
+  if (arr[crossIndex].endTime - curTime <= curTime - arr[crossIndex].startTime)
+    return crossIndex + 1
+  return crossIndex
+}
+
 export function clone<T>(obj: T): T {
   if (structuredClone)
     return structuredClone(obj)

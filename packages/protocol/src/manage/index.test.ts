@@ -51,7 +51,7 @@ describe('video protocol basic info', () => {
 describe('video protocol segment curd', () => {
   describe('add segment', () => {
     it('happy path', () => {
-      const { selectedSegment, setSelectedSegment, segmentMap, trackMap, addSegment } = createVideoProtocolManager(protocol)
+      const { selectedSegment, curTime, setSelectedSegment, segmentMap, trackMap, addSegment } = createVideoProtocolManager(protocol)
       const segment: IVideoFramesSegment = {
         id: '1',
         startTime: 0,
@@ -65,6 +65,7 @@ describe('video protocol segment curd', () => {
       expect(segmentMap.value['1']).toEqual(segment)
       expect(trackMap.value.frames[0].children[0]).toEqual(segment)
 
+      curTime.value = 1000
       setSelectedSegment(addSegment(segment))
       expect(trackMap.value.frames[0].children[1].startTime).toEqual(1000)
       expect(selectedSegment.value?.startTime).toBe(1000)
@@ -119,7 +120,7 @@ describe('video protocol segment curd', () => {
 
     describe('cross time', () => {
       it('with frames segment', () => {
-        const { segmentMap, trackMap, addSegment } = createVideoProtocolManager(protocol)
+        const { segmentMap, trackMap, addSegment, curTime } = createVideoProtocolManager(protocol)
         const segment: IVideoFramesSegment = {
           id: '1',
           startTime: 0,
@@ -130,6 +131,7 @@ describe('video protocol segment curd', () => {
         }
         const insertId = addSegment(segment)
         expect(insertId).toBe('1')
+        curTime.value = 1000
         const newId = addSegment({ ...segment, startTime: 500, endTime: 1500 })
         expect(trackMap.value.frames).toHaveLength(1)
         expect(segmentMap.value[newId]?.startTime).toBe(1000)
@@ -217,7 +219,7 @@ describe('video protocol segment curd', () => {
 
   describe('update segment', () => {
     describe('frames segment', () => {
-      const { selectedSegment, segmentMap, updateSegment, setSelectedSegment, addSegment } = createVideoProtocolManager(protocol)
+      const { selectedSegment, curTime, segmentMap, updateSegment, setSelectedSegment, addSegment } = createVideoProtocolManager(protocol)
       const segment: IVideoFramesSegment = {
         id: '1',
         startTime: 0,
@@ -227,6 +229,7 @@ describe('video protocol segment curd', () => {
         url: 'http://example.com/video.mp4',
       }
       const video1Id = addSegment(segment)
+      curTime.value = 1000
       const video2Id = addSegment(segment)
 
       it('update time duration', () => {
@@ -346,10 +349,26 @@ describe('frames segment', () => {
         expect(trackMap.value.frames).toHaveLength(1)
       })
 
-      it('cross time', () => {
-        const id = addSegment(segment)
-        expect(segmentMap.value[id]?.startTime).toBe(2000)
-        expect(trackMap.value.frames).toHaveLength(1)
+      describe('cross time', () => {
+        it('left half', () => {
+          const { addSegment, segmentMap, trackMap } = createVideoProtocolManager(protocol)
+          const id = addSegment(segment)
+          const idLeft = addSegment(segment)
+
+          expect(segmentMap.value[idLeft]?.startTime).toBe(0)
+          expect(segmentMap.value[id]?.startTime).toBe(1000)
+          expect(trackMap.value.frames).toHaveLength(1)
+        })
+
+        it('right half', () => {
+          const { addSegment, segmentMap, trackMap, curTime } = createVideoProtocolManager(protocol)
+          const id = addSegment(segment)
+          curTime.value = 600
+          const idRight = addSegment(segment)
+          expect(segmentMap.value[idRight]?.startTime).toBe(1000)
+          expect(segmentMap.value[id]?.startTime).toBe(0)
+          expect(trackMap.value.frames).toHaveLength(1)
+        })
       })
     })
 
@@ -388,8 +407,9 @@ describe('frames segment', () => {
 
   describe('modify', () => {
     describe('happy path', () => {
-      const { addSegment, segmentMap, updateSegment } = createVideoProtocolManager(protocol)
+      const { addSegment, segmentMap, updateSegment, curTime } = createVideoProtocolManager(protocol)
       const id1 = addSegment(segment)
+      curTime.value = 1000
       const id2 = addSegment(segment)
 
       it('modify basic info', () => {
@@ -408,6 +428,7 @@ describe('frames segment', () => {
         updateSegment((segment) => {
           segment.endTime = 2000
         }, id1)
+
         expect(segmentMap.value[id1]?.endTime).toBe(2000)
         expect(segmentMap.value[id2]?.startTime).toBe(2000)
         expect(segmentMap.value[id2]?.endTime).toBe(4000)

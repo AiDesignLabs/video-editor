@@ -3,7 +3,7 @@ import type { DeepReadonly } from '@vue/reactivity'
 import { computed, reactive, ref, toRaw } from '@vue/reactivity'
 import { createValidator } from '../verify'
 import type { PartialByKeys } from './utils'
-import { clone, findInsertSegmentIndex, genRandomId } from './utils'
+import { clone, findInsertFramesSegmentIndex, findInsertSegmentIndex, genRandomId } from './utils'
 import { useHistory } from './immer'
 import { checkSegment, handleSegmentUpdate } from './segment'
 
@@ -35,13 +35,26 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
   }
 
   const addFramesSegment = (framesSegment: TrackTypeMapSegment['frames'], track: TrackTypeMapTrack['frames']) => {
-    let insertIndex = track.children.findIndex(segment => segment.startTime < curTime.value && curTime.value <= segment.endTime)
-    if (insertIndex === -1)
-      insertIndex = track.children.length - 1
-    const diff = track.children[insertIndex].endTime - framesSegment.startTime
-    framesSegment.startTime += diff
-    framesSegment.endTime += diff
-    track.children.splice(insertIndex + 1, 0, framesSegment)
+    const insertIndex = findInsertFramesSegmentIndex(track.children, curTime.value)
+
+    if (insertIndex === 0) {
+      framesSegment.endTime -= framesSegment.startTime
+      framesSegment.startTime = 0
+    }
+    else {
+      const prevSegment = track.children[insertIndex - 1]
+      framesSegment.endTime = prevSegment.endTime + (framesSegment.endTime - framesSegment.startTime)
+      framesSegment.startTime = prevSegment.endTime
+    }
+
+    track.children.splice(insertIndex, 0, framesSegment)
+
+    for (let j = insertIndex; j < track.children.length; j++) {
+      const segment = track.children[j]
+      const preSegmentEndTime = track.children[j - 1]?.endTime ?? 0
+      segment.endTime = preSegmentEndTime + (segment.endTime - segment.startTime)
+      segment.startTime = preSegmentEndTime
+    }
     return framesSegment.id
   }
 
