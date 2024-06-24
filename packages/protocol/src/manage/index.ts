@@ -70,6 +70,15 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     return _segment
   }
 
+  const getSegment = <T extends ITrackType>(id: SegmentUnion['id'], type?: T): DeepReadonly<TrackTypeMapSegment[T]> | undefined => {
+    const segment = segments.value[id]
+    if (segment && segment.segmentType === type)
+      return segment as DeepReadonly<TrackTypeMapSegment[T]>
+    else if (segment && !type)
+      return segment as any
+    return undefined
+  }
+
   const addSegment = (segment: PartialByKeys<TrackTypeMapSegment[ITrackType], 'id'>) => {
     const theSegment = normalizedSegment(segment)
 
@@ -122,13 +131,14 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     })
   }
 
-  function updateSegment(updater: (segment: SegmentUnion) => void, id?: string) {
+  function updateSegment<T extends ITrackType>(updater: (segment: TrackTypeMapSegment[T]) => void, id?: string, type?: T) {
     updateProtocol((protocol) => {
       const _id = id ?? selectedSegment.value?.id
       if (_id === undefined)
         return
       const segment = getTrackBySegmentId(_id, protocol)
-      if (segment)
+      if (segment && (!type || segment.segmentType === type))
+        // @ts-expect-error type is correct
         updater(segment)
     }, (patches, inversePatches, effect) => {
       effect((draft) => {
@@ -151,6 +161,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     selectedSegment,
     trackMap: tracks,
     segmentMap: segments,
+    getSegment,
     addSegment,
     removeSegment,
     updateSegment,
