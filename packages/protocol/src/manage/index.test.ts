@@ -1,4 +1,4 @@
-import type { IAudioSegment, IImageSegment, ITextSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
+import type { IAudioSegment, IEffectSegment, IImageSegment, ITextSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import { createVideoProtocolManager } from './index'
 
 const protocol: IVideoProtocol = {
@@ -908,6 +908,153 @@ describe('image segment', () => {
           segment.segmentType = 'text'
         }, id)
         expect(segmentMap.value[id]?.segmentType).toBe('image')
+      })
+    })
+  })
+})
+
+describe('effect segment', () => {
+  const segment: IEffectSegment = {
+    id: '1',
+    startTime: 0,
+    endTime: 1000,
+    segmentType: 'effect',
+    effectId: 'effectId',
+    name: 'effectName',
+  }
+
+  describe('add', () => {
+    const { addSegment, segmentMap, trackMap, curTime } = createVideoProtocolManager(protocol)
+
+    describe('happy path', () => {
+      it('add segment', () => {
+        const id = addSegment(segment)
+        expect(id).toBe('1')
+        expect(trackMap.value.effect).toHaveLength(1)
+        expect(segmentMap.value[id]?.id).toBe('1')
+        expect(trackMap.value.effect[0].children[0]).toEqual(segment)
+      })
+
+      it('add segment by current time', () => {
+        curTime.value = 1100
+        const id = addSegment(segment)
+        expect(segmentMap.value[id]?.startTime).toBe(1100)
+        expect(trackMap.value.effect).toHaveLength(1)
+        expect(trackMap.value.effect[0].children[0]).toEqual(segment)
+        expect(trackMap.value.effect[0].children[1]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
+      })
+
+      it('cross time', () => {
+        const id = addSegment(segment)
+        expect(segmentMap.value[id]?.startTime).toBe(1100)
+        expect(trackMap.value.effect).toHaveLength(2)
+        expect(trackMap.value.effect[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
+      })
+    })
+
+    describe('bad path', () => {
+      it('invalid segment', () => {
+        expect(() => addSegment(null as any)).toThrowError()
+        // addSegment({} as any)
+        expect(() => addSegment({} as any)).toThrowError()
+      })
+    })
+  })
+
+  describe('get', () => {
+    const { getSegment, addSegment, segmentMap, trackMap } = createVideoProtocolManager(protocol)
+    addSegment(segment)
+    it('get', () => {
+      expect(trackMap.value.effect).toHaveLength(1)
+      expect(trackMap.value.effect[0].children[0]).toEqual(segment)
+      expect(segmentMap.value['1']).toEqual(segment)
+      expect(getSegment('1', 'effect')).toEqual(segment)
+      expect(getSegment('1', 'effect')?.segmentType).toEqual('effect')
+      expect(getSegment('1', 'frames')).toBeUndefined()
+    })
+  })
+
+  describe('remove', () => {
+    const { addSegment, segmentMap, trackMap, removeSegment } = createVideoProtocolManager(protocol)
+    addSegment(segment)
+    it('exist id', () => {
+      expect(removeSegment('1')).toBe(true)
+      expect(segmentMap.value['1']).toBeUndefined()
+      expect(trackMap.value.effect).toBeUndefined()
+    })
+
+    it('not exist id', () => {
+      expect(removeSegment('not exist id')).toBe(false)
+    })
+  })
+
+  describe('modify', () => {
+    describe('happy path', () => {
+      const { curTime, getSegment, addSegment, segmentMap, updateSegment } = createVideoProtocolManager(protocol)
+      const id1 = addSegment(segment)
+      curTime.value = 1000
+      const id2 = addSegment(segment)
+      curTime.value = 2000
+      const id3 = addSegment(segment)
+
+      it('modify basic info', () => {
+        updateSegment((segment) => {
+          segment.effectId = 'effectId2'
+          segment.name = 'effectName2'
+        }, id1, 'effect')
+        expect(getSegment(id1, 'effect')?.effectId).toBe('effectId2')
+        expect(getSegment(id1, 'effect')?.name).toBe('effectName2')
+      })
+
+      describe('modify endTime', () => {
+        it('with last segment', () => {
+          updateSegment((segment) => {
+            segment.endTime = 4000
+          }, id3)
+          expect(segmentMap.value[id1]?.startTime).toBe(0)
+          expect(segmentMap.value[id1]?.endTime).toBe(1000)
+          expect(segmentMap.value[id2]?.startTime).toBe(1000)
+          expect(segmentMap.value[id2]?.endTime).toBe(2000)
+          expect(segmentMap.value[id3]?.startTime).toBe(2000)
+          expect(segmentMap.value[id3]?.endTime).toBe(4000)
+        })
+
+        it('with middle segment', () => {
+          updateSegment((segment) => {
+            segment.endTime = 2000
+          }, id1)
+          expect(segmentMap.value[id1]?.startTime).toBe(0)
+          expect(segmentMap.value[id1]?.endTime).toBe(2000)
+          expect(segmentMap.value[id2]?.startTime).toBe(2000)
+          expect(segmentMap.value[id2]?.endTime).toBe(3000)
+          expect(segmentMap.value[id3]?.startTime).toBe(3000)
+          expect(segmentMap.value[id3]?.endTime).toBe(5000)
+        })
+      })
+    })
+
+    describe('bad path', () => {
+      const { addSegment, updateSegment, segmentMap, undoCount } = createVideoProtocolManager(protocol)
+      const id = addSegment(segment)
+
+      expect(undoCount.value).toBe(1)
+
+      it('invalid url', () => {
+        updateSegment((segment) => {
+          segment.url = 'invalid url'
+        }, id)
+        expect(segmentMap.value[id]?.url).toBeUndefined()
+      })
+
+      it('modify segmentType', () => {
+        updateSegment((segment) => {
+          // @ts-expect-error test error type
+          segment.segmentType = 'invalid segmentType'
+        }, id)
+        updateSegment((segment) => {
+          segment.segmentType = 'text'
+        }, id)
+        expect(segmentMap.value[id]?.segmentType).toBe('effect')
       })
     })
   })
