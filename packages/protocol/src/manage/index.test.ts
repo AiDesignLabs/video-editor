@@ -1,4 +1,4 @@
-import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageSegment, ITextSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
+import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageSegment, ITextSegment, ITransition, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import { createVideoProtocolManager } from './index'
 
 const protocol: IVideoProtocol = {
@@ -1192,6 +1192,146 @@ describe('filter segment', () => {
         }, id)
         expect(segmentMap.value[id]?.url).toBeUndefined()
       })
+    })
+  })
+})
+
+describe('transition', () => {
+  const transition: ITransition = {
+    id: '1',
+    name: 'transitionName',
+    duration: 1000,
+  }
+
+  const videoSegment: IFramesSegmentUnion = {
+    id: '1',
+    startTime: 0,
+    endTime: 1000,
+    segmentType: 'frames',
+    type: 'video',
+    url: 'http://example.com/video.mp4',
+  }
+
+  describe('add', () => {
+    describe('happy path', () => {
+      const { addSegment, curTime, addTransition, getSegment } = createVideoProtocolManager(protocol)
+      const id1 = addSegment(videoSegment)
+      curTime.value = 1000
+      const id2 = addSegment(videoSegment)
+      curTime.value = 2000
+      const id3 = addSegment(videoSegment)
+
+      it('add transition with left half time', () => {
+        const added = addTransition(transition, 1100)
+        expect(added).toBe(true)
+        expect(getSegment(id1, 'frames')?.transitionIn).toEqual(transition)
+        expect(getSegment(id2, 'frames')?.transitionOut).toEqual(transition)
+        expect(getSegment(id3, 'frames')?.transitionOut).toBeUndefined()
+      })
+
+      it('add transition with right half time', () => {
+        curTime.value = 1501
+        const added = addTransition(transition)
+        expect(added).toBe(true)
+        expect(getSegment(id1, 'frames')?.transitionIn).toEqual(transition)
+        expect(getSegment(id2, 'frames')?.transitionOut).toEqual(transition)
+        expect(getSegment(id2, 'frames')?.transitionIn).toEqual(transition)
+        expect(getSegment(id3, 'frames')?.transitionOut).toEqual(transition)
+      })
+    })
+
+    describe('bad path', () => {
+      it('frame segment length less than 2', () => {
+        const { addSegment, addTransition } = createVideoProtocolManager(protocol)
+        expect(addTransition(transition, 0)).toBe(false)
+        addSegment(videoSegment)
+        expect(addTransition(transition, 0)).toBe(false)
+      })
+
+      it('cross first segment left half time', () => {
+        const { addSegment, addTransition, curTime, getSegment } = createVideoProtocolManager(protocol)
+        const id1 = addSegment(videoSegment)
+        curTime.value = 1000
+        const id2 = addSegment(videoSegment)
+        expect(addTransition(transition, 0)).toBe(true)
+        expect(getSegment(id1, 'frames')?.transitionIn).toEqual(transition)
+        expect(getSegment(id2, 'frames')?.transitionOut).toEqual(transition)
+      })
+
+      it('cross last segment right half time', () => {
+        const { addSegment, addTransition, curTime, getSegment } = createVideoProtocolManager(protocol)
+        const id1 = addSegment(videoSegment)
+        curTime.value = 1000
+        const id2 = addSegment(videoSegment)
+        expect(addTransition(transition, 2000)).toBe(true)
+        expect(getSegment(id1, 'frames')?.transitionIn).toEqual(transition)
+        expect(getSegment(id2, 'frames')?.transitionOut).toEqual(transition)
+      })
+
+      it('invalid transition', () => {
+        const { addSegment, addTransition, curTime, getSegment } = createVideoProtocolManager(protocol)
+        const id1 = addSegment(videoSegment)
+        curTime.value = 1000
+        const id2 = addSegment(videoSegment)
+        expect(addTransition({} as any)).toBe(true)
+        expect(getSegment(id1, 'frames')?.transitionIn).toBeUndefined()
+        expect(getSegment(id2, 'frames')?.transitionOut).toBeUndefined()
+      })
+    })
+  })
+
+  describe('get', () => {
+    const { addSegment, addTransition, getSegment, curTime } = createVideoProtocolManager(protocol)
+    const id1 = addSegment(videoSegment)
+    curTime.value = 501
+    const id2 = addSegment(videoSegment)
+    addTransition(transition)
+
+    it('get', () => {
+      expect(getSegment(id1, 'frames')?.transitionIn).toEqual(transition)
+      expect(getSegment(id2, 'frames')?.transitionOut).toEqual(transition)
+    })
+  })
+
+  describe('remove', () => {
+    const { addSegment, addTransition, removeTransition, getSegment, curTime } = createVideoProtocolManager(protocol)
+    const id1 = addSegment(videoSegment)
+    curTime.value = 501
+    const id2 = addSegment(videoSegment)
+    addTransition(transition)
+
+    it('exist id', () => {
+      expect(removeTransition(id1)).toBe(true)
+      expect(getSegment(id1, 'frames')?.transitionIn).toBeUndefined()
+      expect(getSegment(id2, 'frames')?.transitionOut).toBeUndefined()
+    })
+
+    it('not exist id', () => {
+      expect(removeTransition('not exist id')).toBe(false)
+    })
+  })
+
+  describe('modify', () => {
+    const { addSegment, addTransition, updateTransition, getSegment, curTime } = createVideoProtocolManager(protocol)
+    const id1 = addSegment(videoSegment)
+    curTime.value = 501
+    const id2 = addSegment(videoSegment)
+    addTransition(transition)
+
+    it('modify name', () => {
+      updateTransition(id1, (transition) => {
+        transition.name = 'transitionName2'
+      })
+      expect(getSegment(id1, 'frames')?.transitionIn?.name).toBe('transitionName2')
+      expect(getSegment(id2, 'frames')?.transitionOut?.name).toBe('transitionName2')
+    })
+
+    it('modify duration', () => {
+      updateTransition(id1, (transition) => {
+        transition.duration = 2000
+      })
+      expect(getSegment(id1, 'frames')?.transitionIn?.duration).toBe(2000)
+      expect(getSegment(id2, 'frames')?.transitionOut?.duration).toBe(2000)
     })
   })
 })

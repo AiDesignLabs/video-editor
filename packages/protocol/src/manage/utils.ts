@@ -21,6 +21,10 @@ export function findInsertSegmentIndex<T extends TrackTypeMapSegment[ITrackType]
   return nextIndex - 1
 }
 
+/**
+ * find the insert index of frames segment,
+ * cross time at right half time segment will be the next segment
+ */
 export function findInsertFramesSegmentIndex<T extends TrackTypeMapSegment['frames']>(arr: T[], curTime: number) {
   if (arr.length === 0)
     return 0

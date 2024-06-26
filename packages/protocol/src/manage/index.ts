@@ -1,4 +1,4 @@
-import type { ITrack, ITrackType, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
+import type { ITrack, ITrackType, ITransition, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
 import type { DeepReadonly } from '@vue/reactivity'
 import { computed, reactive, ref, toRaw } from '@vue/reactivity'
 import { createValidator } from '../verify'
@@ -154,6 +154,75 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     })
   }
 
+  const addTransition = (transition: ITransition, addTime?: number) => {
+    const mainTrack = tracks.value.frames?.find(track => track.trackType === 'frames' && track.isMain) as TrackTypeMapTrack['frames'] | undefined
+    if (!mainTrack || mainTrack.children.length < 2)
+      return false
+    const insertTime = Math.max(0, addTime ?? curTime.value)
+    let startSegmentIdx = findInsertFramesSegmentIndex(mainTrack.children, insertTime) - 1
+
+    // cross first segment left half time, or
+    // cross last segment right half time
+    startSegmentIdx = Math.min(Math.max(0, startSegmentIdx), mainTrack.children.length - 2)
+
+    // update transition
+    // slice handle error transition data
+    updateSegment((segment) => {
+      segment.transitionIn = clone(transition)
+    }, mainTrack.children[startSegmentIdx].id, 'frames')
+    updateSegment((segment) => {
+      segment.transitionOut = clone(transition)
+    }, mainTrack.children[startSegmentIdx + 1].id, 'frames')
+
+    return true
+  }
+
+  const removeTransition = (segmentId: string) => {
+    const mainTrack = tracks.value.frames?.find(track => track.trackType === 'frames' && track.isMain) as TrackTypeMapTrack['frames'] | undefined
+    if (!mainTrack)
+      return false
+    const idx = mainTrack.children.findIndex(segment => segment.id === segmentId)
+
+    if (idx === -1)
+      return false
+
+    // update transition
+    // slice handle error transition data
+    updateSegment((segment) => {
+      segment.transitionIn = undefined
+    }, mainTrack.children[idx].id, 'frames')
+    updateSegment((segment) => {
+      segment.transitionOut = undefined
+    }, mainTrack.children[idx + 1].id, 'frames')
+
+    return true
+  }
+
+  const updateTransition = (segmentId: string, updater: (transition: ITransition) => void) => {
+    const mainTrack = tracks.value.frames?.find(track => track.trackType === 'frames' && track.isMain) as TrackTypeMapTrack['frames'] | undefined
+    if (!mainTrack)
+      return false
+    const idx = mainTrack.children.findIndex(segment => segment.id === segmentId)
+
+    if (idx === -1)
+      return false
+
+    // update transition
+    // slice handle error transition data
+    updateSegment((segment) => {
+      if (!segment.transitionIn)
+        return
+      updater(segment.transitionIn)
+    }, mainTrack.children[idx].id, 'frames')
+    updateSegment((segment) => {
+      if (!segment.transitionOut)
+        return
+      updater(segment.transitionOut)
+    }, mainTrack.children[idx + 1].id, 'frames')
+
+    return true
+  }
+
   return {
     videoBasicInfo,
     curTime,
@@ -168,6 +237,9 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     exportProtocol,
     undoCount,
     redoCount,
+    addTransition,
+    removeTransition,
+    updateTransition,
   }
 }
 
