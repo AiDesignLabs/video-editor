@@ -1335,3 +1335,63 @@ describe('transition', () => {
     })
   })
 })
+
+describe('undo and redo', () => {
+  const { addSegment, segmentMap, undo, redo, undoCount, redoCount } = createVideoProtocolManager(protocol)
+  const segment: IFramesSegmentUnion = {
+    id: '1',
+    startTime: 0,
+    endTime: 1000,
+    segmentType: 'frames',
+    type: 'video',
+    url: 'http://example.com/video.mp4',
+  }
+  const id = addSegment(segment)
+
+  it('undo', () => {
+    expect(undoCount.value).toBe(1)
+    expect(redoCount.value).toBe(0)
+    expect(segmentMap.value[id]).toEqual(segment)
+    undo()
+    expect(segmentMap.value[id]).toBeUndefined()
+    expect(undoCount.value).toBe(0)
+    expect(redoCount.value).toBe(1)
+
+    undo()
+    expect(segmentMap.value[id]).toBeUndefined()
+    expect(undoCount.value).toBe(0)
+    expect(redoCount.value).toBe(1)
+  })
+
+  it('redo', () => {
+    expect(undoCount.value).toBe(0)
+    expect(redoCount.value).toBe(1)
+    expect(segmentMap.value[id]).toBeUndefined()
+    redo()
+    expect(segmentMap.value[id]).toEqual(segment)
+    expect(undoCount.value).toBe(1)
+    expect(redoCount.value).toBe(0)
+
+    redo()
+    expect(segmentMap.value[id]).toEqual(segment)
+    expect(undoCount.value).toBe(1)
+    expect(redoCount.value).toBe(0)
+  })
+
+  it('undo and redo', () => {
+    const id2 = addSegment(segment)
+    expect(undoCount.value).toBe(2)
+    expect(redoCount.value).toBe(0)
+    expect(segmentMap.value[id2]).toEqual({ ...segment, id: id2 })
+
+    undo()
+    expect(segmentMap.value[id2]).toBeUndefined()
+    expect(undoCount.value).toBe(1)
+    expect(redoCount.value).toBe(1)
+
+    const id3 = addSegment(segment)
+    expect(undoCount.value).toBe(2)
+    expect(redoCount.value).toBe(0)
+    expect(segmentMap.value[id3]).toEqual({ ...segment, id: id3 })
+  })
+})

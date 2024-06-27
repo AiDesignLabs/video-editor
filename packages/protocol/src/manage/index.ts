@@ -10,7 +10,7 @@ import { checkSegment, handleSegmentUpdate } from './segment'
 export function createVideoProtocolManager(protocol: IVideoProtocol) {
   const validator = createValidator()
 
-  const { videoBasicInfo, segments, tracks, updateProtocol, undo, exportProtocol, undoCount, redoCount } = normalizedProtocol(validator.verify(protocol))
+  const { videoBasicInfo, segments, tracks, updateProtocol, undo, redo, exportProtocol, undoCount, redoCount } = normalizedProtocol(validator.verify(protocol))
 
   const curTime = ref(0)
   const selectedSegmentId = ref<string>()
@@ -235,11 +235,14 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     removeSegment,
     updateSegment,
     exportProtocol,
-    undoCount,
-    redoCount,
     addTransition,
     removeTransition,
     updateTransition,
+
+    undo,
+    redo,
+    redoCount,
+    undoCount,
   }
 }
 
