@@ -21,7 +21,8 @@
     "types": [
       "node",
       "vite/client",
-      "vitest/globals"
+      "vitest/globals",
+      "@vitest/browser/providers/playwright"
     ],
     "allowJs": false,
     "strict": true,

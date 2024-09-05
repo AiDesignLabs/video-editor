@@ -67,5 +67,8 @@
     "toml",
     "gql",
     "graphql"
+  ],
+  "cSpell.words": [
+    "OPFS"
   ]
 }
