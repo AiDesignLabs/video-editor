@@ -22,7 +22,8 @@
       "node",
       "vite/client",
       "vitest/globals",
-      "@vitest/browser/providers/playwright"
+      "@vitest/browser/providers/playwright",
+      "./types/mp4box.d.ts"
     ],
     "allowJs": false,
     "strict": true,
