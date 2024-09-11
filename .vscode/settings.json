@@ -1,7 +1,9 @@
 {
+  // Enable the ESlint flat config support
+  "eslint.useFlatConfig": true,
   // Disable the default formatter, use eslint instead
   "prettier.enable": false,
-  "editor.formatOnSave": false,
+  "editor.formatOnSave": true,
   // Auto fix
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit",
@@ -11,53 +13,43 @@
   "eslint.rules.customizations": [
     {
       "rule": "style/*",
-      "severity": "off",
-      "fixable": true
+      "severity": "off"
     },
     {
       "rule": "format/*",
-      "severity": "off",
-      "fixable": true
+      "severity": "off"
     },
     {
       "rule": "*-indent",
-      "severity": "off",
-      "fixable": true
+      "severity": "off"
     },
     {
       "rule": "*-spacing",
-      "severity": "off",
-      "fixable": true
+      "severity": "off"
     },
     {
       "rule": "*-spaces",
-      "severity": "off",
-      "fixable": true
+      "severity": "off"
     },
     {
       "rule": "*-order",
-      "severity": "off",
-      "fixable": true
+      "severity": "off"
     },
     {
       "rule": "*-dangle",
-      "severity": "off",
-      "fixable": true
+      "severity": "off"
     },
     {
       "rule": "*-newline",
-      "severity": "off",
-      "fixable": true
+      "severity": "off"
     },
     {
       "rule": "*quotes",
-      "severity": "off",
-      "fixable": true
+      "severity": "off"
     },
     {
       "rule": "*semi",
-      "severity": "off",
-      "fixable": true
+      "severity": "off"
     }
   ],
   // Enable eslint for all supported languages
@@ -81,6 +73,12 @@
     "less",
     "scss",
     "pcss",
-    "postcss"
+    "postcss",
+    "gql",
+    "graphql"
+  ],
+  "cSpell.words": [
+    "OPFS",
+    "pixi"
   ]
 }

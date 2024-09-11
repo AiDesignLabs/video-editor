@@ -1,41 +1,43 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
-    "rootDir": ".",
-    "sourceMap": false,
     "composite": true,
-    "strictFunctionTypes": true,
     "target": "esnext",
-    "module": "esnext",
-    "moduleResolution": "node",
-    "allowJs": false,
-    "skipLibCheck": true,
-    "noUnusedLocals": true,
-    "strictNullChecks": true,
-    "noImplicitAny": true,
-    "noImplicitThis": true,
-    "noImplicitReturns": false,
-    "strict": true,
-    "isolatedModules": true,
-    "experimentalDecorators": true,
-    "resolveJsonModule": true,
-    "esModuleInterop": true,
-    "removeComments": false,
     "jsx": "preserve",
     "lib": [
       "esnext",
       "dom"
     ],
-    "types": [
-      "node",
-      "vite/client",
-      "vitest/globals"
-    ],
+    "experimentalDecorators": true,
+    "baseUrl": ".",
+    "rootDir": ".",
+    "module": "esnext",
+    "moduleResolution": "node",
     "paths": {
       "@video-editor/*": [
         "./packages/*/src/index.ts"
       ]
-    }
+    },
+    "resolveJsonModule": true,
+    "types": [
+      "node",
+      "vite/client",
+      "vitest/globals",
+      "@vitest/browser/providers/playwright",
+      "./types/mp4box.d.ts"
+    ],
+    "allowJs": false,
+    "strict": true,
+    "strictFunctionTypes": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": false,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "removeComments": false,
+    "sourceMap": false,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "skipLibCheck": true
   },
   "include": [
     "packages",

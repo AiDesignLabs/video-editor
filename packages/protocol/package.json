@@ -18,9 +18,19 @@
   "scripts": {
     "build:types": "vue-tsc --declaration --emitDeclarationOnly",
     "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:ui": "vitest",
+    "test": "vitest --run --browser.headless"
   },
-  "peerDependencies": {
-    "@vue/reactivity": "^3.4.19"
+  "dependencies": {
+    "@video-editor/shared": "workspace:*",
+    "@vue/reactivity": "^3.5.0",
+    "@webav/mp4box.js": "0.5.3-fenghen",
+    "ajv": "^8.17.1",
+    "ajv-errors": "^3.0.0",
+    "ajv-formats": "^2.1.1",
+    "ajv-keywords": "^5.1.0",
+    "immer": "^10.1.1",
+    "opfs-tools": "^0.6.1"
   }
 }

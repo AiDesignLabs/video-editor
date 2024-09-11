@@ -1,7 +1,6 @@
 {
   "version": "0.0.1",
   "private": true,
-  "packageManager": "pnpm@8.15.3",
   "engines": {
     "node": ">=16.14"
   },
@@ -12,30 +11,34 @@
     "lint:fix": "pnpm run lint --fix",
     "check": "tsc --incremental --noEmit",
     "publish": "bumpp package.json packages/*/package.json --commit --push --tag && pnpm run build && pnpm -r publish",
-    "test": "pnpm -r run test:ci",
+    "test": "pnpm -r run test",
+    "test:protocol": "pnpm -C packages/protocol run test:ui",
     "preinstall": "npx only-allow pnpm",
     "postinstall": "npx simple-git-hooks",
-    "sizecheck": "npx vite-bundle-visualizer"
+    "sizecheck": "npx vite-bundle-visualizer",
+    "update:dependencies": "taze -r -w"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^0.38.6",
-    "@iconify-json/ri": "^1.1.19",
-    "@types/node": "^18.19.17",
+    "@antfu/eslint-config": "^2.27.3",
+    "@iconify-json/ri": "^1.2.0",
+    "@types/node": "^18.19.48",
     "@unocss/reset": "^0.51.13",
     "@vitejs/plugin-vue": "^4.6.2",
-    "@vueuse/core": "^10.8.0",
-    "bumpp": "^9.3.0",
+    "@vitest/browser": "^2.0.5",
+    "@vueuse/core": "^10.11.1",
+    "bumpp": "^9.5.2",
     "chalk": "^5.3.0",
-    "eslint": "^8.56.0",
-    "lint-staged": "^15.2.2",
-    "simple-git-hooks": "^2.9.0",
-    "typescript": "^4.9.5",
+    "eslint": "^8.57.0",
+    "lint-staged": "^15.2.10",
+    "playwright": "^1.46.1",
+    "simple-git-hooks": "^2.11.1",
+    "typescript": "^5.5.4",
     "unocss": "^0.51.13",
-    "unplugin-auto-import": "^0.17.5",
-    "vite": "^4.5.2",
+    "unplugin-auto-import": "^0.17.8",
+    "vite": "^5.4.2",
     "vite-plugin-dts": "^2.3.0",
-    "vitest": "^1.3.1",
-    "vue": "^3.4.19",
+    "vitest": "^2.0.5",
+    "vue": "^3.5.0",
     "vue-tsc": "^1.8.27"
   },
   "simple-git-hooks": {
@@ -44,11 +47,6 @@
     "pre-push": "pnpm run test"
   },
   "lint-staged": {
-    "*.{js,ts,tsx,vue,md}": [
-      "eslint --cache --fix"
-    ]
-  },
-  "eslintConfig": {
-    "extends": "@antfu"
+    "*": "eslint --fix"
   }
 }

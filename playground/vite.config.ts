@@ -12,7 +12,8 @@ export default defineConfig({
         presetAttributify({ /* preset options */ }),
         presetUno(),
       ],
-    })],
+    }),
+  ],
   server: {
     open: true,
   },
