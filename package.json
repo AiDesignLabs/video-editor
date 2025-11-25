@@ -25,6 +25,7 @@
     "@unocss/reset": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
     "@vitest/browser": "catalog:",
+    "@vitest/browser-playwright": "^4.0.13",
     "@vueuse/core": "catalog:",
     "@wendraw/starry": "0.0.4-beta.1",
     "bumpp": "catalog:",
