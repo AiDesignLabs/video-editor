@@ -1,4 +1,3 @@
-export default () => {
-  // eslint-disable-next-line no-console
-  console.log('video-editor-renderer')
-}
+export { createApp as create2dApp } from './2d'
+export { createRenderer } from './src/index'
+export type { Renderer, RendererOptions } from './src/index'

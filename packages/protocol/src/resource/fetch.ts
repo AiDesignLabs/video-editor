@@ -1,6 +1,6 @@
 import type { MP4ArrayBuffer, MP4File, MP4Info, MP4Sample } from '@webav/mp4box.js'
-import mp4box from '@webav/mp4box.js'
 import type { file as OPFSFile } from 'opfs-tools'
+import mp4box from '@webav/mp4box.js'
 
 export type OPFSToolFile = ReturnType<typeof OPFSFile>
 

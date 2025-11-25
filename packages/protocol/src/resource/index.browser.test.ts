@@ -1,5 +1,5 @@
-import { getResourceType } from './fetch'
 import { createResourceManager } from '.'
+import { getResourceType } from './fetch'
 
 describe('resource manager', () => {
   const manager = createResourceManager()
