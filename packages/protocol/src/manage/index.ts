@@ -1,11 +1,11 @@
 import type { ITrack, ITrackType, ITransition, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
 import type { DeepReadonly } from '@vue/reactivity'
+import type { PartialByKeys } from './utils'
 import { computed, reactive, ref, toRaw } from '@vue/reactivity'
 import { createValidator } from '../verify'
-import type { PartialByKeys } from './utils'
-import { clone, findInsertFramesSegmentIndex, findInsertSegmentIndex, genRandomId } from './utils'
 import { useHistory } from './immer'
 import { checkSegment, handleSegmentUpdate } from './segment'
+import { clone, findInsertFramesSegmentIndex, findInsertSegmentIndex, genRandomId } from './utils'
 
 export function createVideoProtocolManager(protocol: IVideoProtocol) {
   const validator = createValidator()
@@ -85,7 +85,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     try {
       validator.verifySegment(theSegment)
     }
-    catch (error) {
+    catch {
       throw new Error('invalid segment data')
     }
 

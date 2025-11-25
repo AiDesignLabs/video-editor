@@ -11,7 +11,7 @@ const parse: parseFn = (videoProtocolStr) => {
   try {
     o = compile(videoProtocolStr)
   }
-  catch (error) {
+  catch {
     throw new Error('invalid protocol', { cause: videoProtocolStr })
   }
 

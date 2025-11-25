@@ -11,7 +11,7 @@
     "baseUrl": ".",
     "rootDir": ".",
     "module": "esnext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "paths": {
       "@video-editor/*": [
         "./packages/*/src/index.ts"
@@ -22,7 +22,6 @@
       "node",
       "vite/client",
       "vitest/globals",
-      "@vitest/browser/providers/playwright",
       "./types/mp4box.d.ts"
     ],
     "allowJs": false,

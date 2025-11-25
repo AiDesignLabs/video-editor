@@ -1,8 +1,8 @@
 import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageSegment, ITextSegment, ITrackType, IVideoProtocol } from '@video-editor/shared'
 import Ajv from 'ajv'
 import ajvErrors from 'ajv-errors'
-import ajvKeywords from 'ajv-keywords'
 import ajvFormats from 'ajv-formats'
+import ajvKeywords from 'ajv-keywords'
 import { audioSegmentRule, effectSegmentRule, filterSegmentRule, framesSegmentRule, imageSegmentRule, textSegmentRule, trackRule, videoProtocolBasicRule } from './rules'
 
 export const DUPLICATE_SEGMENT_ID = 'duplicate segment id'

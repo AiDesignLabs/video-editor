@@ -1,6 +1,6 @@
 import type { ComputedRef, Ref } from '@vue/reactivity'
-import { computed, ref, shallowRef } from '@vue/reactivity'
 import type { Patch } from 'immer'
+import { computed, ref, shallowRef } from '@vue/reactivity'
 import { applyPatches, enableMapSet, enablePatches, produceWithPatches } from 'immer'
 
 enablePatches()
@@ -25,7 +25,8 @@ type UpdaterFn<T> = <R>(
     /**
      * effect update state with out history
      */
-    effect: (updater: (draft: T) => void) => void) => void,
+    effect: (updater: (draft: T) => void) => void,
+  ) => void,
 ) => R
 export function useHistory<T>(baseState: T): {
   state: Ref<T>

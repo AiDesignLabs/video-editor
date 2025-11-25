@@ -54,7 +54,7 @@ export function checkSegment(patches: Patch[], inversePatches: Patch[], draft: I
     try {
       validator.verifySegment(segment)
     }
-    catch (error) {
+    catch {
       // undo the update
       // @ts-expect-error type is correct
       segment[attr] = inversePatches[i].value

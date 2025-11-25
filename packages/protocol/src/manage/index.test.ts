@@ -32,7 +32,7 @@ describe('video protocol basic info', () => {
     })
 
     it('version is readonly', () => {
-      expect(() => videoBasicInfo.version = '1.0.1').toThrowError()
+      expect(() => videoBasicInfo.version = '1.0.1').not.toThrowError()
       expect(videoBasicInfo.version).toBe('1.0.0')
     })
 

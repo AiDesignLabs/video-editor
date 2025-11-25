@@ -16,11 +16,18 @@
     "dist"
   ],
   "scripts": {
-    "build:types": "vue-tsc --declaration --emitDeclarationOnly",
     "build": "vue-tsc --noEmit && vite build",
+    "build:types": "vue-tsc --declaration --emitDeclarationOnly",
     "preview": "vite preview"
   },
   "peerDependencies": {
     "@vue/reactivity": "^3.4.19"
+  },
+  "dependencies": {
+    "@video-editor/protocol": "workspace:*",
+    "@video-editor/shared": "workspace:*",
+    "@webav/av-cliper": "catalog:",
+    "opfs-tools": "catalog:",
+    "pixi.js": "catalog:"
   }
 }

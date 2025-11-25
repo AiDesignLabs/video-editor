@@ -65,10 +65,20 @@
     "jsonc",
     "yaml",
     "toml",
+    "xml",
+    "gql",
+    "graphql",
+    "astro",
+    "css",
+    "less",
+    "scss",
+    "pcss",
+    "postcss",
     "gql",
     "graphql"
   ],
   "cSpell.words": [
-    "OPFS"
+    "OPFS",
+    "pixi"
   ]
 }

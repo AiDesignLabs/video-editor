@@ -24,13 +24,13 @@
   },
   "dependencies": {
     "@video-editor/shared": "workspace:*",
-    "@vue/reactivity": "^3.5.0",
-    "@webav/mp4box.js": "0.5.3-fenghen",
-    "ajv": "^8.17.1",
-    "ajv-errors": "^3.0.0",
-    "ajv-formats": "^2.1.1",
-    "ajv-keywords": "^5.1.0",
-    "immer": "^10.1.1",
-    "opfs-tools": "^0.6.1"
+    "@vue/reactivity": "catalog:",
+    "@webav/mp4box.js": "catalog:",
+    "ajv": "catalog:",
+    "ajv-errors": "catalog:",
+    "ajv-formats": "catalog:",
+    "ajv-keywords": "catalog:",
+    "immer": "catalog:",
+    "opfs-tools": "catalog:"
   }
 }
