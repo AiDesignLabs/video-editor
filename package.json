@@ -1,6 +1,6 @@
 {
   "name": "video-editor-monorepo",
-  "version": "0.0.0",
+  "version": "0.0.1-beta.1",
   "private": true,
   "engines": {
     "node": ">=16.14"
@@ -11,7 +11,7 @@
     "lint": "eslint --cache .",
     "lint:fix": "pnpm run lint --fix",
     "check": "tsc --incremental --noEmit",
-    "publish": "bumpp package.json packages/*/package.json --commit --push --tag && pnpm run build && pnpm -r publish",
+    "publish": "bumpp package.json packages/*/package.json --commit --push --tag && pnpm run build && pnpm publish -r --access public --no-git-checks",
     "test": "pnpm -r run test",
     "test:protocol": "pnpm -C packages/protocol run test:ui",
     "preinstall": "npx only-allow pnpm",
