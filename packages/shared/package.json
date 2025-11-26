@@ -1,8 +1,7 @@
 {
   "name": "@video-editor/shared",
   "type": "module",
-  "version": "0.0.2-beta.1",
-  "private": true,
+  "version": "0.0.0",
   "description": "video editor shared libs",
   "author": "",
   "license": "ISC",
@@ -21,6 +20,6 @@
     "dist"
   ],
   "scripts": {
-    "build": "vite build"
+    "build": "vite build --config vite.config.ts"
   }
 }

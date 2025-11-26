@@ -1,7 +1,7 @@
 {
   "name": "@video-editor/plugins",
   "type": "module",
-  "version": "0.0.2-beta.1",
+  "version": "0.0.0",
   "private": true,
   "exports": {
     ".": {
@@ -11,13 +11,13 @@
   },
   "main": "dist/index.js",
   "module": "dist/index.js",
-  "types": "types/index.d.ts",
+  "types": "dist/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
     "build:types": "vue-tsc --declaration --emitDeclarationOnly",
-    "build": "vite build",
+    "build": "vite build --config vite.config.ts",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -5,9 +5,12 @@ import dts from 'vite-plugin-dts'
 export default defineConfig({
   plugins: [
     dts({
+      tsconfigPath: './tsconfig.build.json',
+      include: ['src'],
+      outDir: 'dist',
       insertTypesEntry: true,
+      rollupTypes: true,
       copyDtsFiles: false,
-      include: ['src/**/*'],
     }),
   ],
   build: {
