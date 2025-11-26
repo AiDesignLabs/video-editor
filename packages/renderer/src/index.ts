@@ -15,7 +15,7 @@ import {
 import { MP4Clip } from '@webav/av-cliper'
 import { file as opfsFile } from 'opfs-tools'
 import { Container, Sprite, Texture } from 'pixi.js'
-import { createApp as create2dApp } from '../2d'
+import { createApp as create2dApp } from './2d'
 import {
   applyDisplayProps,
   clamp,

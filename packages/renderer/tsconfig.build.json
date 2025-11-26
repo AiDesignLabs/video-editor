@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "composite": false,
+    "rootDir": ".",
+    "paths": {},
+    "types": [
+      "node",
+      "vite/client"
+    ]
+  },
+  "include": [
+    "src",
+    "2d"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "dist"
+  ]
+}

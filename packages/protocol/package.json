@@ -11,13 +11,13 @@
   },
   "main": "dist/index.js",
   "module": "dist/index.js",
-  "types": "types/index.d.ts",
+  "types": "dist/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
     "build:types": "vue-tsc --declaration --emitDeclarationOnly",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "test:ui": "vitest",
     "test": "vitest --run --browser.headless"

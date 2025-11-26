@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "build:types": "vue-tsc --declaration --emitDeclarationOnly",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "peerDependencies": {

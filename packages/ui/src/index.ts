@@ -11,7 +11,8 @@ export { Button, Text }
 
 export default {
   install(app: App): void {
-    app.component(Button.name, Button)
-    app.component(Text.name, Text)
+    // Vue SFC name is optional; fall back to explicit strings to satisfy typings.
+    app.component(Button.name || 'VeButton', Button)
+    app.component(Text.name || 'VeText', Text)
   },
 }
