@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import type { ApplicationOptions } from 'pixi.js'
 import { Application } from 'pixi.js'
 

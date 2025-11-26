@@ -8,12 +8,22 @@ import { defineConfig } from 'vitest/config'
 const browserProvider = playwright() as BrowserProviderOption
 
 export default defineConfig({
-  plugins: [vue(), dts()],
+  plugins: [
+    vue(),
+    dts({
+      tsconfigPath: './tsconfig.build.json',
+      include: ['src', '../../types/mp4box.d.ts'],
+      outDir: 'dist',
+      insertTypesEntry: true,
+      rollupTypes: true,
+      copyDtsFiles: false,
+    }),
+  ],
   build: {
     lib: {
       entry: fileURLToPath(new URL('./src/index.ts', import.meta.url)),
       formats: ['es'],
-      fileName: 'videoEditorProtocol',
+      fileName: 'index',
     },
   },
   test: {
