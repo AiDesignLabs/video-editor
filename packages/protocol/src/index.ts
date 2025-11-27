@@ -1,6 +1,10 @@
 export { createVideoProtocolManager } from './manage'
 export { parse } from './parse'
-export { createResourceManager } from './resource'
+export {
+  createResourceManager,
+  DEFAULT_RESOURCE_DIR,
+  generateThumbnails,
+} from './resource'
 export {
   fileTo,
   fileToMP4Samples,

@@ -1,10 +1,9 @@
 import { dir as _dir, file as _file, write as _write } from 'opfs-tools'
+import { DEFAULT_RESOURCE_DIR } from './constants'
 import { fileTo, getResourceType } from './fetch'
 
-const ROOT_DIR = '/video-editor-res'
-
 export function createResourceManager(opts?: { dir?: string }) {
-  const { dir = ROOT_DIR } = opts || {}
+  const { dir = DEFAULT_RESOURCE_DIR } = opts || {}
 
   async function add(url: string) {
     if (await exists(url))
@@ -61,3 +60,6 @@ export function createResourceManager(opts?: { dir?: string }) {
     clear,
   }
 }
+
+export { DEFAULT_RESOURCE_DIR } from './constants'
+export { generateThumbnails } from './thumbnails'
