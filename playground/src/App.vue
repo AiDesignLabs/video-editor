@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Renderer } from '@video-editor/renderer'
-import type { IVideoProtocol } from '@video-editor/shared'
+import type { ITrack, IVideoProtocol } from '@video-editor/shared'
 import type { Ref } from 'vue'
 import { createRenderer } from '@video-editor/renderer'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
@@ -80,6 +80,13 @@ const protocol = reactive<IVideoProtocol>({
     },
   ],
 })
+
+const firstFrameSegment = computed(() => {
+  const framesTrack = protocol.tracks.find((track): track is ITrack<'frames'> => track.trackType === 'frames')
+  return framesTrack?.children[0]
+})
+
+const firstFrameLabel = computed(() => firstFrameSegment.value?.extra?.label)
 
 const canvasHost = ref<HTMLDivElement | null>(null)
 const renderer = shallowRef<Renderer | null>(null)
@@ -254,6 +261,7 @@ const formatMs = (val: number | Ref<number>) => `${(unref(val) / 1000).toFixed(2
           <span class="pill">Tracks: {{ protocol.tracks.length }}</span>
           <span class="pill">Clips: {{ clipCount }}</span>
           <span class="pill">FPS: {{ protocol.fps }}</span>
+          <span class="pill">Frame label: {{ firstFrameLabel }}</span>
         </div>
       </div>
       <div class="stat">

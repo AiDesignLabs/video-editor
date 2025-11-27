@@ -45,18 +45,11 @@ export type TrackUnion = TrackTypeMapTrack[ITrackType]
 export type SegmentUnion = TrackTypeMapSegment[ITrackType]
 
 // Allow consumers to attach typed custom data per segment type via module augmentation.
-export interface SegmentExtraRegistry {
-  frames: Record<string, unknown>
-  text: Record<string, unknown>
-  image: Record<string, unknown>
-  audio: Record<string, unknown>
-  effect: Record<string, unknown>
-  filter: Record<string, unknown>
-}
+export interface SegmentExtraRegistry {}
 
 export type SegmentExtra<T extends ITrackType> = T extends keyof SegmentExtraRegistry
   ? SegmentExtraRegistry[T]
-  : unknown
+  : Record<string, never>
 
 interface IFramesSegment extends ISegment<'frames'> {
   type: 'image' | 'video' | '3D'
