@@ -15,6 +15,11 @@ export const effectSegmentRule: JSONSchemaType<IEffectSegment> = {
     segmentType: { type: 'string', const: 'effect' },
     effectId: { type: 'string' },
     name: { type: 'string' },
+    extra: {
+      type: 'object',
+      nullable: true,
+      additionalProperties: true,
+    } as JSONSchemaType<IEffectSegment>['properties']['extra'],
   },
   required: ['id', 'startTime', 'endTime', 'effectId', 'name', 'segmentType'],
   errorMessage: {

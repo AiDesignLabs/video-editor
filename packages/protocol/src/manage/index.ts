@@ -1,7 +1,7 @@
 import type { ITrack, ITrackType, ITransition, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
 import type { DeepReadonly } from '@vue/reactivity'
 import type { PartialByKeys } from './utils'
-import { computed, reactive, ref, toRaw } from '@vue/reactivity'
+import { computed, reactive, readonly, ref, toRaw } from '@vue/reactivity'
 import { createValidator } from '../verify'
 import { useHistory } from './immer'
 import { checkSegment, handleSegmentUpdate } from './segment'
@@ -262,7 +262,7 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     const map: Record<string, DeepReadonly<SegmentUnion | undefined>> = {}
     for (const track of protocolState.value.tracks) {
       for (const segment of track.children)
-        map[segment.id] = segment
+        map[segment.id] = readonly(segment)
     }
 
     return map

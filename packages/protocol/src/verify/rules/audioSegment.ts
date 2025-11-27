@@ -18,6 +18,11 @@ export const audioSegmentRule: JSONSchemaType<IAudioSegment> = {
     playRate: { type: 'number', minimum: 0.1, maximum: 100, nullable: true },
     fadeInDuration: { type: 'number', minimum: 0, nullable: true },
     fadeOutDuration: { type: 'number', minimum: 0, nullable: true },
+    extra: {
+      type: 'object',
+      nullable: true,
+      additionalProperties: true,
+    } as JSONSchemaType<IAudioSegment>['properties']['extra'],
   },
   required: ['id', 'startTime', 'endTime', 'url', 'segmentType'],
   errorMessage: {

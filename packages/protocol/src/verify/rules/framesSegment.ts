@@ -36,6 +36,11 @@ export const framesSegmentRule: JSONSchemaType<IFramesSegmentUnion> = {
     transitionOut: { $ref: '#/definitions/ITransition' },
     palette: { $ref: '#/definitions/IPalette' },
     background: { type: 'string', pattern: '^rgba\\([0-9]+,[0-9]+,[0-9]+,[0-9]+\\)$', nullable: true },
+    extra: {
+      type: 'object',
+      nullable: true,
+      additionalProperties: true,
+    } as JSONSchemaType<IFramesSegmentUnion>['properties']['extra'],
   },
   required: ['id', 'startTime', 'endTime', 'type', 'url', 'segmentType'],
   if: { properties: { type: { const: 'image' } } },

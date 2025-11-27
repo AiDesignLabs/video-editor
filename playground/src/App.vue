@@ -32,6 +32,7 @@ const protocol = reactive<IVideoProtocol>({
           startTime: 0,
           endTime: 3000,
           opacity: 1,
+          extra: { aiTag: 'warm-start', confidence: 0.96, label: 'Clip A' },
         },
         {
           id: 'clip-b',
@@ -42,6 +43,7 @@ const protocol = reactive<IVideoProtocol>({
           startTime: 3000,
           endTime: 6000,
           opacity: 1,
+          extra: { aiTag: 'video-segment', confidence: 0.88, label: 'Clip B' },
         },
         {
           id: 'clip-c',
@@ -52,6 +54,7 @@ const protocol = reactive<IVideoProtocol>({
           startTime: 6000,
           endTime: 9000,
           opacity: 1,
+          extra: { aiTag: 'ending', confidence: 0.91, label: 'Clip C' },
         },
       ],
     },
@@ -71,6 +74,7 @@ const protocol = reactive<IVideoProtocol>({
             rotation: [0, 0, 0],
             scale: [1, 1, 1],
           },
+          extra: { author: 'demo-bot' },
         },
       ],
     },
@@ -228,6 +232,7 @@ function appendClip() {
     startTime: start,
     endTime: end,
     opacity: 0.95,
+    extra: { aiTag: 'appended', label: 'Clip D' },
   })
 }
 

@@ -29,6 +29,11 @@ export const textSegmentRule: JSONSchemaType<ITextSegment> = {
     transform: { $ref: '#/definitions/ITransform' },
     animation: { $ref: '#/definitions/IAnimation' },
     opacity: { type: 'number', minimum: 0, maximum: 1, nullable: true },
+    extra: {
+      type: 'object',
+      nullable: true,
+      additionalProperties: true,
+    } as JSONSchemaType<ITextSegment>['properties']['extra'],
   },
   required: ['id', 'startTime', 'endTime', 'texts', 'segmentType'],
   errorMessage: {

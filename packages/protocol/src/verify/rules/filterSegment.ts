@@ -16,6 +16,11 @@ export const filterSegmentRule: JSONSchemaType<IFilterSegment> = {
     filterId: { type: 'string' },
     name: { type: 'string' },
     intensity: { type: 'number', minimum: 0, maximum: 1, nullable: true },
+    extra: {
+      type: 'object',
+      nullable: true,
+      additionalProperties: true,
+    } as JSONSchemaType<IFilterSegment>['properties']['extra'],
   },
   required: ['id', 'startTime', 'endTime', 'filterId', 'name', 'segmentType'],
   errorMessage: {

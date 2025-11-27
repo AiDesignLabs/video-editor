@@ -26,6 +26,11 @@ export const imageSegmentRule: JSONSchemaType<IImageSegment> = {
     animation: { $ref: '#/definitions/IAnimation' },
     transform: { $ref: '#/definitions/ITransform' },
     palette: { $ref: '#/definitions/IPalette' },
+    extra: {
+      type: 'object',
+      nullable: true,
+      additionalProperties: true,
+    } as JSONSchemaType<IImageSegment>['properties']['extra'],
   },
   required: ['id', 'startTime', 'endTime', 'format', 'url', 'segmentType'],
   errorMessage: {
