@@ -17,11 +17,13 @@ const protocol = reactive<IVideoProtocol>({
   width: 1280,
   height: 720,
   fps: 30,
+  extra: { projectName: 'Playground Demo' },
   tracks: [
     {
       trackId: 'frames-track',
       trackType: 'frames',
       isMain: true,
+      extra: { trackOwner: 'demo-owner' },
       children: [
         {
           id: 'clip-a',
@@ -262,6 +264,7 @@ const formatMs = (val: number | Ref<number>) => `${(unref(val) / 1000).toFixed(2
           <span class="pill">Clips: {{ clipCount }}</span>
           <span class="pill">FPS: {{ protocol.fps }}</span>
           <span class="pill">Frame label: {{ firstFrameLabel }}</span>
+          <span class="pill">Project: {{ protocol.extra?.projectName ?? '未命名' }}</span>
         </div>
       </div>
       <div class="stat">

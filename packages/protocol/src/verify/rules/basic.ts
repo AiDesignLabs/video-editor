@@ -17,6 +17,7 @@ export const videoProtocolBasicRule: JSONSchemaType<Omit<IVideoProtocol, 'tracks
     height: { type: 'number', minimum: 0 },
     fps: { type: 'number', minimum: 1 },
     tracks: { type: 'array', items: { type: 'object' } },
+    extra: { type: 'object', nullable: true, additionalProperties: true } as JSONSchemaType<IVideoProtocol>['properties']['extra'],
   },
   required: ['version', 'width', 'height', 'fps', 'tracks'],
   errorMessage: {

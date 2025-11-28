@@ -11,4 +11,14 @@ declare module '@video-editor/shared' {
       author?: string
     }
   }
+
+  interface TrackExtraRegistry {
+    frames: {
+      trackOwner?: string
+    }
+  }
+
+  interface ProtocolExtraRegistry {
+    projectName?: string
+  }
 }

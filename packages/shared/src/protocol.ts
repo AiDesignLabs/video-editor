@@ -10,12 +10,14 @@ export interface IVideoProtocol {
   height: number
   fps: number
   tracks: TrackUnion[]
+  extra?: ProtocolExtra | null
 }
 
 export type ITrack<T extends ITrackType> = {
   trackId: string
   trackType: T
   children: TrackTypeMapSegment[T][]
+  extra?: TrackExtra<T> | null
 } & (T extends 'frames' ? {
   isMain?: boolean
 } : object)
@@ -48,8 +50,22 @@ export type SegmentUnion = TrackTypeMapSegment[ITrackType]
 export interface SegmentExtraRegistry {}
 
 export type SegmentExtra<T extends ITrackType> = T extends keyof SegmentExtraRegistry
-  ? SegmentExtraRegistry[T]
+  ? NonNullable<SegmentExtraRegistry[T]>
   : Record<string, never>
+
+// Allow consumers to attach typed custom data per track type via module augmentation.
+export interface TrackExtraRegistry {}
+
+export type TrackExtra<T extends ITrackType> = T extends keyof TrackExtraRegistry
+  ? NonNullable<TrackExtraRegistry[T]>
+  : Record<string, never>
+
+// Allow consumers to attach typed custom data to the root protocol via module augmentation.
+export interface ProtocolExtraRegistry {}
+
+export type ProtocolExtra = ProtocolExtraRegistry extends Record<string, never>
+  ? Record<string, never>
+  : NonNullable<ProtocolExtraRegistry>
 
 interface IFramesSegment extends ISegment<'frames'> {
   type: 'image' | 'video' | '3D'
