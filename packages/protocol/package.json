@@ -1,7 +1,7 @@
 {
   "name": "@video-editor/protocol",
   "type": "module",
-  "version": "0.0.1-beta.3",
+  "version": "0.0.1-beta.4",
   "exports": {
     ".": {
       "import": "./dist/index.js"
