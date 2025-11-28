@@ -5,6 +5,7 @@
  */
 
 export interface IVideoProtocol {
+  id: string
   version: `${number}.${number}.${number}`
   width: number
   height: number

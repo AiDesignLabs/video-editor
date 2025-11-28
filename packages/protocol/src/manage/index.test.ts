@@ -2,6 +2,7 @@ import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion
 import { createVideoProtocolManager } from './index'
 
 const protocol: IVideoProtocol = {
+  id: 'protocol-1',
   version: '1.0.0',
   width: 1920,
   height: 1080,
@@ -38,6 +39,7 @@ describe('video protocol basic info', () => {
 
     it('export', () => {
       expect(exportProtocol()).toEqual({
+        id: 'protocol-1',
         version: '1.0.0',
         width: 1280,
         height: 720,
@@ -280,6 +282,7 @@ describe('video protocol segment curd', () => {
       expect(insertId).toBe('1')
 
       expect(exportProtocol()).toEqual({
+        id: 'protocol-1',
         version: '1.0.0',
         width: 1920,
         height: 1080,

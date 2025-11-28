@@ -3,6 +3,7 @@ import { parse } from './index'
 
 it('parse valid protocol', () => {
   const videoProtocol: IVideoProtocol = {
+    id: 'video-001',
     version: '0.0.1',
     width: 500,
     height: 500,

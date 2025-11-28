@@ -4,7 +4,7 @@ import { generateMissingRequiredReg, generateTypeErrorPrefixReg, INVALID_ANIMATI
 
 describe('verify basic info of video protocol', () => {
   const { verifyBasic } = createValidator()
-  const videoProtocol = { version: '0.0.1', width: 500, height: 500, fps: 25, tracks: [] }
+  const videoProtocol = { id: 'vp-0', version: '0.0.1', width: 500, height: 500, fps: 25, tracks: [] }
   it('valid video protocol', () => {
     const o = verifyBasic(videoProtocol)
     expect(o).toEqual(videoProtocol)
@@ -22,33 +22,38 @@ describe('verify basic info of video protocol', () => {
     })
 
     describe('with missing attributes', () => {
+      it('missing id', () => {
+        const videoProtocol = { version: '0.0.1', width: 500, height: 500, fps: 25, tracks: [] }
+        expect(() => verifyBasic(videoProtocol)).toThrowError(generateMissingRequiredReg('id'))
+      })
+
       it('missing width', () => {
-        const videoProtocol = { version: '0.0.1', height: 500, fps: 25, tracks: [] }
+        const videoProtocol = { id: 'vp-0', version: '0.0.1', height: 500, fps: 25, tracks: [] }
         expect(() => verifyBasic(videoProtocol)).toThrowError(generateMissingRequiredReg('width'))
       })
 
       it('missing height', () => {
-        const videoProtocol = { version: '0.0.1', width: 500, fps: 25, tracks: [] }
+        const videoProtocol = { id: 'vp-0', version: '0.0.1', width: 500, fps: 25, tracks: [] }
         expect(() => verifyBasic(videoProtocol)).toThrowError(generateMissingRequiredReg('height'))
       })
 
       it('missing fps', () => {
-        const videoProtocol = { version: '0.0.1', width: 500, height: 500, tracks: [] }
+        const videoProtocol = { id: 'vp-0', version: '0.0.1', width: 500, height: 500, tracks: [] }
         expect(() => verifyBasic(videoProtocol)).toThrowError(generateMissingRequiredReg('fps'))
       })
 
       it('missing tracks', () => {
-        const videoProtocol = { version: '0.0.1', width: 500, height: 500, fps: 25 }
+        const videoProtocol = { id: 'vp-0', version: '0.0.1', width: 500, height: 500, fps: 25 }
         expect(() => verifyBasic(videoProtocol)).toThrowError(generateMissingRequiredReg('tracks'))
       })
 
       it('missing multiple attributes', () => {
-        const videoProtocol = { version: '0.0.1', width: 500 }
+        const videoProtocol = { id: 'vp-0', version: '0.0.1', width: 500 }
         expect(() => verifyBasic(videoProtocol)).toThrowError(generateMissingRequiredReg(['height', 'fps', 'tracks']))
       })
 
       it('missing all attributes', () => {
-        expect(() => verifyBasic({})).toThrowError(generateMissingRequiredReg(['version', 'height', 'width', 'fps', 'tracks']))
+        expect(() => verifyBasic({})).toThrowError(generateMissingRequiredReg(['id', 'version', 'height', 'width', 'fps', 'tracks']))
       })
     })
 
@@ -916,7 +921,7 @@ describe('verify track', () => {
 })
 
 describe('verify video protocol', () => {
-  const videoProtocol: IVideoProtocol = { version: '1.0.0', width: 1920, height: 1080, fps: 30, tracks: [] }
+  const videoProtocol: IVideoProtocol = { id: 'vp-verify', version: '1.0.0', width: 1920, height: 1080, fps: 30, tracks: [] }
   const framesSegment: IFramesSegmentUnion = { segmentType: 'frames', id: '1', startTime: 0, endTime: 500, type: 'image', format: 'img', url: 'https://example.com/image.png' }
   const textSegment: ITextSegment = { segmentType: 'text', id: '1', startTime: 0, endTime: 500, texts: [{ content: 'hello wendraw' }] }
   const imageSegment: IImageSegment = { segmentType: 'image', id: '1', startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png' }

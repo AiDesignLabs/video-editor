@@ -13,6 +13,7 @@ const swatches = {
 }
 
 const protocol = reactive<IVideoProtocol>({
+  id: 'demo-protocol',
   version: '1.0.0',
   width: 1280,
   height: 720,
