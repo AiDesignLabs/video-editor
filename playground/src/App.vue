@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Renderer } from '@video-editor/renderer'
-import type { IVideoProtocol } from '@video-editor/shared'
+import type { IFramesSegmentUnion, IVideoProtocol } from '@video-editor/shared'
 import type { Ref } from 'vue'
 import { createVideoProtocolManager, generateThumbnails } from '@video-editor/protocol'
 import { createRenderer } from '@video-editor/renderer'
