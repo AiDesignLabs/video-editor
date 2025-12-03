@@ -2,6 +2,7 @@
 import type { Renderer } from '@video-editor/renderer'
 import type { ITrack, IVideoProtocol } from '@video-editor/shared'
 import type { Ref } from 'vue'
+import { generateThumbnails } from '@video-editor/protocol'
 import { createRenderer } from '@video-editor/renderer'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 
@@ -93,6 +94,11 @@ const firstFrameLabel = computed(() => firstFrameSegment.value?.extra?.label)
 
 const canvasHost = ref<HTMLDivElement | null>(null)
 const renderer = shallowRef<Renderer | null>(null)
+const thumbnailsState = reactive({
+  items: [] as Array<{ tsMs: number, url: string }>,
+  loading: false,
+  error: null as string | null,
+})
 const scrub = ref(0)
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -119,6 +125,12 @@ const protocolPreview = computed(() => {
       })),
     })),
   }, null, 2)
+})
+
+const thumbnailSourceUrl = computed(() => {
+  const framesTrack = protocol.tracks.find((track): track is ITrack<'frames'> => track.trackType === 'frames')
+  const videoSegment = framesTrack?.children.find(segment => segment.segmentType === 'frames' && segment.type === 'video')
+  return videoSegment && 'url' in videoSegment ? videoSegment.url : swatches.video
 })
 
 onMounted(async () => {
@@ -149,6 +161,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   renderer.value?.destroy()
+  clearThumbnails()
 })
 
 watch(renderer, (instance, _, onCleanup) => {
@@ -246,6 +259,38 @@ function appendClip() {
   })
 }
 
+function clearThumbnails() {
+  // Release object URLs before replacing them to avoid leaking memory in the demo.
+  thumbnailsState.items.forEach(thumb => URL.revokeObjectURL(thumb.url))
+  thumbnailsState.items = []
+}
+
+async function runThumbnailDemo() {
+  thumbnailsState.error = null
+  thumbnailsState.loading = true
+  clearThumbnails()
+
+  try {
+    const shots = await generateThumbnails(thumbnailSourceUrl.value, {
+      imgWidth: 160,
+      start: 0,
+      end: 5_000_000,
+      step: 800_000,
+    })
+
+    thumbnailsState.items = shots.map(thumb => ({
+      tsMs: Math.round(thumb.ts / 1000),
+      url: URL.createObjectURL(thumb.img),
+    }))
+  }
+  catch (err) {
+    thumbnailsState.error = err instanceof Error ? err.message : String(err)
+  }
+  finally {
+    thumbnailsState.loading = false
+  }
+}
+
 const formatMs = (val: number | Ref<number>) => `${(unref(val) / 1000).toFixed(2)}s`
 </script>
 
@@ -331,6 +376,31 @@ const formatMs = (val: number | Ref<number>) => `${(unref(val) / 1000).toFixed(2
         <button class="btn" @click="appendClip">
           追加新片段
         </button>
+      </div>
+
+      <div class="thumbnails">
+        <div class="protocol__header">
+          <span>generateThumbnails 示例</span>
+          <span class="muted">基于 frames track 的视频片段</span>
+        </div>
+        <p class="muted">
+          源地址：<span class="mono">{{ thumbnailSourceUrl }}</span>
+        </p>
+        <div class="thumb-actions">
+          <button class="btn" :disabled="thumbnailsState.loading" @click="runThumbnailDemo">
+            {{ thumbnailsState.loading ? '生成中…' : '生成缩略图' }}
+          </button>
+          <span v-if="thumbnailsState.error" class="error-text">失败: {{ thumbnailsState.error }}</span>
+        </div>
+        <div v-if="thumbnailsState.items.length" class="thumbnail-grid">
+          <div v-for="thumb in thumbnailsState.items" :key="thumb.url" class="thumbnail-card">
+            <img :src="thumb.url" alt="thumbnail frame" loading="lazy">
+            <span>{{ (thumb.tsMs / 1000).toFixed(2) }}s</span>
+          </div>
+        </div>
+        <p v-else class="muted">
+          点击按钮调用 generateThumbnails，查看返回的 Blob 缩略图。
+        </p>
       </div>
 
       <div class="protocol">
