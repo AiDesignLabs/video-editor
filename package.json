@@ -1,6 +1,6 @@
 {
   "name": "video-editor-monorepo",
-  "version": "0.0.1-beta.5",
+  "version": "0.0.1-beta.6",
   "private": true,
   "engines": {
     "node": ">=16.14"
