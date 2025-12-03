@@ -174,6 +174,76 @@ describe('video protocol segment curd', () => {
       const insertId2 = addSegment(segment)
       expect(insertId2).not.toBe('1')
     })
+
+    it('normalizes unordered initial tracks before inserting frames segment', () => {
+      const unorderedProtocol: IVideoProtocol = {
+        id: 'unordered-protocol',
+        version: '1.0.0',
+        width: 1280,
+        height: 720,
+        fps: 30,
+        tracks: [
+          {
+            trackId: 'frames-track',
+            trackType: 'frames',
+            isMain: true,
+            children: [
+              {
+                id: 'clip-b',
+                segmentType: 'frames',
+                type: 'video',
+                url: 'http://example.com/clip-b.mp4',
+                startTime: 3000,
+                endTime: 6000,
+              },
+              {
+                id: 'clip-c',
+                segmentType: 'frames',
+                type: 'image',
+                format: 'img',
+                url: 'http://example.com/clip-c.png',
+                startTime: 6000,
+                endTime: 9000,
+              },
+              {
+                id: 'clip-a',
+                segmentType: 'frames',
+                type: 'image',
+                format: 'img',
+                url: 'http://example.com/clip-a.png',
+                startTime: 0,
+                endTime: 3000,
+              },
+            ],
+          },
+        ],
+      }
+
+      const { addSegment, trackMap, curTime } = createVideoProtocolManager(unorderedProtocol)
+      const initialMainTrack = trackMap.value.frames?.find(track => track.isMain)
+
+      expect(initialMainTrack?.children.map(segment => segment.id)).toEqual(['clip-a', 'clip-b', 'clip-c'])
+
+      curTime.value = initialMainTrack?.children.at(-1)?.endTime ?? 0
+      const newId = addSegment({
+        id: 'clip-d',
+        segmentType: 'frames',
+        type: 'image',
+        format: 'img',
+        url: 'http://example.com/clip-d.png',
+        startTime: 0,
+        endTime: 2000,
+      })
+
+      const framesTrack = trackMap.value.frames?.find(track => track.isMain)
+      expect(framesTrack?.children.map(segment => segment.id)).toEqual(['clip-a', 'clip-b', 'clip-c', newId])
+      expect(framesTrack?.children.map(({ startTime, endTime }) => [startTime, endTime])).toEqual([
+        [0, 3000],
+        [3000, 6000],
+        [6000, 9000],
+        [9000, 11000],
+      ])
+    })
   })
 
   it('remove segment', () => {

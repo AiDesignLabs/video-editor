@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { Renderer } from '@video-editor/renderer'
-import type { ITrack, IVideoProtocol } from '@video-editor/shared'
+import type { IVideoProtocol } from '@video-editor/shared'
 import type { Ref } from 'vue'
-import { generateThumbnails } from '@video-editor/protocol'
+import { createVideoProtocolManager, generateThumbnails } from '@video-editor/protocol'
 import { createRenderer } from '@video-editor/renderer'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 
@@ -13,7 +13,7 @@ const swatches = {
   extra: 'https://dummyimage.com/1280x720/22c55e/ffffff.png&text=Clip+D',
 }
 
-const protocol = reactive<IVideoProtocol>({
+const initialProtocol: IVideoProtocol = {
   id: 'demo-protocol',
   version: '1.0.0',
   width: 1280,
@@ -27,17 +27,6 @@ const protocol = reactive<IVideoProtocol>({
       isMain: true,
       extra: { trackOwner: 'demo-owner' },
       children: [
-        {
-          id: 'clip-a',
-          segmentType: 'frames',
-          type: 'image',
-          format: 'img',
-          url: swatches.primary,
-          startTime: 0,
-          endTime: 3000,
-          opacity: 1,
-          extra: { aiTag: 'warm-start', confidence: 0.96, label: 'Clip A' },
-        },
         {
           id: 'clip-b',
           segmentType: 'frames',
@@ -59,6 +48,17 @@ const protocol = reactive<IVideoProtocol>({
           endTime: 9000,
           opacity: 1,
           extra: { aiTag: 'ending', confidence: 0.91, label: 'Clip C' },
+        },
+        {
+          id: 'clip-a',
+          segmentType: 'frames',
+          type: 'image',
+          format: 'img',
+          url: swatches.primary,
+          startTime: 0,
+          endTime: 3000,
+          opacity: 1,
+          extra: { aiTag: 'warm-start', confidence: 0.96, label: 'Clip A' },
         },
       ],
     },
@@ -83,11 +83,21 @@ const protocol = reactive<IVideoProtocol>({
       ],
     },
   ],
+}
+
+const { curTime, exportProtocol, trackMap, addSegment, updateSegment } = createVideoProtocolManager(initialProtocol)
+const protocolRef = computed(() => clone(exportProtocol()))
+const protocol = reactive(protocolRef.value)
+watch(protocolRef, next => Object.assign(protocol, clone(next)), { immediate: true })
+const scrub = curTime
+
+const mainFramesTrack = computed(() => {
+  const framesTracks = trackMap.value.frames ?? []
+  return framesTracks.find(track => track.isMain) ?? framesTracks[0]
 })
 
 const firstFrameSegment = computed(() => {
-  const framesTrack = protocol.tracks.find((track): track is ITrack<'frames'> => track.trackType === 'frames')
-  return framesTrack?.children[0]
+  return mainFramesTrack.value?.children[0]
 })
 
 const firstFrameLabel = computed(() => firstFrameSegment.value?.extra?.label)
@@ -99,7 +109,6 @@ const thumbnailsState = reactive({
   loading: false,
   error: null as string | null,
 })
-const scrub = ref(0)
 const loading = ref(true)
 const error = ref<string | null>(null)
 const captionShifted = ref(false)
@@ -128,8 +137,7 @@ const protocolPreview = computed(() => {
 })
 
 const thumbnailSourceUrl = computed(() => {
-  const framesTrack = protocol.tracks.find((track): track is ITrack<'frames'> => track.trackType === 'frames')
-  const videoSegment = framesTrack?.children.find(segment => segment.segmentType === 'frames' && segment.type === 'video')
+  const videoSegment = mainFramesTrack.value?.children.find(segment => segment.segmentType === 'frames' && segment.type === 'video')
   return videoSegment && 'url' in videoSegment ? videoSegment.url : swatches.video
 })
 
@@ -208,55 +216,53 @@ function onScrub(event: Event) {
 }
 
 function swapMainClip() {
-  const framesTrack = protocol.tracks.find(track => track.trackType === 'frames')
-  if (!framesTrack)
+  const segmentId = firstFrameSegment.value?.id
+  if (!segmentId)
     return
-  const first = framesTrack.children[0]
-  if (first && 'url' in first) {
-    first.url = first.url === swatches.primary ? swatches.alt : swatches.primary
-  }
+
+  updateSegment((segment) => {
+    segment.url = segment.url === swatches.primary ? swatches.alt : swatches.primary
+  }, segmentId, 'frames')
 }
 
 function moveCaption() {
-  const textTrack = protocol.tracks.find(track => track.trackType === 'text')
-  const caption = textTrack?.children[0]
-  if (!caption)
+  const captionId = trackMap.value.text?.[0]?.children[0]?.id
+  if (!captionId)
     return
 
   const shiftBy = 1000
-  if (!captionShifted.value) {
-    caption.startTime = shiftBy
-    caption.endTime += shiftBy
-    caption.texts[0].content = '字幕后移 1 秒'
-  }
-  else {
-    caption.endTime -= caption.startTime
-    caption.startTime = 0
-    caption.texts[0].content = '字幕复位'
-  }
+  updateSegment((segment) => {
+    if (!captionShifted.value) {
+      segment.startTime = shiftBy
+      segment.endTime += shiftBy
+      segment.texts[0].content = '字幕后移 1 秒'
+    }
+    else {
+      segment.endTime -= segment.startTime
+      segment.startTime = 0
+      segment.texts[0].content = '字幕复位'
+    }
+  }, captionId, 'text')
   captionShifted.value = !captionShifted.value
 }
 
 function appendClip() {
-  const framesTrack = protocol.tracks.find(track => track.trackType === 'frames')
-  if (!framesTrack)
-    return
+  const lastEnd = mainFramesTrack.value?.children.at(-1)?.endTime ?? 0
+  const end = lastEnd + 2000
+  curTime.value = lastEnd
 
-  const lastEnd = framesTrack.children[framesTrack.children.length - 1]?.endTime ?? 0
-  const start = lastEnd
-  const end = start + 2000
-
-  framesTrack.children.push({
+  const seg: IFramesSegmentUnion = {
     id: `clip-${Date.now()}`,
     segmentType: 'frames',
     type: 'image',
     format: 'img',
     url: swatches.extra,
-    startTime: start,
-    endTime: end,
+    startTime: 0,
+    endTime: end - lastEnd,
     opacity: 0.95,
     extra: { aiTag: 'appended', label: 'Clip D' },
-  })
+  }
+  addSegment(seg)
 }
 
 function clearThumbnails() {

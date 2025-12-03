@@ -247,7 +247,8 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
 }
 
 function normalizedProtocol(protocol: IVideoProtocol) {
-  const { state: protocolState, update: updateProtocol, enable, redo, undo, undoCount, redoCount } = useHistory(clone(protocol))
+  const normalized = normalizeProtocolTracks(clone(protocol))
+  const { state: protocolState, update: updateProtocol, enable, redo, undo, undoCount, redoCount } = useHistory(normalized)
   enable()
 
   const videoBasicInfo = reactive({
@@ -299,6 +300,20 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     redoCount,
     exportProtocol,
   }
+}
+
+function normalizeProtocolTracks(protocol: IVideoProtocol) {
+  for (const track of protocol.tracks) {
+    track.children.sort((a, b) => {
+      if (a.startTime === b.startTime) {
+        if (a.endTime === b.endTime)
+          return a.id.localeCompare(b.id)
+        return a.endTime - b.endTime
+      }
+      return a.startTime - b.startTime
+    })
+  }
+  return protocol
 }
 
 function getTrackBySegmentId(segmentId: string, protocol: IVideoProtocol) {
