@@ -31,5 +31,4 @@ coverage
 auto-imports.d.ts
 components.d.ts
 
-pnpm-lock.yaml
 tsconfig.tsbuildinfo
