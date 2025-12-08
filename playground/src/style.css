@@ -138,6 +138,7 @@ h1 {
 .timeline {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .timeline input[type="range"] {
@@ -150,6 +151,14 @@ h1 {
   justify-content: space-between;
   color: #475569;
   font-size: 13px;
+}
+
+.timeline-meta {
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.6;
+  display: grid;
+  gap: 2px;
 }
 
 .controls {

@@ -4,7 +4,17 @@
     "incremental": false,
     "composite": false,
     "rootDir": "..",
-    "paths": {},
+    "paths": {
+      "@video-editor/ui": [
+        "./src/shims-video-editor-ui.d.ts"
+      ],
+      "@video-editor/ui/*": [
+        "./src/shims-video-editor-ui.d.ts"
+      ],
+      "@video-editor/*": [
+        "../packages/*/src/index.ts"
+      ]
+    },
     "typeRoots": [
       "../types",
       "../node_modules/@types"

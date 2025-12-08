@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { Renderer } from '@video-editor/renderer'
-import type { IFramesSegmentUnion, IVideoProtocol } from '@video-editor/shared'
+import type { IFramesSegmentUnion, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { Ref } from 'vue'
 import { createVideoProtocolManager, generateThumbnails } from '@video-editor/protocol'
 import { createRenderer } from '@video-editor/renderer'
+import { VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 
 const swatches = {
@@ -112,6 +113,8 @@ const thumbnailsState = reactive({
 const loading = ref(true)
 const error = ref<string | null>(null)
 const captionShifted = ref(false)
+const timelineZoom = ref<number | undefined>(undefined)
+const selectedSegmentId = ref<string | null>(null)
 
 const protocolDuration = computed(() => {
   const endTimes = protocol.tracks.flatMap(track => track.children.map(seg => seg.endTime))
@@ -208,11 +211,19 @@ function seekTo(time: number | Ref<number>) {
   scrub.value = next
 }
 
-function onScrub(event: Event) {
-  const target = event.target as HTMLInputElement
-  const next = Number(target.value)
-  scrub.value = next
+function handleTimelineCurrentTime(next: number) {
   seekTo(next)
+}
+
+function handleTimelineSegmentTiming(payload: { segment: SegmentUnion }) {
+  updateSegment((segment) => {
+    segment.startTime = payload.segment.startTime
+    segment.endTime = payload.segment.endTime
+  }, payload.segment.id, payload.segment.segmentType)
+}
+
+function handleTimelineSegmentClick(payload: { segment: SegmentUnion }) {
+  selectedSegmentId.value = payload.segment.id
 }
 
 function swapMainClip() {
@@ -344,17 +355,22 @@ const formatMs = (val: number | Ref<number>) => `${(unref(val) / 1000).toFixed(2
       </div>
 
       <div class="timeline">
-        <input
-          type="range"
-          :value="scrub"
-          min="0"
-          :max="Math.max(unref(durationMs), 1)"
-          step="16"
-          @input="onScrub"
-        >
-        <div class="timeline__labels">
-          <span>{{ formatMs(scrub) }}</span>
-          <span>{{ formatMs(durationMs) }}</span>
+        <VideoEditorTimeline
+          v-model:zoom="timelineZoom"
+          v-model:selected-segment-id="selectedSegmentId"
+          :protocol="protocol"
+          :current-time="currentTimeMs"
+          :track-types="['frames', 'text']"
+          @update:current-time="handleTimelineCurrentTime"
+          @segment-click="handleTimelineSegmentClick"
+          @segment-drag-end="handleTimelineSegmentTiming"
+          @segment-resize-end="handleTimelineSegmentTiming"
+        />
+        <div class="timeline-meta">
+          <div>时间轴使用 UI 包的默认 toolbar / ruler / playhead（主色 #222226）。</div>
+          <div class="muted">
+            点击 +/- 只会放大刻度与片段宽度，Pixi 预览画布不会缩放；需要自定义可通过 slots 覆盖。
+          </div>
         </div>
       </div>
 

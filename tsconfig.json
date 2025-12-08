@@ -21,8 +21,7 @@
     "types": [
       "node",
       "vite/client",
-      "vitest/globals",
-      "./types/mp4box.d.ts"
+      "vitest/globals"
     ],
     "allowJs": false,
     "strict": true,
@@ -40,7 +39,8 @@
   },
   "include": [
     "packages",
-    "playground"
+    "playground",
+    "types"
   ],
   "exclude": [
     "node_modules",
