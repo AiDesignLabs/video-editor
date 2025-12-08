@@ -278,7 +278,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   async function loadDisplay(segment: SegmentUnion): Promise<PixiDisplayObject | undefined> {
     // prioritize static resources via protocol resource manager
-    if (segment.segmentType === 'frames' || segment.segmentType === 'image') {
+    if (segment.segmentType === 'frames' || segment.segmentType === 'sticker') {
       if (!segment.url)
         return placeholder(segment.segmentType)
 

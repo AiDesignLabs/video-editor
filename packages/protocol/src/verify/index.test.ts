@@ -1,6 +1,6 @@
-import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageSegment, ITextSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
+import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IStickerSegment, ITextSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import { createValidator, DUPLICATE_SEGMENT_ID, DUPLICATE_TRACK_ID } from './index'
-import { generateMissingRequiredReg, generateTypeErrorPrefixReg, INVALID_ANIMATION_TYPE, INVALID_AUDIO_SEGMENT_TYPE, INVALID_EFFECT_SEGMENT_TYPE, INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FILTER_SEGMENT_TYPE, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FRAMES_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_IMAGE_SEGMENT_TYPE, INVALID_RGBA, INVALID_START_TIME, INVALID_TEXT_BASIC_ALIGN_TYPE, INVALID_TEXT_SEGMENT_TYPE, INVALID_TRACK_TYPE, INVALID_TRACKS, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_AUDIO_SEGMENT, TYPE_ERROR_EFFECT_SEGMENT, TYPE_ERROR_FILTER_SEGMENT, TYPE_ERROR_FRAMES_SEGMENT, TYPE_ERROR_IMAGE_SEGMENT, TYPE_ERROR_TEXT_SEGMENT, TYPE_ERROR_TRACK } from './rules'
+import { generateMissingRequiredReg, generateTypeErrorPrefixReg, INVALID_ANIMATION_TYPE, INVALID_AUDIO_SEGMENT_TYPE, INVALID_EFFECT_SEGMENT_TYPE, INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FILTER_SEGMENT_TYPE, INVALID_FPS, INVALID_FRAMES_SEGMENT_TYPE, INVALID_FRAMES_TYPE, INVALID_FROM_TIME, INVALID_HEIGHT, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_STICKER_SEGMENT_TYPE, INVALID_TEXT_BASIC_ALIGN_TYPE, INVALID_TEXT_SEGMENT_TYPE, INVALID_TRACK_TYPE, INVALID_TRACKS, INVALID_URL, INVALID_VERSION, INVALID_WIDTH, TYPE_ERROR_AUDIO_SEGMENT, TYPE_ERROR_EFFECT_SEGMENT, TYPE_ERROR_FILTER_SEGMENT, TYPE_ERROR_FRAMES_SEGMENT, TYPE_ERROR_STICKER_SEGMENT, TYPE_ERROR_TEXT_SEGMENT, TYPE_ERROR_TRACK } from './rules'
 
 describe('verify basic info of video protocol', () => {
   const { verifyBasic } = createValidator()
@@ -94,7 +94,7 @@ describe('verify basic info of video protocol', () => {
 })
 
 describe('verify segment of video protocol', () => {
-  const { verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment } = createValidator()
+  const { verifyFramesSegment, verifyTextSegment, verifyStickerSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment } = createValidator()
 
   describe('frames segment', () => {
     const videoFramesSegment: IVideoFramesSegment = { segmentType: 'frames', id: '1', startTime: 0, endTime: 500, type: 'video', url: 'https://example.com/video.mp4' }
@@ -430,121 +430,121 @@ describe('verify segment of video protocol', () => {
     })
   })
 
-  describe('image segment', () => {
-    const imageSegment: IImageSegment = { segmentType: 'image', id: '1', startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png' }
-    it('valid image segment', () => {
-      const o = verifyPhotoSegment(imageSegment)
-      expect(o).toEqual(imageSegment)
+  describe('sticker segment', () => {
+    const stickerSegment: IStickerSegment = { segmentType: 'sticker', id: '1', startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png' }
+    it('valid sticker segment', () => {
+      const o = verifyStickerSegment(stickerSegment)
+      expect(o).toEqual(stickerSegment)
     })
 
-    describe('invalid image segment', () => {
+    describe('invalid sticker segment', () => {
       it('with invalid object', () => {
         // @ts-expect-error test invalid object
-        expect(() => verifyPhotoSegment('')).toThrowError(TYPE_ERROR_IMAGE_SEGMENT)
+        expect(() => verifyStickerSegment('')).toThrowError(TYPE_ERROR_STICKER_SEGMENT)
         // @ts-expect-error test invalid object
-        expect(() => verifyPhotoSegment(1)).toThrowError(TYPE_ERROR_IMAGE_SEGMENT)
+        expect(() => verifyStickerSegment(1)).toThrowError(TYPE_ERROR_STICKER_SEGMENT)
         // @ts-expect-error test invalid object
-        expect(() => verifyPhotoSegment(null)).toThrowError(TYPE_ERROR_IMAGE_SEGMENT)
-        expect(() => verifyPhotoSegment([])).toThrowError(TYPE_ERROR_IMAGE_SEGMENT)
+        expect(() => verifyStickerSegment(null)).toThrowError(TYPE_ERROR_STICKER_SEGMENT)
+        expect(() => verifyStickerSegment([])).toThrowError(TYPE_ERROR_STICKER_SEGMENT)
       })
 
       describe('missing attributes', () => {
         it('missing id', () => {
-          const o = { startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png', segmentType: 'image' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg('id'))
+          const o = { startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png', segmentType: 'sticker' }
+          expect(() => verifyStickerSegment(o)).toThrowError(generateMissingRequiredReg('id'))
         })
 
         it('missing startTime', () => {
-          const o = { id: '1', endTime: 500, format: 'img', url: 'https://example.com/image.png', segmentType: 'image' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg('startTime'))
+          const o = { id: '1', endTime: 500, format: 'img', url: 'https://example.com/image.png', segmentType: 'sticker' }
+          expect(() => verifyStickerSegment(o)).toThrowError(generateMissingRequiredReg('startTime'))
         })
 
         it('missing endTime', () => {
-          const o = { id: '1', startTime: 0, format: 'img', url: 'https://example.com/image.png', segmentType: 'image' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg('endTime'))
+          const o = { id: '1', startTime: 0, format: 'img', url: 'https://example.com/image.png', segmentType: 'sticker' }
+          expect(() => verifyStickerSegment(o)).toThrowError(generateMissingRequiredReg('endTime'))
         })
 
         it('missing format', () => {
-          const o = { id: '1', startTime: 0, endTime: 500, url: 'https://example.com/image.png', segmentType: 'image' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg('format'))
+          const o = { id: '1', startTime: 0, endTime: 500, url: 'https://example.com/image.png', segmentType: 'sticker' }
+          expect(() => verifyStickerSegment(o)).toThrowError(generateMissingRequiredReg('format'))
         })
 
         it('missing url', () => {
-          const o = { id: '1', startTime: 0, endTime: 500, format: 'img', segmentType: 'image' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg('url'))
+          const o = { id: '1', startTime: 0, endTime: 500, format: 'img', segmentType: 'sticker' }
+          expect(() => verifyStickerSegment(o)).toThrowError(generateMissingRequiredReg('url'))
         })
 
         it('missing multiple attributes', () => {
           const o = { id: '1', startTime: 0, format: 'img' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'url', 'segmentType']))
+          expect(() => verifyStickerSegment(o)).toThrowError(generateMissingRequiredReg(['endTime', 'url', 'segmentType']))
         })
 
         it('missing all attributes', () => {
-          expect(() => verifyPhotoSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'format', 'url', 'segmentType']))
+          expect(() => verifyStickerSegment({})).toThrowError(generateMissingRequiredReg(['id', 'startTime', 'endTime', 'format', 'url', 'segmentType']))
         })
       })
 
       describe('invalid values', () => {
         it('invalid id', () => {
-          const o = { ...imageSegment, id: 1 }
-          expect(() => verifyPhotoSegment(o)).toThrowError(INVALID_ID)
+          const o = { ...stickerSegment, id: 1 }
+          expect(() => verifyStickerSegment(o)).toThrowError(INVALID_ID)
         })
 
         it('invalid startTime', () => {
-          const o = { ...imageSegment, startTime: -1 }
-          expect(() => verifyPhotoSegment(o)).toThrowError(INVALID_START_TIME)
+          const o = { ...stickerSegment, startTime: -1 }
+          expect(() => verifyStickerSegment(o)).toThrowError(INVALID_START_TIME)
         })
 
         it('invalid endTime', () => {
-          const o = { ...imageSegment, endTime: -1 }
-          expect(() => verifyPhotoSegment(o)).toThrowError(INVALID_END_TIME)
+          const o = { ...stickerSegment, endTime: -1 }
+          expect(() => verifyStickerSegment(o)).toThrowError(INVALID_END_TIME)
         })
 
         it('invalid url', () => {
-          const o = { ...imageSegment, url: 'invalid' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(INVALID_URL)
+          const o = { ...stickerSegment, url: 'invalid' }
+          expect(() => verifyStickerSegment(o)).toThrowError(INVALID_URL)
         })
 
         it('invalid format', () => {
-          const o = { ...imageSegment, format: 'invalid' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(INVALID_IMAGE_FORMAT)
+          const o = { ...stickerSegment, format: 'invalid' }
+          expect(() => verifyStickerSegment(o)).toThrowError(INVALID_IMAGE_FORMAT)
         })
 
         it('invalid type fillMode', () => {
-          const o = { ...imageSegment, fillMode: 'invalid' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(INVALID_FILL_MODE)
+          const o = { ...stickerSegment, fillMode: 'invalid' }
+          expect(() => verifyStickerSegment(o)).toThrowError(INVALID_FILL_MODE)
         })
 
         it('invalid type animation', () => {
-          const o = { ...imageSegment, type: 'video', animation: 'invalid' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(generateTypeErrorPrefixReg('/animation'))
-          const o1 = { ...imageSegment, type: 'video', animation: {} }
-          expect(() => verifyPhotoSegment(o1)).toThrowError(generateMissingRequiredReg(['id', 'name', 'type', 'duration'], { path: '/animation' }))
-          const o2 = { ...imageSegment, type: 'video', animation: { type: 'invalid', duration: 1000 } }
-          expect(() => verifyPhotoSegment(o2)).toThrowError(INVALID_ANIMATION_TYPE)
-          const o3 = { ...imageSegment, type: 'video', animation: { type: 'in', duration: -1 } }
-          expect(() => verifyPhotoSegment(o3)).toThrowError(generateTypeErrorPrefixReg('/animation/duration', '>= 0'))
+          const o = { ...stickerSegment, type: 'video', animation: 'invalid' }
+          expect(() => verifyStickerSegment(o)).toThrowError(generateTypeErrorPrefixReg('/animation'))
+          const o1 = { ...stickerSegment, type: 'video', animation: {} }
+          expect(() => verifyStickerSegment(o1)).toThrowError(generateMissingRequiredReg(['id', 'name', 'type', 'duration'], { path: '/animation' }))
+          const o2 = { ...stickerSegment, type: 'video', animation: { type: 'invalid', duration: 1000 } }
+          expect(() => verifyStickerSegment(o2)).toThrowError(INVALID_ANIMATION_TYPE)
+          const o3 = { ...stickerSegment, type: 'video', animation: { type: 'in', duration: -1 } }
+          expect(() => verifyStickerSegment(o3)).toThrowError(generateTypeErrorPrefixReg('/animation/duration', '>= 0'))
         })
 
         it('invalid type transform', () => {
-          const o = { ...imageSegment, transform: 'invalid' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(generateTypeErrorPrefixReg('/transform'))
-          const o1 = { ...imageSegment, type: 'video', transform: {} }
-          expect(() => verifyPhotoSegment(o1)).toThrowError(generateMissingRequiredReg(['position', 'rotation', 'scale'], { path: '/transform' }))
-          const o2 = { ...imageSegment, type: 'video', transform: { position: [2, 2, 2, 2] } }
+          const o = { ...stickerSegment, transform: 'invalid' }
+          expect(() => verifyStickerSegment(o)).toThrowError(generateTypeErrorPrefixReg('/transform'))
+          const o1 = { ...stickerSegment, type: 'video', transform: {} }
+          expect(() => verifyStickerSegment(o1)).toThrowError(generateMissingRequiredReg(['position', 'rotation', 'scale'], { path: '/transform' }))
+          const o2 = { ...stickerSegment, type: 'video', transform: { position: [2, 2, 2, 2] } }
           expect(() => verifyFramesSegment(o2)).toThrowError(generateMissingRequiredReg(['position', 'rotation', 'scale'], { path: '/transform', match: 'start' }))
         })
 
         it('invalid type palette', () => {
-          const o = { ...imageSegment, type: 'video', palette: 'invalid' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(generateTypeErrorPrefixReg('/palette'))
-          const o1 = { ...imageSegment, type: 'video', palette: {} }
-          expect(() => verifyPhotoSegment(o1)).toThrowError(generateMissingRequiredReg(['temperature', 'hue', 'saturation', 'brightness', 'contrast', 'shine', 'highlight', 'shadow', 'sharpness', 'vignette', 'fade', 'grain'], { path: '/palette' }))
+          const o = { ...stickerSegment, type: 'video', palette: 'invalid' }
+          expect(() => verifyStickerSegment(o)).toThrowError(generateTypeErrorPrefixReg('/palette'))
+          const o1 = { ...stickerSegment, type: 'video', palette: {} }
+          expect(() => verifyStickerSegment(o1)).toThrowError(generateMissingRequiredReg(['temperature', 'hue', 'saturation', 'brightness', 'contrast', 'shine', 'highlight', 'shadow', 'sharpness', 'vignette', 'fade', 'grain'], { path: '/palette' }))
         })
 
         it('invalid segmentType', () => {
-          const o = { ...imageSegment, segmentType: 'invalid' }
-          expect(() => verifyPhotoSegment(o)).toThrowError(INVALID_IMAGE_SEGMENT_TYPE)
+          const o = { ...stickerSegment, segmentType: 'invalid' }
+          expect(() => verifyStickerSegment(o)).toThrowError(INVALID_STICKER_SEGMENT_TYPE)
         })
       })
     })
@@ -924,7 +924,7 @@ describe('verify video protocol', () => {
   const videoProtocol: IVideoProtocol = { id: 'vp-verify', version: '1.0.0', width: 1920, height: 1080, fps: 30, tracks: [] }
   const framesSegment: IFramesSegmentUnion = { segmentType: 'frames', id: '1', startTime: 0, endTime: 500, type: 'image', format: 'img', url: 'https://example.com/image.png' }
   const textSegment: ITextSegment = { segmentType: 'text', id: '1', startTime: 0, endTime: 500, texts: [{ content: 'hello wendraw' }] }
-  const imageSegment: IImageSegment = { segmentType: 'image', id: '1', startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png' }
+  const stickerSegment: IStickerSegment = { segmentType: 'sticker', id: '1', startTime: 0, endTime: 500, format: 'img', url: 'https://example.com/image.png' }
   const audioSegment: IAudioSegment = { segmentType: 'audio', id: '1', startTime: 0, endTime: 500, url: 'https://example.com/audio.mp3' }
   const effectSegment: IEffectSegment = { segmentType: 'effect', id: '1', startTime: 0, endTime: 500, name: 'effect1', effectId: 'effect1Id' }
   const filterSegment: IFilterSegment = { segmentType: 'filter', id: '1', startTime: 0, endTime: 500, name: 'filter1', filterId: 'filter1Id' }
@@ -947,8 +947,8 @@ describe('verify video protocol', () => {
       expect(verify(o)).toEqual(o)
     })
 
-    it('with image segment', () => {
-      const o: IVideoProtocol = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'image', children: [imageSegment] }] }
+    it('with sticker segment', () => {
+      const o: IVideoProtocol = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'sticker', children: [stickerSegment] }] }
       expect(verify(o)).toEqual(o)
     })
 
@@ -984,8 +984,8 @@ describe('verify video protocol', () => {
       expect(() => verify(o)).toThrowError(generateTypeErrorPrefixReg('/texts', 'array'))
     })
 
-    it('with invalid image segment', () => {
-      const o = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'image', children: [{ ...imageSegment, format: 'invalid' }] }] }
+    it('with invalid sticker segment', () => {
+      const o = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'sticker', children: [{ ...stickerSegment, format: 'invalid' }] }] }
       expect(() => verify(o)).toThrowError(INVALID_IMAGE_FORMAT)
     })
 

@@ -1,18 +1,18 @@
-import type { IImageSegment } from '@video-editor/shared'
+import type { IStickerSegment } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
 import { INVALID_END_TIME, INVALID_FILL_MODE, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_START_TIME, INVALID_URL, TYPE_ERROR_PREFIX } from './common'
 import { commonAnimationDefs, commonPaletteDefs, commonTransformDefs } from './commonDefs'
 
-export const TYPE_ERROR_IMAGE_SEGMENT = `${TYPE_ERROR_PREFIX} object`
-export const INVALID_IMAGE_SEGMENT_TYPE = 'type segmentType must be a string and equal to "image"'
+export const TYPE_ERROR_STICKER_SEGMENT = `${TYPE_ERROR_PREFIX} object`
+export const INVALID_STICKER_SEGMENT_TYPE = 'type segmentType must be a string and equal to "sticker"'
 
 const CommonDefinitions = {
   ITransform: commonTransformDefs,
   IAnimation: commonAnimationDefs,
   IPalette: commonPaletteDefs,
-} as JSONSchemaType<IImageSegment>['definitions']
+} as JSONSchemaType<IStickerSegment>['definitions']
 
-export const imageSegmentRule: JSONSchemaType<IImageSegment> = {
+export const stickerSegmentRule: JSONSchemaType<IStickerSegment> = {
   type: 'object',
   definitions: CommonDefinitions,
   properties: {
@@ -21,7 +21,7 @@ export const imageSegmentRule: JSONSchemaType<IImageSegment> = {
     endTime: { type: 'number', minimum: 0, nullable: false },
     url: { type: 'string', format: 'uri', nullable: false },
     format: { type: 'string', enum: ['img', 'gif'], nullable: false },
-    segmentType: { type: 'string', const: 'image', nullable: false },
+    segmentType: { type: 'string', const: 'sticker', nullable: false },
     fillMode: { type: 'string', enum: ['none', 'contain', 'cover', 'stretch'], nullable: true },
     animation: { $ref: '#/definitions/IAnimation' },
     transform: { $ref: '#/definitions/ITransform' },
@@ -30,11 +30,11 @@ export const imageSegmentRule: JSONSchemaType<IImageSegment> = {
       type: 'object',
       nullable: true,
       additionalProperties: true,
-    } as JSONSchemaType<IImageSegment>['properties']['extra'],
+    } as JSONSchemaType<IStickerSegment>['properties']['extra'],
   },
   required: ['id', 'startTime', 'endTime', 'format', 'url', 'segmentType'],
   errorMessage: {
-    type: TYPE_ERROR_IMAGE_SEGMENT,
+    type: TYPE_ERROR_STICKER_SEGMENT,
     properties: {
       id: INVALID_ID,
       startTime: INVALID_START_TIME,
@@ -42,7 +42,7 @@ export const imageSegmentRule: JSONSchemaType<IImageSegment> = {
       url: INVALID_URL,
       format: INVALID_IMAGE_FORMAT,
       fillMode: INVALID_FILL_MODE,
-      segmentType: INVALID_IMAGE_SEGMENT_TYPE,
+      segmentType: INVALID_STICKER_SEGMENT_TYPE,
     },
   },
 }

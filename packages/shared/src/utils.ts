@@ -3,7 +3,7 @@ import type {
   IEffectSegment,
   IFilterSegment,
   IFramesSegmentUnion,
-  IImageSegment,
+  IStickerSegment,
   ITextSegment,
   ITrackType,
   IVideoFramesSegment,
@@ -37,10 +37,10 @@ export function isTextSegment(segment: SegmentUnion): segment is ITextSegment {
 }
 
 /**
- * Type guard: check if segment is image segment
+ * Type guard: check if segment is sticker segment
  */
-export function isImageSegment(segment: SegmentUnion): segment is IImageSegment {
-  return segment.segmentType === 'image'
+export function isStickerSegment(segment: SegmentUnion): segment is IStickerSegment {
+  return segment.segmentType === 'sticker'
 }
 
 /**
@@ -81,7 +81,7 @@ export function isTimeInSegment(time: number, segment: SegmentUnion): boolean {
 /**
  * Track type constants
  */
-export const TRACK_TYPES: readonly ITrackType[] = ['frames', 'text', 'image', 'audio', 'effect', 'filter'] as const
+export const TRACK_TYPES: readonly ITrackType[] = ['frames', 'text', 'sticker', 'audio', 'effect', 'filter'] as const
 
 /**
  * Check if a string is a valid track type

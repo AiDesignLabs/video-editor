@@ -28,14 +28,14 @@ export type ITrackType = keyof TrackTypeMapSegment
 export interface TrackTypeMapSegment {
   frames: IFramesSegmentUnion
   text: TextSegment<'text'>
-  image: ImageSegment<'image'>
+  sticker: StickerSegment<'sticker'>
   audio: AudioSegment<'audio'>
   effect: EffectSegment<'effect'>
   filter: FilterSegment<'filter'>
 }
 export type IFramesSegmentUnion = IVideoFramesSegment | IImageFramesSegment | I3DFramesSegment
 export type ITextSegment = TextSegment<'text'>
-export type IImageSegment = ImageSegment<'image'>
+export type IStickerSegment = StickerSegment<'sticker'>
 export type IAudioSegment = AudioSegment<'audio'>
 export type IEffectSegment = EffectSegment<'effect'>
 export type IFilterSegment = FilterSegment<'filter'>
@@ -105,7 +105,7 @@ interface TextSegment<T extends ITrackType> extends ISegment<T> {
   animation?: IAnimation
 }
 
-interface ImageSegment<T extends ITrackType> extends ISegment<T> {
+interface StickerSegment<T extends ITrackType> extends ISegment<T> {
   segmentType: T
   format: 'img' | 'gif'
   url: string

@@ -1,4 +1,4 @@
-import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageSegment, ITextSegment, ITransition, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
+import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IStickerSegment, ITextSegment, ITransition, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import { createVideoProtocolManager } from './index'
 
 const protocol: IVideoProtocol = {
@@ -141,18 +141,18 @@ describe('video protocol segment curd', () => {
 
       it('with other segment', () => {
         const { segmentMap, trackMap, addSegment } = createVideoProtocolManager(protocol)
-        const segment: IImageSegment = {
+        const segment: IStickerSegment = {
           id: '1',
           startTime: 0,
           endTime: 1000,
-          segmentType: 'image',
+          segmentType: 'sticker',
           format: 'img',
           url: 'http://example.com/image.jpg',
         }
         const insertId = addSegment(segment)
         expect(insertId).toBe('1')
         const newId = addSegment({ ...segment, startTime: 500, endTime: 1500 })
-        expect(trackMap.value.image).toHaveLength(2)
+        expect(trackMap.value.sticker).toHaveLength(2)
         expect(segmentMap.value[newId]?.startTime).toBe(0)
       })
     })
@@ -370,11 +370,11 @@ describe('video protocol segment curd', () => {
 
     it('with multiple track, have level index', () => {
       const { addSegment, exportProtocol } = createVideoProtocolManager(protocol)
-      const imageSegment: IImageSegment = {
+      const stickerSegment: IStickerSegment = {
         id: '1',
         startTime: 0,
         endTime: 1000,
-        segmentType: 'image',
+        segmentType: 'sticker',
         format: 'img',
         url: 'http://example.com/image.jpg',
       }
@@ -385,12 +385,12 @@ describe('video protocol segment curd', () => {
         segmentType: 'text',
         texts: [{ content: 'wendraw' }],
       }
-      addSegment(imageSegment)
+      addSegment(stickerSegment)
       addSegment(textSegment)
-      addSegment(imageSegment)
+      addSegment(stickerSegment)
       addSegment(textSegment)
 
-      expect(exportProtocol().tracks.map(track => track.trackType)).toEqual(['image', 'text', 'image', 'text'])
+      expect(exportProtocol().tracks.map(track => track.trackType)).toEqual(['sticker', 'text', 'sticker', 'text'])
     })
   })
 })
@@ -839,12 +839,12 @@ describe('text segment', () => {
   })
 })
 
-describe('image segment', () => {
-  const segment: IImageSegment = {
+describe('sticker segment', () => {
+  const segment: IStickerSegment = {
     id: '1',
     startTime: 0,
     endTime: 1000,
-    segmentType: 'image',
+    segmentType: 'sticker',
     format: 'img',
     url: 'http://example.com/image.jpg',
   }
@@ -856,25 +856,25 @@ describe('image segment', () => {
       it('add segment', () => {
         const id = addSegment(segment)
         expect(id).toBe('1')
-        expect(trackMap.value.image).toHaveLength(1)
+        expect(trackMap.value.sticker).toHaveLength(1)
         expect(segmentMap.value[id]?.id).toBe('1')
-        expect(trackMap.value.image[0].children[0]).toEqual(segment)
+        expect(trackMap.value.sticker[0].children[0]).toEqual(segment)
       })
 
       it('add segment by current time', () => {
         curTime.value = 1100
         const id = addSegment(segment)
         expect(segmentMap.value[id]?.startTime).toBe(1100)
-        expect(trackMap.value.image).toHaveLength(1)
-        expect(trackMap.value.image[0].children[0]).toEqual(segment)
-        expect(trackMap.value.image[0].children[1]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
+        expect(trackMap.value.sticker).toHaveLength(1)
+        expect(trackMap.value.sticker[0].children[0]).toEqual(segment)
+        expect(trackMap.value.sticker[0].children[1]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
       })
 
       it('cross time', () => {
         const id = addSegment(segment)
         expect(segmentMap.value[id]?.startTime).toBe(1100)
-        expect(trackMap.value.image).toHaveLength(2)
-        expect(trackMap.value.image[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
+        expect(trackMap.value.sticker).toHaveLength(2)
+        expect(trackMap.value.sticker[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
       })
     })
 
@@ -891,10 +891,10 @@ describe('image segment', () => {
     const { getSegment, addSegment, segmentMap, trackMap } = createVideoProtocolManager(protocol)
     addSegment(segment)
     it('get', () => {
-      expect(trackMap.value.image).toHaveLength(1)
-      expect(trackMap.value.image[0].children[0]).toEqual(segment)
+      expect(trackMap.value.sticker).toHaveLength(1)
+      expect(trackMap.value.sticker[0].children[0]).toEqual(segment)
       expect(segmentMap.value['1']).toEqual(segment)
-      expect(getSegment('1', 'image')).toEqual(segment)
+      expect(getSegment('1', 'sticker')).toEqual(segment)
       expect(getSegment('1', 'frames')).toBeUndefined()
     })
   })
@@ -905,7 +905,7 @@ describe('image segment', () => {
     it('exist id', () => {
       expect(removeSegment('1')).toBe(true)
       expect(segmentMap.value['1']).toBeUndefined()
-      expect(trackMap.value.image).toBeUndefined()
+      expect(trackMap.value.sticker).toBeUndefined()
     })
 
     it('not exist id', () => {
@@ -927,9 +927,9 @@ describe('image segment', () => {
           segment.format = 'gif'
           segment.url = 'http://example.com/image2.gif'
           segment.fillMode = 'cover'
-        }, id1, 'image')
-        expect(getSegment(id1, 'image')?.url).toBe('http://example.com/image2.gif')
-        expect(getSegment(id1, 'image')?.format).toBe('gif')
+        }, id1, 'sticker')
+        expect(getSegment(id1, 'sticker')?.url).toBe('http://example.com/image2.gif')
+        expect(getSegment(id1, 'sticker')?.format).toBe('gif')
       })
 
       describe('modify endTime', () => {
@@ -980,7 +980,7 @@ describe('image segment', () => {
         updateSegment((segment) => {
           segment.segmentType = 'text'
         }, id)
-        expect(segmentMap.value[id]?.segmentType).toBe('image')
+        expect(segmentMap.value[id]?.segmentType).toBe('sticker')
       })
     })
   })

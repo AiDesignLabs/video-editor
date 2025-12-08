@@ -1,9 +1,9 @@
-import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageSegment, ITextSegment, ITrackType, IVideoProtocol } from '@video-editor/shared'
+import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IStickerSegment, ITextSegment, ITrackType, IVideoProtocol } from '@video-editor/shared'
 import Ajv from 'ajv'
 import ajvErrors from 'ajv-errors'
 import ajvFormats from 'ajv-formats'
 import ajvKeywords from 'ajv-keywords'
-import { audioSegmentRule, effectSegmentRule, filterSegmentRule, framesSegmentRule, imageSegmentRule, textSegmentRule, trackRule, videoProtocolBasicRule } from './rules'
+import { audioSegmentRule, effectSegmentRule, filterSegmentRule, framesSegmentRule, stickerSegmentRule, textSegmentRule, trackRule, videoProtocolBasicRule } from './rules'
 
 export const DUPLICATE_SEGMENT_ID = 'duplicate segment id'
 export const DUPLICATE_TRACK_ID = 'duplicate track id'
@@ -20,7 +20,7 @@ export function createValidator() {
   const validateBasic = ajv.compile(videoProtocolBasicRule)
   const validateFramesSegment = ajv.compile(framesSegmentRule)
   const validateTextSegment = ajv.compile(textSegmentRule)
-  const validateImageSegment = ajv.compile(imageSegmentRule)
+  const validateStickerSegment = ajv.compile(stickerSegmentRule)
   const validateAudioSegment = ajv.compile(audioSegmentRule)
   const validateEffectSegment = ajv.compile(effectSegmentRule)
   const validateFilterSegment = ajv.compile(filterSegmentRule)
@@ -47,11 +47,11 @@ export function createValidator() {
     return o as ITextSegment
   }
 
-  const verifyPhotoSegment = (o: object) => {
-    if (validateImageSegment(o) === false)
-      throw new Error(ajv.errorsText(validateImageSegment.errors))
+  const verifyStickerSegment = (o: object) => {
+    if (validateStickerSegment(o) === false)
+      throw new Error(ajv.errorsText(validateStickerSegment.errors))
 
-    return o as IImageSegment
+    return o as IStickerSegment
   }
 
   const verifyAudioSegment = (o: object) => {
@@ -86,7 +86,7 @@ export function createValidator() {
     const verifyTrackMap = {
       frames: verifyFramesSegment,
       text: verifyTextSegment,
-      image: verifyPhotoSegment,
+      sticker: verifyStickerSegment,
       audio: verifyAudioSegment,
       effect: verifyEffectSegment,
       filter: verifyFilterSegment,
@@ -122,5 +122,5 @@ export function createValidator() {
     return validBasic as IVideoProtocol
   }
 
-  return { verify, verifyBasic, verifyFramesSegment, verifyTextSegment, verifyPhotoSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment, verifyTrack, verifySegment }
+  return { verify, verifyBasic, verifyFramesSegment, verifyTextSegment, verifyStickerSegment, verifyAudioSegment, verifyEffectSegment, verifyFilterSegment, verifyTrack, verifySegment }
 }
