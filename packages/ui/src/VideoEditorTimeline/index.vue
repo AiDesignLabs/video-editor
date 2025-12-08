@@ -8,6 +8,7 @@ import type {
 import type { SegmentDragPayload, SegmentLayout, SegmentResizePayload, TimelineTrack } from '../VideoTimeline/types'
 import { computed, ref, watch } from 'vue'
 import VideoTimeline from '../VideoTimeline/index.vue'
+import { FramesSegment, SegmentBase } from './segments'
 
 defineOptions({ name: 'VideoEditorTimeline' })
 
@@ -42,11 +43,14 @@ watch(() => props.selectedSegmentId, (value) => {
   innerSelectedId.value = value ?? null
 })
 
+const PRIMARY_COLOR = '#222226'
+const SURFACE_ALPHA = 0.4
+
 const colorByType: Record<ITrackType, string> = {
   frames: '#4f46e5',
   audio: '#0ea5e9',
   text: '#16a34a',
-  image: '#f97316',
+  sticker: '#f97316',
   effect: '#a855f7',
   filter: '#64748b',
 }
@@ -60,19 +64,20 @@ const filteredTracks = computed(() => {
 })
 
 const timelineTracks = computed<TimelineTrack[]>(() => filteredTracks.value.map((track: TrackUnion, index: number) => {
-  const color = colorByType[track.trackType] || '#4f46e5'
+  const accent = colorByType[track.trackType] || PRIMARY_COLOR
+  const surface = toAlphaColor(accent, SURFACE_ALPHA)
   return {
     id: track.trackId || `${track.trackType}-${index}`,
     label: track.trackType,
     type: track.trackType,
-    color,
+    color: accent,
     payload: track,
     segments: track.children.map((segment: SegmentUnion) => ({
       id: segment.id,
       start: segment.startTime,
       end: segment.endTime,
       type: segment.segmentType,
-      color,
+      color: surface,
       payload: segment,
     })),
   }
@@ -84,6 +89,23 @@ const timelineDuration = computed(() => {
   const endTimes = props.protocol.tracks.flatMap(track => track.children.map(seg => seg.endTime))
   return endTimes.length ? Math.max(...endTimes) : 0
 })
+
+function toAlphaColor(hex: string, alpha: number) {
+  const normalized = hex.replace('#', '')
+  if (!(normalized.length === 3 || normalized.length === 6))
+    return hex
+  const full = normalized.length === 3 ? normalized.split('').map(ch => ch + ch).join('') : normalized
+  const r = Number.parseInt(full.slice(0, 2), 16)
+  const g = Number.parseInt(full.slice(2, 4), 16)
+  const b = Number.parseInt(full.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+function resolveSegment(payload: unknown): SegmentUnion | null {
+  if (payload && typeof payload === 'object' && 'segmentType' in (payload as SegmentUnion))
+    return payload as SegmentUnion
+  return null
+}
 
 function cloneProtocol(source: IVideoProtocol | null | undefined) {
   return source ? JSON.parse(JSON.stringify(source)) as IVideoProtocol : null
@@ -112,7 +134,7 @@ function emitSelection(id: string | null) {
 }
 
 function handleTimelineSegmentClick(layout: SegmentLayout) {
-  const segment = layout.segment.payload as SegmentUnion | undefined
+  const segment = resolveSegment(layout.segment.payload)
   const track = findTrackFromLayout(layout.track) as TrackUnion | undefined
   if (!segment)
     return
@@ -194,36 +216,39 @@ function applySegmentResize(payload: SegmentResizePayload) {
     @segment-click="handleTimelineSegmentClick"
     @segment-drag-end="applySegmentPosition"
     @segment-resize-end="applySegmentResize"
+    @background-click="emitSelection(null)"
   >
     <template #segment="{ layout }">
-      <div class="ve-editor-segment">
-        <div class="ve-editor-segment__title">
-          {{ layout.segment.type || layout.track.type }}
+      <template v-for="segment in [resolveSegment(layout.segment.payload)]" :key="segment?.id || layout.segment.id">
+        <div
+          v-if="segment"
+          class="ve-editor-segment"
+          :style="{ '--ve-segment-accent': layout.track.color || PRIMARY_COLOR }"
+        >
+          <div class="ve-editor-segment__preview">
+            <FramesSegment
+              v-if="segment.segmentType === 'frames'"
+              :segment="segment"
+            />
+            <SegmentBase
+              v-else
+              :segment="segment"
+              :track-type="layout.track.type || 'unknown'"
+              :accent-color="layout.track.color"
+            />
+          </div>
         </div>
-        <div class="ve-editor-segment__time">
-          {{ (layout.segment.start / 1000).toFixed(2) }}s - {{ (layout.segment.end / 1000).toFixed(2) }}s
-        </div>
-      </div>
+      </template>
     </template>
   </VideoTimeline>
 </template>
 
 <style scoped>
-.ve-editor-segment {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+:where(.ve-editor-segment) {
+  --at-apply: relative flex flex-col gap-1.5 w-full h-full text-[#0f172a];
 }
 
-.ve-editor-segment__title {
-  font-weight: 700;
-  font-size: 12px;
-  text-transform: capitalize;
-}
-
-.ve-editor-segment__time {
-  font-size: 11px;
-  color: rgba(15, 23, 42, 0.8);
-  font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+:where(.ve-editor-segment .ve-editor-segment__preview) {
+  --at-apply: flex items-stretch w-full min-h-14;
 }
 </style>

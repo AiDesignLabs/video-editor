@@ -33,7 +33,7 @@ const props = withDefaults(defineProps<{
   minZoom: 0.25,
   maxZoom: 10,
   snapStep: 0,
-  trackHeight: 72,
+  trackHeight: 56,
   trackGap: 8,
   rulerHeight: 28,
   minSegmentDuration: 60,
@@ -669,14 +669,37 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
                       </div>
                     </div>
                   </slot>
+
+                  <!-- Selection border and handles -->
                   <div
-                    class="ve-segment__handle ve-segment__handle--start"
-                    @mousedown="startResize(layout, 'start', $event)"
-                  />
-                  <div
-                    class="ve-segment__handle ve-segment__handle--end"
-                    @mousedown="startResize(layout, 'end', $event)"
-                  />
+                    v-if="layout.isSelected"
+                    class="ve-segment__selection"
+                  >
+                    <!-- Left handle -->
+                    <div
+                      class="ve-segment__handle ve-segment__handle--left"
+                      @mousedown.stop="startResize(layout, 'start', $event)"
+                    >
+                      <div class="ve-segment__handle-dots">
+                        <div class="ve-segment__handle-dot" />
+                        <div class="ve-segment__handle-dot" />
+                        <div class="ve-segment__handle-dot" />
+                        <div class="ve-segment__handle-dot" />
+                      </div>
+                    </div>
+                    <!-- Right handle -->
+                    <div
+                      class="ve-segment__handle ve-segment__handle--right"
+                      @mousedown.stop="startResize(layout, 'end', $event)"
+                    >
+                      <div class="ve-segment__handle-dots">
+                        <div class="ve-segment__handle-dot" />
+                        <div class="ve-segment__handle-dot" />
+                        <div class="ve-segment__handle-dot" />
+                        <div class="ve-segment__handle-dot" />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </slot>
@@ -713,7 +736,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
   </div>
 </template>
 
-<style>
+<style scoped>
 :where(.ve-timeline) {
   --ve-primary: #222226;
   --at-apply: flex flex-col w-full max-w-full min-w-0 border border-[#e5e7eb] rounded-10px;
@@ -740,7 +763,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 }
 
 :where(.ve-timeline .ve-segment) {
-  --at-apply: absolute top-0 bottom-0 rounded-[10px] text-[#0f172a] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)] cursor-pointer flex items-center px-2.5 py-1.5 overflow-hidden transition-[box-shadow,transform] duration-150;
+  --at-apply: absolute top-0 bottom-0 rounded-[4px] text-[#0f172a] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)] cursor-pointer flex items-center overflow-hidden transition-[box-shadow,transform] duration-150;
 }
 
 :where(.ve-timeline .ve-segment--selected) {
@@ -763,19 +786,35 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
   --at-apply: text-[11px] text-[rgba(15,23,42,0.8)] font-mono;
 }
 
+:where(.ve-timeline .ve-segment__selection) {
+  --at-apply: absolute bottom-0 left-0 right-0 top-0 pointer-events-none z-10;
+}
+
 :where(.ve-timeline .ve-segment__handle) {
-  --at-apply: absolute top-0 bottom-0 w-2 bg-[rgba(255,255,255,0.8)] border border-[rgba(34,34,38,0.35)] cursor-ew-resize;
+  --at-apply: absolute h-full w-1 bg-[var(--ve-primary)] cursor-ew-resize pointer-events-auto top-50% translate-y--50%;
+  border: 2px solid var(--ve-primary);
 }
 
-:where(.ve-timeline .ve-segment__handle--start) {
-  --at-apply: left-0 rounded-l-[10px];
+:where(.ve-timeline .ve-segment__handle--left) {
+  --at-apply: left-0 top-0 translate-x--50% rounded-l-1;
 }
 
-:where(.ve-timeline .ve-segment__handle--end) {
-  --at-apply: right-0 rounded-r-[10px];
+:where(.ve-timeline .ve-segment__handle--right) {
+  --at-apply: right-0 top-0 translate-x-50% rounded-r-1;
+}
+
+:where(.ve-timeline .ve-segment__handle-dots) {
+  --at-apply: absolute left-0 top-50% translate-x--50% translate-y--50% flex flex-col items-center gap-0.5 w-1;
+  justify-content: center;
+}
+
+:where(.ve-timeline .ve-segment__handle-dot) {
+  --at-apply: rounded-full bg-white;
+  width: 1px;
+  height: 1px;
 }
 
 :where(.ve-timeline .ve-segment--preview) {
-  --at-apply: absolute opacity-35 pointer-events-none rounded-[10px] shadow-[0_0_0_2px_rgba(34,34,38,0.5)];
+  --at-apply: absolute opacity-35 pointer-events-none rounded-[4px] shadow-[0_0_0_2px_rgba(34,34,38,0.5)];
 }
 </style>
