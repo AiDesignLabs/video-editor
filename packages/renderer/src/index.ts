@@ -96,7 +96,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   async function renderScene(task: RenderTask) {
     const { protocol, at, layer } = task
-    const active = collectActiveSegments(protocol, at)
+    const renderAt = normalizeRenderTime(protocol, at)
+    const active = collectActiveSegments(protocol, renderAt)
     const stageWidth = task.app.renderer.width
     const stageHeight = task.app.renderer.height
 
@@ -107,7 +108,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         continue
       applyDisplayProps(display, segment, stageWidth, stageHeight)
       if (isVideoSegment(segment))
-        await updateVideoFrame(segment, at)
+        await updateVideoFrame(segment, renderAt)
       renders.push(display)
     }
 
@@ -400,6 +401,17 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     return segment.segmentType === 'frames'
       && segment.type === 'video'
       && typeof segment.url === 'string'
+  }
+
+  function normalizeRenderTime(protocol: IVideoProtocol, at: number) {
+    const total = computeDuration(protocol)
+    if (total <= 0)
+      return 0
+    if (at < total)
+      return at
+    // Keep the last visible frame when playback reaches the end.
+    const frameWindow = Math.max(1000 / Math.max(protocol.fps || 30, 1), 1)
+    return Math.max(total - frameWindow, 0)
   }
 
   async function getOpfsFile(url: string) {
