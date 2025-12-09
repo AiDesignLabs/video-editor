@@ -13,6 +13,7 @@
       "node",
       "vite/client"
     ],
+    "declarationDir": "types",
     "outDir": "dist"
   },
   "include": [
@@ -20,6 +21,7 @@
   ],
   "exclude": [
     "**/*.test.ts",
-    "dist"
+    "dist",
+    "types"
   ]
 }

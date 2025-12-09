@@ -3,8 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
-
-// import dts from 'vite-plugin-dts'
+import dts from 'vite-plugin-dts'
 
 const componentMap: Record<string, string> = {}
 
@@ -18,7 +17,14 @@ fs.readdirSync(path.resolve(__dirname, 'src')).forEach((name) => {
 export default defineConfig({
   plugins: [
     vue(),
-    // dts(),
+    dts({
+      tsconfigPath: './tsconfig.build.json',
+      include: ['src'],
+      outDir: 'dist',
+      insertTypesEntry: true,
+      rollupTypes: true,
+      copyDtsFiles: false,
+    }),
   ],
   resolve: {
     alias: {
@@ -31,7 +37,7 @@ export default defineConfig({
         ...componentMap,
       },
       formats: ['es'],
-      fileName: (format, entryName) => `${entryName}.js`,
+      fileName: (_format, entryName) => `${entryName}.js`,
     },
     rollupOptions: {
       external: ['vue', '@video-editor/protocol', '@video-editor/shared'],
