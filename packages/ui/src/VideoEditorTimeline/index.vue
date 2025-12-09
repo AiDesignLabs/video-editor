@@ -29,13 +29,12 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  (e: 'update:protocol', protocol: IVideoProtocol): void
   (e: 'update:currentTime', value: number): void
   (e: 'update:zoom', value: number): void
   (e: 'update:selectedSegmentId', value: string | null): void
   (e: 'segmentClick', payload: { segment: SegmentUnion, track: TrackUnion }): void
-  (e: 'segmentDragEnd', payload: { segment: SegmentUnion, track: TrackUnion, protocol: IVideoProtocol }): void
-  (e: 'segmentResizeEnd', payload: { segment: SegmentUnion, track: TrackUnion, protocol: IVideoProtocol }): void
+  (e: 'segmentDragEnd', payload: SegmentDragPayload): void
+  (e: 'segmentResizeEnd', payload: SegmentResizePayload): void
 }>()
 
 const innerSelectedId = ref<string | null>(props.selectedSegmentId ?? null)
@@ -47,7 +46,7 @@ const PRIMARY_COLOR = '#222226'
 const SURFACE_ALPHA = 0.4
 
 const colorByType: Record<ITrackType, string> = {
-  frames: '#4f46e5',
+  frames: PRIMARY_COLOR,
   audio: '#0ea5e9',
   text: '#16a34a',
   sticker: '#f97316',
@@ -66,11 +65,13 @@ const filteredTracks = computed(() => {
 const timelineTracks = computed<TimelineTrack[]>(() => filteredTracks.value.map((track: TrackUnion, index: number) => {
   const accent = colorByType[track.trackType] || PRIMARY_COLOR
   const surface = toAlphaColor(accent, SURFACE_ALPHA)
+  const isMain = track.trackType === 'frames' && track.isMain === true
   return {
     id: track.trackId || `${track.trackType}-${index}`,
     label: track.trackType,
     type: track.trackType,
     color: accent,
+    isMain,
     payload: track,
     segments: track.children.map((segment: SegmentUnion) => ({
       id: segment.id,
@@ -107,18 +108,6 @@ function resolveSegment(payload: unknown): SegmentUnion | null {
   return null
 }
 
-function cloneProtocol(source: IVideoProtocol | null | undefined) {
-  return source ? JSON.parse(JSON.stringify(source)) as IVideoProtocol : null
-}
-
-function getMutableSegments(track: TrackUnion): SegmentUnion[] {
-  return track.children as SegmentUnion[]
-}
-
-function findTrack(protocol: IVideoProtocol, trackId: string) {
-  return protocol.tracks.find((track: TrackUnion) => track.trackId === trackId)
-}
-
 function findTrackFromLayout(timelineTrack: TimelineTrack) {
   const trackFromPayload = timelineTrack.payload as TrackUnion | undefined
   if (trackFromPayload)
@@ -143,61 +132,22 @@ function handleTimelineSegmentClick(layout: SegmentLayout) {
     emit('segmentClick', { segment, track })
 }
 
-function applySegmentPosition(payload: SegmentDragPayload) {
-  if (!props.protocol)
-    return
-
-  const next = cloneProtocol(props.protocol)
-  if (!next)
-    return
-
-  const sourceTrack = findTrack(next, payload.track.id)
-  const targetTrack = findTrack(next, payload.targetTrackId) ?? sourceTrack
-  if (!sourceTrack || !targetTrack)
-    return
-
-  const segmentIndex = sourceTrack.children.findIndex((seg: SegmentUnion) => seg.id === payload.segment.id)
-  if (segmentIndex < 0)
-    return
-
-  const segment = sourceTrack.children[segmentIndex] as SegmentUnion
-  const canMoveTrack = segment.segmentType === targetTrack.trackType
-  const destination = canMoveTrack ? targetTrack : sourceTrack
-
-  if (destination !== sourceTrack) {
-    sourceTrack.children.splice(segmentIndex, 1)
-    getMutableSegments(destination).push(segment)
-  }
-
-  segment.startTime = payload.startTime
-  segment.endTime = payload.endTime
-  getMutableSegments(destination).sort((a, b) => a.startTime - b.startTime)
-
-  emit('update:protocol', next)
-  emit('segmentDragEnd', { segment, track: destination, protocol: next })
+function handleSegmentDragStart(payload: SegmentDragPayload) {
+  // Select the segment when drag starts
+  emitSelection(payload.segment.id)
 }
 
-function applySegmentResize(payload: SegmentResizePayload) {
-  if (!props.protocol)
-    return
-  const next = cloneProtocol(props.protocol)
-  if (!next)
-    return
+function handleSegmentDragEnd(payload: SegmentDragPayload) {
+  emit('segmentDragEnd', payload)
+}
 
-  const track = findTrack(next, payload.track.id)
-  if (!track)
-    return
+function handleSegmentResizeStart(payload: SegmentResizePayload) {
+  // Select the segment when resize starts
+  emitSelection(payload.segment.id)
+}
 
-  const segment = track.children.find((seg: SegmentUnion) => seg.id === payload.segment.id) as SegmentUnion | undefined
-  if (!segment)
-    return
-
-  segment.startTime = payload.startTime
-  segment.endTime = payload.endTime
-  getMutableSegments(track).sort((a, b) => a.startTime - b.startTime)
-
-  emit('update:protocol', next)
-  emit('segmentResizeEnd', { segment, track, protocol: next })
+function handleSegmentResizeEnd(payload: SegmentResizePayload) {
+  emit('segmentResizeEnd', payload)
 }
 </script>
 
@@ -214,8 +164,10 @@ function applySegmentResize(payload: SegmentResizePayload) {
     @update:current-time="emit('update:currentTime', $event)"
     @update:zoom="emit('update:zoom', $event)"
     @segment-click="handleTimelineSegmentClick"
-    @segment-drag-end="applySegmentPosition"
-    @segment-resize-end="applySegmentResize"
+    @segment-drag-start="handleSegmentDragStart"
+    @segment-drag-end="handleSegmentDragEnd"
+    @segment-resize-start="handleSegmentResizeStart"
+    @segment-resize-end="handleSegmentResizeEnd"
     @background-click="emitSelection(null)"
   >
     <template #segment="{ layout }">

@@ -134,7 +134,7 @@ function getImageStyle() {
 
 :where(.frames-segment .frames-segment__image) {
   --at-apply: w-full h-full rounded-4px;
-  background-color: rgba(79, 70, 229, 0.15);
+  background-color: color-mix(in srgb, var(--ve-segment-accent, #222226) 15%, transparent);
 }
 
 :where(.frames-segment .frames-segment__video) {

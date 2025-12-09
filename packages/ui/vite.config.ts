@@ -34,7 +34,7 @@ export default defineConfig({
       fileName: (format, entryName) => `${entryName}.js`,
     },
     rollupOptions: {
-      external: ['vue'],
+      external: ['vue', '@video-editor/protocol', '@video-editor/shared'],
       output: {
         assetFileNames: '[name].[ext]',
         exports: 'named',

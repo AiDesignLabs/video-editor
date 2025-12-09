@@ -225,7 +225,7 @@ describe('video protocol segment curd', () => {
       expect(initialMainTrack?.children.map(segment => segment.id)).toEqual(['clip-a', 'clip-b', 'clip-c'])
 
       curTime.value = initialMainTrack?.children.at(-1)?.endTime ?? 0
-      const newId = addSegment({
+      const newSegment: IImageFramesSegment = {
         id: 'clip-d',
         segmentType: 'frames',
         type: 'image',
@@ -233,7 +233,8 @@ describe('video protocol segment curd', () => {
         url: 'http://example.com/clip-d.png',
         startTime: 0,
         endTime: 2000,
-      })
+      }
+      const newId = addSegment(newSegment)
 
       const framesTrack = trackMap.value.frames?.find(track => track.isMain)
       expect(framesTrack?.children.map(segment => segment.id)).toEqual(['clip-a', 'clip-b', 'clip-c', newId])
@@ -1466,5 +1467,1216 @@ describe('undo and redo', () => {
     expect(undoCount.value).toBe(2)
     expect(redoCount.value).toBe(0)
     expect(segmentMap.value[id3]).toEqual({ ...segment, id: id3 })
+  })
+})
+
+describe('moveSegment', () => {
+  it('should move segment within same track', () => {
+    const { addSegment, moveSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    const text2: ITextSegment = {
+      id: 'text-2',
+      segmentType: 'text',
+      startTime: 1000,
+      endTime: 2000,
+      texts: [{ content: 'Text 2' }],
+    }
+
+    addSegment(text1)
+    curTime.value = 1000
+    addSegment(text2)
+
+    const p1 = exportProtocol()
+    const track = p1.tracks[0]
+
+    // Move text-1 to overlap with text-2
+    // text-2 is at 1000-2000, moving text-1 to 1500-2500 causes overlap
+    // Expected: text-1 should be pushed to 2000-3000 to avoid overlap
+    moveSegment({
+      segmentId: 'text-1',
+      sourceTrackId: track.trackId,
+      targetTrackId: track.trackId,
+      startTime: 1500,
+      endTime: 2500,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks).toHaveLength(1)
+    expect(p2.tracks[0].children).toHaveLength(2)
+    expect(p2.tracks[0].children[0].id).toBe('text-2')
+    expect(p2.tracks[0].children[0].startTime).toBe(1000)
+    expect(p2.tracks[0].children[0].endTime).toBe(2000)
+    expect(p2.tracks[0].children[1].id).toBe('text-1')
+    expect(p2.tracks[0].children[1].startTime).toBe(2000) // Pushed to avoid overlap
+    expect(p2.tracks[0].children[1].endTime).toBe(3000) // Duration preserved (1000ms)
+  })
+
+  it('should move segment to new track', () => {
+    const { addSegment, moveSegment, exportProtocol } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    addSegment(text1)
+    const p1 = exportProtocol()
+    const sourceTrack = p1.tracks[0]
+
+    // Move to new track
+    moveSegment({
+      segmentId: 'text-1',
+      sourceTrackId: sourceTrack.trackId,
+      startTime: 500,
+      endTime: 1500,
+      isNewTrack: true,
+      newTrackInsertIndex: 0,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks).toHaveLength(1) // Old track deleted, new track created
+    expect(p2.tracks[0].children).toHaveLength(1)
+    expect(p2.tracks[0].children[0].startTime).toBe(500)
+    expect(p2.tracks[0].children[0].endTime).toBe(1500)
+  })
+
+  it('should handle frames track correctly', () => {
+    const { addSegment, moveSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    const frame2: IVideoFramesSegment = {
+      id: 'frame-2',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video2.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    const frame3: IVideoFramesSegment = {
+      id: 'frame-3',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video3.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    addSegment(frame1)
+    curTime.value = 1000
+    addSegment(frame2)
+    curTime.value = 2000
+    addSegment(frame3)
+
+    const p1 = exportProtocol()
+    expect(p1.tracks[0].children[0].startTime).toBe(0)
+    expect(p1.tracks[0].children[0].endTime).toBe(1000)
+    expect(p1.tracks[0].children[1].startTime).toBe(1000)
+    expect(p1.tracks[0].children[1].endTime).toBe(2000)
+    expect(p1.tracks[0].children[2].startTime).toBe(2000)
+    expect(p1.tracks[0].children[2].endTime).toBe(3000)
+
+    const track = p1.tracks[0]
+
+    // Move frame-2 to new track
+    moveSegment({
+      segmentId: 'frame-2',
+      sourceTrackId: track.trackId,
+      startTime: 500,
+      endTime: 1500,
+      isNewTrack: true,
+      newTrackInsertIndex: 1,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks).toHaveLength(2)
+
+    // Original track should adjust frame-3's time
+    expect(p2.tracks[0].children).toHaveLength(2)
+    expect(p2.tracks[0].children[0].id).toBe('frame-1')
+    expect(p2.tracks[0].children[0].startTime).toBe(0)
+    expect(p2.tracks[0].children[0].endTime).toBe(1000)
+    expect(p2.tracks[0].children[1].id).toBe('frame-3')
+    expect(p2.tracks[0].children[1].startTime).toBe(1000) // Adjusted
+    expect(p2.tracks[0].children[1].endTime).toBe(2000) // Adjusted
+
+    // New track
+    expect(p2.tracks[1].children).toHaveLength(1)
+    expect(p2.tracks[1].children[0].id).toBe('frame-2')
+  })
+})
+
+describe('moveSegment - undo/redo', () => {
+  it('should support undo/redo for moving segment within same track', () => {
+    const { addSegment, moveSegment, exportProtocol, curTime, undo, redo } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    const text2: ITextSegment = {
+      id: 'text-2',
+      segmentType: 'text',
+      startTime: 1000,
+      endTime: 2000,
+      texts: [{ content: 'Text 2' }],
+    }
+
+    addSegment(text1)
+    curTime.value = 1000
+    addSegment(text2)
+
+    const p1 = exportProtocol()
+    expect(p1.tracks[0].children[0].id).toBe('text-1')
+    expect(p1.tracks[0].children[0].startTime).toBe(0)
+    expect(p1.tracks[0].children[1].id).toBe('text-2')
+    expect(p1.tracks[0].children[1].startTime).toBe(1000)
+
+    const track = p1.tracks[0]
+
+    // Move text-1 causing overlap
+    moveSegment({
+      segmentId: 'text-1',
+      sourceTrackId: track.trackId,
+      targetTrackId: track.trackId,
+      startTime: 1500,
+      endTime: 2500,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks[0].children[0].id).toBe('text-2')
+    expect(p2.tracks[0].children[0].startTime).toBe(1000)
+    expect(p2.tracks[0].children[1].id).toBe('text-1')
+    expect(p2.tracks[0].children[1].startTime).toBe(2000) // Pushed to avoid overlap
+
+    // Undo should restore original state
+    undo()
+    const p3 = exportProtocol()
+    expect(p3.tracks[0].children[0].id).toBe('text-1')
+    expect(p3.tracks[0].children[0].startTime).toBe(0)
+    expect(p3.tracks[0].children[1].id).toBe('text-2')
+    expect(p3.tracks[0].children[1].startTime).toBe(1000)
+
+    // Redo should reapply the move
+    redo()
+    const p4 = exportProtocol()
+    expect(p4.tracks[0].children[0].id).toBe('text-2')
+    expect(p4.tracks[0].children[0].startTime).toBe(1000)
+    expect(p4.tracks[0].children[1].id).toBe('text-1')
+    expect(p4.tracks[0].children[1].startTime).toBe(2000)
+  })
+
+  it('should support undo/redo for moving segment to new track', () => {
+    const { addSegment, moveSegment, exportProtocol, undo, redo } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    addSegment(text1)
+    const p1 = exportProtocol()
+    expect(p1.tracks).toHaveLength(1)
+    expect(p1.tracks[0].children).toHaveLength(1)
+
+    const sourceTrack = p1.tracks[0]
+
+    // Move to new track
+    moveSegment({
+      segmentId: 'text-1',
+      sourceTrackId: sourceTrack.trackId,
+      startTime: 500,
+      endTime: 1500,
+      isNewTrack: true,
+      newTrackInsertIndex: 0,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks).toHaveLength(1) // Old track deleted, new track created
+    expect(p2.tracks[0].children[0].startTime).toBe(500)
+
+    // Undo should restore original state
+    undo()
+    const p3 = exportProtocol()
+    expect(p3.tracks).toHaveLength(1)
+    expect(p3.tracks[0].children[0].id).toBe('text-1')
+    expect(p3.tracks[0].children[0].startTime).toBe(0)
+    expect(p3.tracks[0].children[0].endTime).toBe(1000)
+
+    // Redo should recreate the new track
+    redo()
+    const p4 = exportProtocol()
+    expect(p4.tracks).toHaveLength(1)
+    expect(p4.tracks[0].children[0].startTime).toBe(500)
+    expect(p4.tracks[0].children[0].endTime).toBe(1500)
+  })
+
+  it('should support undo/redo for moving frames segment', () => {
+    const { addSegment, moveSegment, exportProtocol, curTime, undo, redo } = createVideoProtocolManager(protocol)
+
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    const frame2: IVideoFramesSegment = {
+      id: 'frame-2',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video2.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    const frame3: IVideoFramesSegment = {
+      id: 'frame-3',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video3.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    addSegment(frame1)
+    curTime.value = 1000
+    addSegment(frame2)
+    curTime.value = 2000
+    addSegment(frame3)
+
+    const p1 = exportProtocol()
+    expect(p1.tracks[0].children).toHaveLength(3)
+    expect(p1.tracks[0].children[0].startTime).toBe(0)
+    expect(p1.tracks[0].children[1].startTime).toBe(1000)
+    expect(p1.tracks[0].children[2].startTime).toBe(2000)
+
+    const track = p1.tracks[0]
+
+    // Move frame-2 to new track
+    moveSegment({
+      segmentId: 'frame-2',
+      sourceTrackId: track.trackId,
+      startTime: 500,
+      endTime: 1500,
+      isNewTrack: true,
+      newTrackInsertIndex: 1,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks).toHaveLength(2)
+    expect(p2.tracks[0].children).toHaveLength(2) // frame-1 and frame-3
+    expect(p2.tracks[1].children).toHaveLength(1) // frame-2
+
+    // Undo should restore all frames to original track
+    undo()
+    const p3 = exportProtocol()
+    expect(p3.tracks).toHaveLength(1)
+    expect(p3.tracks[0].children).toHaveLength(3)
+    expect(p3.tracks[0].children[0].id).toBe('frame-1')
+    expect(p3.tracks[0].children[1].id).toBe('frame-2')
+    expect(p3.tracks[0].children[2].id).toBe('frame-3')
+
+    // Redo should recreate the new track
+    redo()
+    const p4 = exportProtocol()
+    expect(p4.tracks).toHaveLength(2)
+    expect(p4.tracks[0].children).toHaveLength(2)
+    expect(p4.tracks[1].children).toHaveLength(1)
+  })
+})
+
+describe('resizeSegment', () => {
+  it('should resize text segment', () => {
+    const { addSegment, resizeSegment, exportProtocol } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    addSegment(text1)
+    const p1 = exportProtocol()
+    const track = p1.tracks[0]
+
+    resizeSegment({
+      segmentId: 'text-1',
+      trackId: track.trackId,
+      startTime: 500,
+      endTime: 2000,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks[0].children[0].startTime).toBe(500)
+    expect(p2.tracks[0].children[0].endTime).toBe(2000)
+  })
+
+  it('should prevent overlap when resizing text segment', () => {
+    const { addSegment, resizeSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    const text2: ITextSegment = {
+      id: 'text-2',
+      segmentType: 'text',
+      startTime: 1000,
+      endTime: 2000,
+      texts: [{ content: 'Text 2' }],
+    }
+
+    addSegment(text1)
+    curTime.value = 1000
+    addSegment(text2)
+
+    const p1 = exportProtocol()
+    const track = p1.tracks[0]
+
+    // Resize text-1 from 1000ms to 1500ms, causing overlap with text-2
+    resizeSegment({
+      segmentId: 'text-1',
+      trackId: track.trackId,
+      startTime: 0,
+      endTime: 1500,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks[0].children[0].startTime).toBe(0)
+    expect(p2.tracks[0].children[0].endTime).toBe(1500)
+    // text-2 should be pushed to 1500-2500 to avoid overlap
+    expect(p2.tracks[0].children[1].startTime).toBe(1500)
+    expect(p2.tracks[0].children[1].endTime).toBe(2500)
+  })
+
+  it('should allow gaps when moving text segment', () => {
+    const { addSegment, moveSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    const text2: ITextSegment = {
+      id: 'text-2',
+      segmentType: 'text',
+      startTime: 1000,
+      endTime: 2000,
+      texts: [{ content: 'Text 2' }],
+    }
+
+    addSegment(text1)
+    curTime.value = 1000
+    addSegment(text2)
+
+    const p1 = exportProtocol()
+    const track = p1.tracks[0]
+
+    // Move text-1 to 3000-4000, leaving a gap (no overlap)
+    moveSegment({
+      segmentId: 'text-1',
+      sourceTrackId: track.trackId,
+      targetTrackId: track.trackId,
+      startTime: 3000,
+      endTime: 4000,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks[0].children).toHaveLength(2)
+    // text-2 should remain at 1000-2000
+    expect(p2.tracks[0].children[0].id).toBe('text-2')
+    expect(p2.tracks[0].children[0].startTime).toBe(1000)
+    expect(p2.tracks[0].children[0].endTime).toBe(2000)
+    // text-1 should be at 3000-4000 (gap allowed)
+    expect(p2.tracks[0].children[1].id).toBe('text-1')
+    expect(p2.tracks[0].children[1].startTime).toBe(3000)
+    expect(p2.tracks[0].children[1].endTime).toBe(4000)
+  })
+
+  it('should preserve time position when moving frames segment to new non-main track', () => {
+    const { addSegment, moveSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    // Create main frames track with frame-1
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    // Create another frames segment
+    const frame2: IVideoFramesSegment = {
+      id: 'frame-2',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video2.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    addSegment(frame1) // Creates main frames track at 0-1000
+    curTime.value = 1000
+    addSegment(frame2) // Adds to main track at 1000-2000
+
+    const p1 = exportProtocol()
+    const mainTrack = p1.tracks[0]
+
+    // Move frame-2 to a new non-main frames track at time 3000
+    moveSegment({
+      segmentId: 'frame-2',
+      sourceTrackId: mainTrack.trackId,
+      startTime: 3000,
+      endTime: 4000,
+      isNewTrack: true,
+      newTrackInsertIndex: 1,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks).toHaveLength(2)
+
+    // Main track should only have frame-1, adjusted to 0-1000
+    expect(p2.tracks[0].children).toHaveLength(1)
+    expect(p2.tracks[0].children[0].id).toBe('frame-1')
+    expect(p2.tracks[0].children[0].startTime).toBe(0)
+    expect(p2.tracks[0].children[0].endTime).toBe(1000)
+
+    // New non-main frames track should have frame-2 at the dragged position (3000-4000)
+    expect(p2.tracks[1].children).toHaveLength(1)
+    expect(p2.tracks[1].children[0].id).toBe('frame-2')
+    expect(p2.tracks[1].children[0].startTime).toBe(3000) // Keep user's position
+    expect(p2.tracks[1].children[0].endTime).toBe(4000)
+    expect((p2.tracks[1] as any).isMain).toBeUndefined() // Not a main track
+  })
+
+  it('should support undo/redo for resizing text segment', () => {
+    const { addSegment, resizeSegment, exportProtocol, undo, redo } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    addSegment(text1)
+    const p1 = exportProtocol()
+    const track = p1.tracks[0]
+
+    expect(p1.tracks[0].children[0].startTime).toBe(0)
+    expect(p1.tracks[0].children[0].endTime).toBe(1000)
+
+    // Resize segment
+    resizeSegment({
+      segmentId: 'text-1',
+      trackId: track.trackId,
+      startTime: 500,
+      endTime: 2000,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks[0].children[0].startTime).toBe(500)
+    expect(p2.tracks[0].children[0].endTime).toBe(2000)
+
+    // Undo should restore original size
+    undo()
+    const p3 = exportProtocol()
+    expect(p3.tracks[0].children[0].startTime).toBe(0)
+    expect(p3.tracks[0].children[0].endTime).toBe(1000)
+
+    // Redo should reapply the resize
+    redo()
+    const p4 = exportProtocol()
+    expect(p4.tracks[0].children[0].startTime).toBe(500)
+    expect(p4.tracks[0].children[0].endTime).toBe(2000)
+  })
+
+  it('should support undo/redo for resizing frames segment', () => {
+    const { addSegment, resizeSegment, exportProtocol, curTime, undo, redo } = createVideoProtocolManager(protocol)
+
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    const frame2: IVideoFramesSegment = {
+      id: 'frame-2',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video2.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    addSegment(frame1)
+    curTime.value = 1000
+    addSegment(frame2)
+
+    const p1 = exportProtocol()
+    expect(p1.tracks[0].children[0].startTime).toBe(0)
+    expect(p1.tracks[0].children[0].endTime).toBe(1000)
+    expect(p1.tracks[0].children[1].startTime).toBe(1000)
+    expect(p1.tracks[0].children[1].endTime).toBe(2000)
+
+    const track = p1.tracks[0]
+
+    // Resize frame-1, which should push frame-2
+    resizeSegment({
+      segmentId: 'frame-1',
+      trackId: track.trackId,
+      startTime: 0,
+      endTime: 1500,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks[0].children[0].startTime).toBe(0)
+    expect(p2.tracks[0].children[0].endTime).toBe(1500)
+    expect(p2.tracks[0].children[1].startTime).toBe(1500) // Pushed
+    expect(p2.tracks[0].children[1].endTime).toBe(2500)
+
+    // Undo should restore original positions
+    undo()
+    const p3 = exportProtocol()
+    expect(p3.tracks[0].children[0].startTime).toBe(0)
+    expect(p3.tracks[0].children[0].endTime).toBe(1000)
+    expect(p3.tracks[0].children[1].startTime).toBe(1000)
+    expect(p3.tracks[0].children[1].endTime).toBe(2000)
+
+    // Redo should reapply the resize and push
+    redo()
+    const p4 = exportProtocol()
+    expect(p4.tracks[0].children[0].startTime).toBe(0)
+    expect(p4.tracks[0].children[0].endTime).toBe(1500)
+    expect(p4.tracks[0].children[1].startTime).toBe(1500)
+    expect(p4.tracks[0].children[1].endTime).toBe(2500)
+  })
+
+  it('should resize frames segment and adjust subsequent segments', () => {
+    const { addSegment, resizeSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    const frame2: IVideoFramesSegment = {
+      id: 'frame-2',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video2.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    addSegment(frame1)
+    curTime.value = 1000
+    addSegment(frame2)
+
+    const p1 = exportProtocol()
+    expect(p1.tracks[0].children[0].startTime).toBe(0)
+    expect(p1.tracks[0].children[0].endTime).toBe(1000)
+    expect(p1.tracks[0].children[1].startTime).toBe(1000)
+    expect(p1.tracks[0].children[1].endTime).toBe(2000)
+
+    const track = p1.tracks[0]
+
+    // Resize frame-1 from 1000ms to 1500ms
+    resizeSegment({
+      segmentId: 'frame-1',
+      trackId: track.trackId,
+      startTime: 0,
+      endTime: 1500,
+    })
+
+    const p2 = exportProtocol()
+    expect(p2.tracks[0].children[0].startTime).toBe(0)
+    expect(p2.tracks[0].children[0].endTime).toBe(1500)
+    expect(p2.tracks[0].children[1].startTime).toBe(1500) // Adjusted +500
+    expect(p2.tracks[0].children[1].endTime).toBe(2500) // Adjusted +500
+  })
+})
+
+describe('addSegment - undo/redo', () => {
+  it('should support undo/redo for adding frames segment', () => {
+    const { addSegment, exportProtocol, undo, redo } = createVideoProtocolManager(protocol)
+
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    // Initial state - no tracks
+    const p1 = exportProtocol()
+    expect(p1.tracks.length).toBe(0)
+
+    // Add segment - creates track
+    addSegment(frame1)
+    const p2 = exportProtocol()
+    expect(p2.tracks.length).toBe(1)
+    expect(p2.tracks[0].trackType).toBe('frames')
+    expect(p2.tracks[0].children.length).toBe(1)
+    expect(p2.tracks[0].children[0].id).toBe('frame-1')
+
+    // Undo - should remove track
+    undo()
+    const p3 = exportProtocol()
+    expect(p3.tracks.length).toBe(0)
+
+    // Redo - should restore track and segment
+    redo()
+    const p4 = exportProtocol()
+    expect(p4.tracks.length).toBe(1)
+    expect(p4.tracks[0].children.length).toBe(1)
+    expect(p4.tracks[0].children[0].id).toBe('frame-1')
+  })
+
+  it('should support undo/redo for adding text segment', () => {
+    const { addSegment, exportProtocol, undo, redo } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 2000,
+      texts: [{ content: 'Hello World' }],
+    }
+
+    // Add segment
+    addSegment(text1)
+    const p1 = exportProtocol()
+    expect(p1.tracks.length).toBe(1)
+    expect(p1.tracks[0].trackType).toBe('text')
+    expect(p1.tracks[0].children[0].id).toBe('text-1')
+
+    // Undo
+    undo()
+    const p2 = exportProtocol()
+    expect(p2.tracks.length).toBe(0)
+
+    // Redo
+    redo()
+    const p3 = exportProtocol()
+    expect(p3.tracks.length).toBe(1)
+    expect(p3.tracks[0].children[0].id).toBe('text-1')
+  })
+
+  it('should support undo/redo for adding multiple segments', () => {
+    const { addSegment, exportProtocol, undo, redo, curTime } = createVideoProtocolManager(protocol)
+
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    const frame2: IVideoFramesSegment = {
+      id: 'frame-2',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video2.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    // Add first segment
+    addSegment(frame1)
+    const p1 = exportProtocol()
+    expect(p1.tracks[0].children.length).toBe(1)
+
+    // Add second segment
+    curTime.value = 1000
+    addSegment(frame2)
+    const p2 = exportProtocol()
+    expect(p2.tracks[0].children.length).toBe(2)
+    expect(p2.tracks[0].children[0].id).toBe('frame-1')
+    expect(p2.tracks[0].children[1].id).toBe('frame-2')
+
+    // Undo once - should remove second segment
+    undo()
+    const p3 = exportProtocol()
+    expect(p3.tracks[0].children.length).toBe(1)
+    expect(p3.tracks[0].children[0].id).toBe('frame-1')
+
+    // Undo again - should remove first segment and track
+    undo()
+    const p4 = exportProtocol()
+    expect(p4.tracks.length).toBe(0)
+
+    // Redo once - should restore first segment
+    redo()
+    const p5 = exportProtocol()
+    expect(p5.tracks.length).toBe(1)
+    expect(p5.tracks[0].children.length).toBe(1)
+    expect(p5.tracks[0].children[0].id).toBe('frame-1')
+
+    // Redo again - should restore second segment
+    redo()
+    const p6 = exportProtocol()
+    expect(p6.tracks[0].children.length).toBe(2)
+    expect(p6.tracks[0].children[0].id).toBe('frame-1')
+    expect(p6.tracks[0].children[1].id).toBe('frame-2')
+  })
+})
+
+describe('removeSegment - undo/redo', () => {
+  it('should support undo/redo for removing segment', () => {
+    const { addSegment, removeSegment, exportProtocol, undo, redo } = createVideoProtocolManager(protocol)
+
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    // Add segment
+    addSegment(frame1)
+    const p1 = exportProtocol()
+    expect(p1.tracks.length).toBe(1)
+    expect(p1.tracks[0].children.length).toBe(1)
+
+    // Remove segment
+    removeSegment('frame-1')
+    const p2 = exportProtocol()
+    expect(p2.tracks.length).toBe(0) // Track should be removed when empty
+
+    // Undo - should restore segment and track
+    undo()
+    const p3 = exportProtocol()
+    expect(p3.tracks.length).toBe(1)
+    expect(p3.tracks[0].children.length).toBe(1)
+    expect(p3.tracks[0].children[0].id).toBe('frame-1')
+
+    // Redo - should remove segment and track again
+    redo()
+    const p4 = exportProtocol()
+    expect(p4.tracks.length).toBe(0)
+  })
+
+  it('should support undo/redo for removing one of multiple segments', () => {
+    const { addSegment, removeSegment, exportProtocol, undo, redo, curTime } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    const text2: ITextSegment = {
+      id: 'text-2',
+      segmentType: 'text',
+      startTime: 1000,
+      endTime: 2000,
+      texts: [{ content: 'Text 2' }],
+    }
+
+    // Add two segments
+    addSegment(text1)
+    curTime.value = 1000
+    addSegment(text2)
+    const p1 = exportProtocol()
+    expect(p1.tracks[0].children.length).toBe(2)
+
+    // Remove first segment
+    removeSegment('text-1')
+    const p2 = exportProtocol()
+    expect(p2.tracks.length).toBe(1) // Track still exists
+    expect(p2.tracks[0].children.length).toBe(1)
+    expect(p2.tracks[0].children[0].id).toBe('text-2')
+
+    // Undo - should restore first segment
+    undo()
+    const p3 = exportProtocol()
+    expect(p3.tracks[0].children.length).toBe(2)
+    expect(p3.tracks[0].children[0].id).toBe('text-1')
+    expect(p3.tracks[0].children[1].id).toBe('text-2')
+
+    // Redo - should remove first segment again
+    redo()
+    const p4 = exportProtocol()
+    expect(p4.tracks[0].children.length).toBe(1)
+    expect(p4.tracks[0].children[0].id).toBe('text-2')
+  })
+})
+
+describe('updateSegment - undo/redo', () => {
+  it('should support undo/redo for updating segment properties', () => {
+    const { addSegment, updateSegment, exportProtocol, undo, redo } = createVideoProtocolManager(protocol)
+
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+      opacity: 1,
+    }
+
+    // Add segment
+    addSegment(frame1)
+    const p1 = exportProtocol()
+    expect((p1.tracks[0].children[0] as IVideoFramesSegment).opacity).toBe(1)
+    expect((p1.tracks[0].children[0] as IVideoFramesSegment).url).toBe('file:///video1.mp4')
+
+    // Update segment
+    updateSegment((segment) => {
+      segment.opacity = 0.5
+      segment.url = 'file:///video2.mp4'
+    }, 'frame-1', 'frames')
+
+    const p2 = exportProtocol()
+    expect((p2.tracks[0].children[0] as IVideoFramesSegment).opacity).toBe(0.5)
+    expect((p2.tracks[0].children[0] as IVideoFramesSegment).url).toBe('file:///video2.mp4')
+
+    // Undo - should restore original values
+    undo()
+    const p3 = exportProtocol()
+    expect((p3.tracks[0].children[0] as IVideoFramesSegment).opacity).toBe(1)
+    expect((p3.tracks[0].children[0] as IVideoFramesSegment).url).toBe('file:///video1.mp4')
+
+    // Redo - should apply changes again
+    redo()
+    const p4 = exportProtocol()
+    expect((p4.tracks[0].children[0] as IVideoFramesSegment).opacity).toBe(0.5)
+    expect((p4.tracks[0].children[0] as IVideoFramesSegment).url).toBe('file:///video2.mp4')
+  })
+
+  it('should support undo/redo for updating text segment content', () => {
+    const { addSegment, updateSegment, exportProtocol, undo, redo } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 2000,
+      texts: [{ content: 'Original Text' }],
+    }
+
+    // Add segment
+    addSegment(text1)
+    const p1 = exportProtocol()
+    expect((p1.tracks[0].children[0] as ITextSegment).texts[0].content).toBe('Original Text')
+
+    // Update text content
+    updateSegment((segment) => {
+      segment.texts[0].content = 'Updated Text'
+    }, 'text-1', 'text')
+
+    const p2 = exportProtocol()
+    expect((p2.tracks[0].children[0] as ITextSegment).texts[0].content).toBe('Updated Text')
+
+    // Undo
+    undo()
+    const p3 = exportProtocol()
+    expect((p3.tracks[0].children[0] as ITextSegment).texts[0].content).toBe('Original Text')
+
+    // Redo
+    redo()
+    const p4 = exportProtocol()
+    expect((p4.tracks[0].children[0] as ITextSegment).texts[0].content).toBe('Updated Text')
+  })
+})
+
+describe('addTransition - undo/redo', () => {
+  it('should support undo/redo for adding transition', () => {
+    const { addSegment, addTransition, getSegment, undo, redo, curTime } = createVideoProtocolManager(protocol)
+
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    const frame2: IVideoFramesSegment = {
+      id: 'frame-2',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video2.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    // Add two segments to create main frames track
+    addSegment(frame1)
+    curTime.value = 1000
+    addSegment(frame2)
+
+    // Verify transition fields are undefined before adding
+    expect(getSegment('frame-1', 'frames')?.transitionIn).toBeUndefined()
+    expect(getSegment('frame-2', 'frames')?.transitionOut).toBeUndefined()
+
+    // Add transition between frame-1 and frame-2 at time 1000
+    const transition: ITransition = {
+      id: 'transition-1',
+      name: 'fade',
+      duration: 300,
+    }
+    const added = addTransition(transition, 1000)
+    expect(added).toBe(true)
+
+    // Verify transition was added (frame-1 gets transitionIn, frame-2 gets transitionOut)
+    expect(getSegment('frame-1', 'frames')?.transitionIn).toEqual(transition)
+    expect(getSegment('frame-2', 'frames')?.transitionOut).toEqual(transition)
+
+    // Undo - should remove transition (single operation)
+    undo()
+    expect(getSegment('frame-1', 'frames')?.transitionIn).toBeUndefined()
+    expect(getSegment('frame-2', 'frames')?.transitionOut).toBeUndefined()
+
+    // Redo - should restore transition
+    redo()
+    expect(getSegment('frame-1', 'frames')?.transitionIn).toEqual(transition)
+    expect(getSegment('frame-2', 'frames')?.transitionOut).toEqual(transition)
+  })
+})
+
+describe('removeTransition - undo/redo', () => {
+  it('should support undo/redo for removing transition', () => {
+    const { addSegment, addTransition, removeTransition, getSegment, undo, redo, curTime } = createVideoProtocolManager(protocol)
+
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    const frame2: IVideoFramesSegment = {
+      id: 'frame-2',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video2.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    // Add two segments and a transition
+    addSegment(frame1)
+    curTime.value = 1000
+    addSegment(frame2)
+
+    const transition: ITransition = {
+      id: 'transition-1',
+      name: 'fade',
+      duration: 300,
+    }
+    addTransition(transition, 1000)
+
+    // Verify transition was added
+    expect(getSegment('frame-1', 'frames')?.transitionIn).toEqual(transition)
+    expect(getSegment('frame-2', 'frames')?.transitionOut).toEqual(transition)
+
+    // Remove transition from frame-2
+    const removed = removeTransition('frame-2')
+    expect(removed).toBe(true)
+    expect(getSegment('frame-1', 'frames')?.transitionIn).toBeUndefined()
+    expect(getSegment('frame-2', 'frames')?.transitionOut).toBeUndefined()
+
+    // Undo - should restore transition (single operation)
+    undo()
+    expect(getSegment('frame-1', 'frames')?.transitionIn).toEqual(transition)
+    expect(getSegment('frame-2', 'frames')?.transitionOut).toEqual(transition)
+
+    // Redo - should remove transition again
+    redo()
+    expect(getSegment('frame-1', 'frames')?.transitionIn).toBeUndefined()
+    expect(getSegment('frame-2', 'frames')?.transitionOut).toBeUndefined()
+  })
+})
+
+describe('complex undo/redo scenarios', () => {
+  it('should support undo/redo for mixed operations', () => {
+    const { addSegment, updateSegment, exportProtocol, undo, redo, curTime } = createVideoProtocolManager(protocol)
+
+    // Operation 1: Add frame-1
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+      opacity: 1,
+    }
+    addSegment(frame1)
+
+    // Operation 2: Add frame-2
+    curTime.value = 1000
+    const frame2: IVideoFramesSegment = {
+      id: 'frame-2',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video2.mp4',
+      startTime: 0,
+      endTime: 1000,
+      opacity: 1,
+    }
+    addSegment(frame2)
+
+    // Operation 3: Update frame-1 opacity
+    updateSegment((segment) => {
+      segment.opacity = 0.5
+    }, 'frame-1', 'frames')
+
+    const p1 = exportProtocol()
+    expect(p1.tracks[0].children.length).toBe(2)
+    expect((p1.tracks[0].children[0] as IVideoFramesSegment).opacity).toBe(0.5)
+
+    // Undo operation 3 - opacity update
+    undo()
+    const p2 = exportProtocol()
+    expect((p2.tracks[0].children[0] as IVideoFramesSegment).opacity).toBe(1)
+
+    // Undo operation 2 - add frame-2
+    undo()
+    const p3 = exportProtocol()
+    expect(p3.tracks[0].children.length).toBe(1)
+    expect(p3.tracks[0].children[0].id).toBe('frame-1')
+
+    // Undo operation 1 - add frame-1
+    undo()
+    const p4 = exportProtocol()
+    expect(p4.tracks.length).toBe(0)
+
+    // Redo operation 1 - restore frame-1
+    redo()
+    const p5 = exportProtocol()
+    expect(p5.tracks.length).toBe(1)
+    expect(p5.tracks[0].children.length).toBe(1)
+    expect(p5.tracks[0].children[0].id).toBe('frame-1')
+
+    // Redo operation 2 - restore frame-2
+    redo()
+    const p6 = exportProtocol()
+    expect(p6.tracks[0].children.length).toBe(2)
+
+    // Redo operation 3 - restore opacity update
+    redo()
+    const p7 = exportProtocol()
+    expect((p7.tracks[0].children[0] as IVideoFramesSegment).opacity).toBe(0.5)
+  })
+
+  it('should clear redo history when new operation is performed after undo', () => {
+    const { addSegment, exportProtocol, undo, redo, redoCount, curTime } = createVideoProtocolManager(protocol)
+
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    const frame2: IVideoFramesSegment = {
+      id: 'frame-2',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video2.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    // Add frame-1
+    addSegment(frame1)
+    curTime.value = 1000
+    // Add frame-2
+    addSegment(frame2)
+
+    const p1 = exportProtocol()
+    expect(p1.tracks[0].children.length).toBe(2)
+
+    // Undo add frame-2
+    undo()
+    const p2 = exportProtocol()
+    expect(p2.tracks[0].children.length).toBe(1)
+    expect(redoCount.value).toBe(1)
+
+    // Add frame-3 (different segment) - should clear redo history
+    const frame3: IVideoFramesSegment = {
+      id: 'frame-3',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video3.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+    addSegment(frame3)
+    expect(redoCount.value).toBe(0) // Redo history cleared
+
+    const p3 = exportProtocol()
+    expect(p3.tracks[0].children.length).toBe(2)
+    expect(p3.tracks[0].children[1].id).toBe('frame-3') // Not frame-2
+
+    // Redo should not restore frame-2
+    redo()
+    const p4 = exportProtocol()
+    expect(p4.tracks[0].children.length).toBe(2)
+    expect(p4.tracks[0].children[1].id).toBe('frame-3')
   })
 })

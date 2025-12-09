@@ -244,9 +244,15 @@ importers:
 
   packages/ui:
     dependencies:
+      '@video-editor/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@video-editor/shared':
+        specifier: workspace:*
+        version: link:../shared
       vue:
-        specifier: ^3.2.47
-        version: 3.5.13(typescript@5.9.3)
+        specifier: 'catalog:'
+        version: 3.5.25(typescript@5.9.3)
 
   playground:
     dependencies:

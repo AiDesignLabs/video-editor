@@ -67,6 +67,9 @@ The monorepo contains 6 main packages under `/packages/`:
 
 - **@video-editor/ui** - Reusable UI components
   - Basic components: Button, Text
+  - **VideoTimeline** - Low-level timeline component with drag-and-drop
+  - **VideoEditorTimeline** - High-level timeline that connects VideoTimeline to protocol
+  - Timeline subcomponents: TimelineRoot, TimelinePlayhead, TimelineRuler, TimelineTracks, TimelineToolbar
 
 - **@video-editor/shared** - Shared types and utilities
   - `protocol.ts` - Core TypeScript interfaces for video protocol (IVideoProtocol, segments, tracks, etc.)
@@ -127,6 +130,68 @@ Uses Ajv (JSON Schema validator) with plugins (ajv-errors, ajv-keywords, ajv-for
 - Enforces unique segment and track IDs
 - Validates time ranges, numeric constraints, and required fields
 
+### UI Architecture: Timeline Components
+
+#### VideoTimeline Component
+
+Located in `packages/ui/src/VideoTimeline/`, this is a low-level, reusable timeline component with advanced drag-and-drop capabilities.
+
+**Core Features:**
+- Segment drag-and-drop with intelligent track insertion
+- Visual feedback: snap guides, placeholder indicators, new track lines
+- Segment resizing with edge handles
+- Time-based ruler with major/minor ticks
+- Track management with automatic empty track cleanup
+
+**Drag-and-Drop System** (implemented via hooks pattern):
+
+The drag-and-drop logic is modularized into three specialized hooks in `packages/ui/src/VideoTimeline/hooks/`:
+
+1. **`useDragDetection.ts`** - Position detection logic
+   - `detectTrackGap()` - Detects if mouse is in gap between tracks for new track creation
+   - `resolveTrackIndexFromClientY()` - Converts mouse Y position to track index
+
+2. **`useDragVisualFeedback.ts`** - Visual feedback calculations
+   - `snapGuides` - Computed snap guide positions when segment boundaries align (100ms threshold)
+
+3. **`useDragAndDrop.ts`** - Main drag coordination
+   - Handles drag start, move, and end events
+   - Implements track type compatibility rules:
+     - **Same type tracks**: Drop in track = add to track, drop in gap = create new track
+     - **Different type tracks**: Drop position determines insert index (upper half = insert above, lower half = insert below)
+   - Separates visual position (follows mouse) from actual placement position (enforced by rules)
+   - Emits `SegmentDragPayload` with fields: `targetTrackIndex`, `visualTrackIndex`, `isNewTrack`, `newTrackInsertIndex`, `mouseDeltaY`, `isValidTarget`
+
+**Key Design Decisions:**
+- Dragged segment DOM follows raw mouse position for smooth UX (`mouseDeltaY` tracks pixel offset)
+- Green placeholder shows final drop position (may differ from mouse position)
+- Blue line indicates new track creation position
+- Empty tracks are automatically deleted when last segment is removed
+- Segments can overlap in time on same track
+
+#### VideoEditorTimeline Component
+
+Located in `packages/ui/src/VideoEditorTimeline/`, this is the high-level wrapper that connects VideoTimeline to the protocol system.
+
+**Responsibilities:**
+- Protocol mutation: Converts drag/resize events into protocol updates
+- Track creation/deletion: Manages track lifecycle with proper indexing
+- Segment rendering: Provides custom segment components (FramesSegment, SegmentBase)
+- Color management: Maps track types to colors
+- Undo/redo integration: All mutations go through protocol manager's history system
+
+**Key Functions:**
+- `applySegmentPosition()` - Handles segment drop with track creation/deletion logic
+- `applySegmentResize()` - Updates segment time bounds
+- Handles `isMain` flag for frames tracks (only one frames track can be main)
+
+**Protocol Update Pattern:**
+```typescript
+const next = cloneProtocol(props.protocol) // Clone with Immer
+// ... mutate next ...
+emit('update:protocol', next) // Triggers undo/redo history
+```
+
 ## Important Notes
 
 ### Commit Message Convention
@@ -164,3 +229,24 @@ Examples:
 - **pnpm only** - enforced via preinstall hook
 - Workspace protocol for internal dependencies (`workspace:*`)
 - Supports nested packages (up to 2 levels)
+
+## Code Style Guidelines
+
+### Comments
+
+- All code comments must be in English
+- Use JSDoc-style comments for functions and interfaces
+- Inline comments should explain "why" not "what"
+
+### Vue Components
+
+- Use Vue 3 Composition API with `<script setup lang="ts">`
+- Define component name with `defineOptions({ name: 'ComponentName' })`
+- Use TypeScript for all props and emits
+- Prefer computed properties over methods for derived state
+
+### File Organization
+
+- Group related hooks in dedicated files (see VideoTimeline hooks pattern)
+- Place types in separate `types.ts` files for reusability
+- Component folders should contain: `index.vue`, `types.ts`, `hooks/` (if complex)

@@ -7,10 +7,11 @@ import type {
   TimelineTick,
   TimelineTrack,
 } from './types'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import TimelinePlayhead from '../timeline/TimelinePlayhead.vue'
 import TimelineRuler from '../timeline/TimelineRuler.vue'
 import TimelineToolbar from '../timeline/TimelineToolbar.vue'
+import { useDragAndDrop } from './hooks'
 
 defineOptions({ name: 'VideoTimeline' })
 
@@ -144,27 +145,92 @@ const segmentLayouts = computed(() => props.tracks.map((track, trackIndex) => ({
   }),
 })))
 
-interface DragState {
-  layout: SegmentLayout
-  initialX: number
-  initialY: number
-  moved: boolean
-}
-
 interface ResizeState {
   layout: SegmentLayout
   edge: 'start' | 'end'
   initialX: number
 }
 
-const dragPreview = ref<SegmentDragPayload | null>(null)
+// 使用拖拽 hook
+const {
+  draggingState,
+  dragPreview,
+  snapGuides,
+  startDrag,
+  handleDragMove,
+  handleDragEnd,
+} = useDragAndDrop({
+  tracks: toRef(props, 'tracks'),
+  tracksRef,
+  trackHeightPx,
+  trackGapPx,
+  pixelsPerMs,
+  disableInteraction: toRef(props, 'disableInteraction'),
+  snap,
+  onDragStart: (payload) => {
+    emit('segmentDragStart', payload)
+  },
+  onDrag: (payload) => {
+    emit('segmentDrag', payload)
+  },
+  onDragEnd: (payload) => {
+    emit('segmentDragEnd', payload)
+  },
+})
+
 const resizePreview = ref<SegmentResizePayload | null>(null)
 const dragPreviewPayload = computed(() => dragPreview.value)
 const resizePreviewPayload = computed(() => resizePreview.value)
-const draggingState = ref<DragState | null>(null)
 const resizingState = ref<ResizeState | null>(null)
 const draggingPlayhead = ref(false)
 const isMouseDownOnTimeline = ref(false)
+const justFinishedDragging = ref(false)
+
+// Calculate dragged segment position offset
+const draggingSegmentLayout = computed(() => {
+  if (!dragPreview.value)
+    return null
+
+  const payload = dragPreview.value
+
+  // Find original layout info
+  const trackLayout = segmentLayouts.value.find(t => t.track.id === payload.track.id)
+  const layout = trackLayout?.segments.find(s => s.segment.id === payload.segment.id)
+
+  if (!layout)
+    return null
+
+  const deltaX = (payload.startTime - payload.segment.start) * pixelsPerMs.value
+
+  // Calculate vertical position - use raw mouse Y offset to let segment fully follow mouse
+  const originalTop = rulerHeightPx.value + payload.trackIndex * (trackHeightPx.value + trackGapPx.value) + trackGapPx.value
+  const top = originalTop + payload.mouseDeltaY
+
+  return {
+    ...layout,
+    left: layout.left + deltaX,
+    top,
+  }
+})
+
+// Calculate placeholder position
+const placeholderTop = computed(() => {
+  if (!dragPreview.value)
+    return 0
+
+  const payload = dragPreview.value
+  if (payload.isNewTrack) {
+    // New track - placeholder shows where new track will be created
+    if (payload.newTrackInsertIndex === 0) {
+      // Before first track - show below ruler
+      return rulerHeightPx.value + trackGapPx.value
+    }
+    // Other positions - show at corresponding track index position
+    return rulerHeightPx.value + payload.targetTrackIndex * (trackHeightPx.value + trackGapPx.value) + trackGapPx.value
+  }
+  // Not creating new track - normal calculation
+  return rulerHeightPx.value + payload.targetTrackIndex * (trackHeightPx.value + trackGapPx.value) + trackGapPx.value
+})
 
 onMounted(() => {
   if (viewportRef.value) {
@@ -272,6 +338,13 @@ function snap(time: number) {
 function handleBackgroundClick(event: MouseEvent) {
   if (!contentRef.value)
     return
+
+  // 如果刚刚完成拖拽,不触发背景点击
+  if (justFinishedDragging.value) {
+    justFinishedDragging.value = false
+    return
+  }
+
   const rect = contentRef.value.getBoundingClientRect()
   const x = event.clientX - rect.left
   const nextTime = snap(x / Math.max(pixelsPerMs.value, 0.0001))
@@ -299,33 +372,6 @@ function seekByClientX(clientX: number) {
   emit('update:currentTime', nextTime)
 }
 
-function resolveTrackIndexFromClientY(clientY: number) {
-  if (!tracksRef.value)
-    return -1
-  if (!props.tracks.length)
-    return -1
-  const rect = tracksRef.value.getBoundingClientRect()
-  const relativeY = clientY - rect.top
-  const step = trackHeightPx.value + trackGapPx.value
-  if (relativeY < 0)
-    return -1
-  return Math.min(
-    props.tracks.length - 1,
-    Math.max(0, Math.floor(relativeY / step)),
-  )
-}
-
-function startDrag(layout: SegmentLayout, event: MouseEvent) {
-  if (props.disableInteraction)
-    return
-  draggingState.value = {
-    layout,
-    initialX: event.clientX,
-    initialY: event.clientY,
-    moved: false,
-  }
-}
-
 function startResize(layout: SegmentLayout, edge: 'start' | 'end', event: MouseEvent) {
   if (props.disableInteraction)
     return
@@ -347,54 +393,6 @@ function startResize(layout: SegmentLayout, edge: 'start' | 'end', event: MouseE
   }
   resizePreview.value = payload
   emit('segmentResizeStart', payload)
-}
-
-function emitDragPreview(state: DragState, clientX: number, clientY: number, trigger: 'drag' | 'end') {
-  const { layout, initialX, initialY } = state
-  const deltaX = clientX - initialX
-  const deltaY = clientY - initialY
-  const movedEnough = Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2
-  if (!state.moved && movedEnough) {
-    state.moved = true
-    const payload: SegmentDragPayload = {
-      segment: layout.segment,
-      track: layout.track,
-      trackIndex: layout.trackIndex,
-      segmentIndex: layout.segmentIndex,
-      startTime: layout.segment.start,
-      endTime: layout.segment.end,
-      targetTrackIndex: layout.trackIndex,
-      targetTrackId: layout.track.id,
-    }
-    emit('segmentDragStart', payload)
-  }
-
-  const duration = layout.segment.end - layout.segment.start
-  const rawIndex = resolveTrackIndexFromClientY(clientY)
-  const targetTrackIndex = rawIndex >= 0 ? rawIndex : layout.trackIndex
-  const targetTrack = props.tracks[targetTrackIndex] ?? layout.track
-  const startTime = snap(layout.segment.start + deltaX / Math.max(pixelsPerMs.value, 0.0001))
-  const nextStart = Math.max(0, startTime)
-  const nextEnd = nextStart + duration
-  const payload: SegmentDragPayload = {
-    segment: layout.segment,
-    track: layout.track,
-    trackIndex: layout.trackIndex,
-    segmentIndex: layout.segmentIndex,
-    startTime: nextStart,
-    endTime: nextEnd,
-    targetTrackIndex,
-    targetTrackId: targetTrack?.id ?? layout.track.id,
-  }
-  dragPreview.value = payload
-
-  if (!state.moved)
-    return
-
-  if (trigger === 'drag')
-    emit('segmentDrag', payload)
-  else if (trigger === 'end')
-    emit('segmentDragEnd', payload)
 }
 
 function emitResizePreview(state: ResizeState, clientX: number, trigger: 'drag' | 'end') {
@@ -448,9 +446,8 @@ function handleGlobalMouseMove(event: MouseEvent) {
     return
   }
 
-  if (draggingState.value) {
-    emitDragPreview(draggingState.value, event.clientX, event.clientY, 'drag')
-  }
+  // 使用 hook 中的拖拽处理
+  handleDragMove(event)
 }
 
 function handleGlobalMouseUp(event: MouseEvent) {
@@ -458,6 +455,8 @@ function handleGlobalMouseUp(event: MouseEvent) {
     draggingPlayhead.value = false
     isMouseDownOnTimeline.value = false
     seekByClientX(event.clientX)
+    justFinishedDragging.value = true
+    return
   }
 
   if (resizingState.value) {
@@ -465,20 +464,24 @@ function handleGlobalMouseUp(event: MouseEvent) {
     resizingState.value = null
     resizePreview.value = null
     isMouseDownOnTimeline.value = false
+    justFinishedDragging.value = true
     return
   }
 
+  // 处理拖拽结束或点击
   if (draggingState.value) {
-    if (draggingState.value.moved) {
-      emitDragPreview(draggingState.value, event.clientX, event.clientY, 'end')
-    }
-    else {
+    if (!draggingState.value.moved) {
       const { layout } = draggingState.value
       handleSegmentClick(layout, event)
     }
-    draggingState.value = null
-    dragPreview.value = null
+    else {
+      // 如果进行了拖拽,标记为刚完成拖拽,防止触发背景点击
+      justFinishedDragging.value = true
+    }
   }
+
+  // 使用 hook 中的拖拽结束处理
+  handleDragEnd(event)
 
   isMouseDownOnTimeline.value = false
 }
@@ -626,6 +629,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
             v-for="trackLayout in segmentLayouts"
             :key="trackLayout.track.id"
             class="ve-track"
+            :class="{ 've-track--main': trackLayout.track.isMain }"
             :style="{ height: `${trackHeightPx}px` }"
           >
             <slot
@@ -639,18 +643,18 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
               <div class="ve-track__body">
                 <div
                   v-for="layout in trackLayout.segments"
+                  v-show="dragPreview?.segment.id !== layout.segment.id && resizePreview?.segment.id !== layout.segment.id"
                   :key="layout.segment.id"
                   class="ve-segment"
                   :class="{
                     've-segment--selected': layout.isSelected,
-                    've-segment--dragging': dragPreview?.segment.id === layout.segment.id,
                   }"
                   :style="{
                     left: `${layout.left}px`,
                     width: `${layout.width}px`,
-                    backgroundColor: layout.segment.color || trackLayout.track.color || '#4f46e5',
+                    backgroundColor: layout.segment.color || trackLayout.track.color || 'var(--ve-primary)',
                   }"
-                  @mousedown.prevent="startDrag(layout, $event)"
+                  @mousedown.prevent.stop="startDrag(layout, $event)"
                   @click.stop="handleSegmentClick(layout, $event)"
                 >
                   <slot
@@ -706,17 +710,55 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
           </div>
         </div>
 
-        <template v-if="dragPreviewPayload">
+        <!-- 拖拽中的 segment (提升到轨道外避免被 overflow 裁剪) -->
+        <template v-if="draggingSegmentLayout">
           <div
-            class="ve-segment ve-segment--preview"
+            class="ve-segment ve-segment--dragging"
+            :style="{
+              left: `${draggingSegmentLayout.left}px`,
+              width: `${draggingSegmentLayout.width}px`,
+              top: `${draggingSegmentLayout.top}px`,
+              height: `${trackHeightPx}px`,
+              backgroundColor: draggingSegmentLayout.segment.color || 'var(--ve-primary)',
+            }"
+          >
+            <slot
+              name="segment"
+              :layout="draggingSegmentLayout"
+              :segment="draggingSegmentLayout.segment"
+              :track="draggingSegmentLayout.track"
+              :is-selected="draggingSegmentLayout.isSelected"
+            >
+              <div class="ve-segment__content">
+                <div class="ve-segment__title">
+                  {{ draggingSegmentLayout.segment.type || 'segment' }}
+                </div>
+                <div class="ve-segment__time">
+                  {{ formatTime(draggingSegmentLayout.segment.start) }} - {{ formatTime(draggingSegmentLayout.segment.end) }}
+                </div>
+              </div>
+            </slot>
+          </div>
+        </template>
+
+        <!-- Placeholder for final drop position (only show when not creating new track) -->
+        <template v-if="dragPreviewPayload && !dragPreviewPayload.isNewTrack">
+          <div
+            class="ve-segment ve-segment--placeholder"
             :style="{
               left: `${dragPreviewPayload.startTime * pixelsPerMs}px`,
               width: `${(dragPreviewPayload.endTime - dragPreviewPayload.startTime) * pixelsPerMs}px`,
-              top: `${rulerHeightPx + dragPreviewPayload.targetTrackIndex * (trackHeightPx + trackGapPx) + trackGapPx}px`,
+              top: `${placeholderTop}px`,
               height: `${trackHeightPx}px`,
-              backgroundColor: dragPreviewPayload.segment.color || '#3730a3',
             }"
-          />
+          >
+            <div
+              class="ve-segment--placeholder-inner"
+              :style="{
+                backgroundColor: dragPreviewPayload.segment.color || 'var(--ve-primary)',
+              }"
+            />
+          </div>
         </template>
 
         <template v-if="resizePreviewPayload">
@@ -727,7 +769,33 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
               width: `${(resizePreviewPayload.endTime - resizePreviewPayload.startTime) * pixelsPerMs}px`,
               top: `${rulerHeightPx + resizePreviewPayload.trackIndex * (trackHeightPx + trackGapPx) + trackGapPx}px`,
               height: `${trackHeightPx}px`,
-              backgroundColor: resizePreviewPayload.segment.color || '#3730a3',
+              backgroundColor: resizePreviewPayload.segment.color || 'var(--ve-primary)',
+            }"
+          />
+        </template>
+
+        <!-- 吸附辅助线 -->
+        <template v-if="dragPreview && snapGuides.length">
+          <div
+            v-for="guide in snapGuides"
+            :key="`snap-${guide.time}`"
+            class="ve-snap-guide"
+            :style="{
+              left: `${guide.left}px`,
+              top: `${rulerHeightPx}px`,
+              height: `calc(100% - ${rulerHeightPx}px)`,
+            }"
+          />
+        </template>
+
+        <!-- 新轨道创建提示 - 蓝色线 -->
+        <template v-if="dragPreview && dragPreview.isNewTrack">
+          <div
+            class="ve-new-track-line"
+            :style="{
+              top: `${rulerHeightPx + dragPreview.targetTrackIndex * (trackHeightPx + trackGapPx)}px`,
+              left: '0',
+              right: '0',
             }"
           />
         </template>
@@ -758,12 +826,16 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
   --at-apply: relative bg-[#f8fafc] overflow-hidden;
 }
 
+:where(.ve-timeline .ve-track--main) {
+  background-color: #F4F4F6;
+}
+
 :where(.ve-timeline .ve-track__body) {
   --at-apply: relative h-full;
 }
 
 :where(.ve-timeline .ve-segment) {
-  --at-apply: absolute top-0 bottom-0 rounded-[4px] text-[#0f172a] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)] cursor-pointer flex items-center overflow-hidden transition-[box-shadow,transform] duration-150;
+  --at-apply: absolute top-0 bottom-0 rounded-[4px] text-[#0f172a] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)] cursor-pointer flex items-center overflow-hidden transition-[box-shadow] duration-150;
 }
 
 :where(.ve-timeline .ve-segment--selected) {
@@ -771,7 +843,14 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 }
 
 :where(.ve-timeline .ve-segment--dragging) {
-  --at-apply: opacity-50;
+  --at-apply: absolute z-50 rounded-[4px] text-[#0f172a] cursor-pointer flex items-center overflow-hidden pointer-events-none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+:where(.ve-timeline .ve-segment--preview) {
+  --at-apply: absolute z-45 rounded-[4px] pointer-events-none;
+  opacity: 0.7;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 0 0 2px rgba(255, 255, 255, 0.4);
 }
 
 :where(.ve-timeline .ve-segment__content) {
@@ -814,7 +893,29 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
   height: 1px;
 }
 
-:where(.ve-timeline .ve-segment--preview) {
-  --at-apply: absolute opacity-35 pointer-events-none rounded-[4px] shadow-[0_0_0_2px_rgba(34,34,38,0.5)];
+:where(.ve-timeline .ve-segment--placeholder) {
+  --at-apply: absolute pointer-events-none rounded-[4px] z-24;
+  background: rgba(34, 34, 38, 0.12);
+  border: 2px solid rgba(34, 34, 38, 0.6);
+  box-shadow: 0 2px 8px rgba(34, 34, 38, 0.3);
+}
+
+:where(.ve-timeline .ve-segment--placeholder-inner) {
+  --at-apply: absolute inset-0 rounded-[2px];
+  opacity: 0.2;
+}
+
+:where(.ve-timeline .ve-snap-guide) {
+  --at-apply: absolute pointer-events-none z-20;
+  width: 2px;
+  background: var(--ve-primary);
+  opacity: 0.7;
+}
+
+:where(.ve-timeline .ve-new-track-line) {
+  --at-apply: absolute pointer-events-none z-25;
+  height: 2px;
+  background: var(--ve-primary);
+  opacity: 0.8;
 }
 </style>

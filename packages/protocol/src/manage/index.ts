@@ -34,28 +34,92 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     return segment.id
   }
 
-  const addFramesSegment = (framesSegment: TrackTypeMapSegment['frames'], track: TrackTypeMapTrack['frames']) => {
-    const insertIndex = findInsertFramesSegmentIndex(track.children, curTime.value)
+  /**
+   * Insert a frames segment into a frames track and rebuild the timeline
+   * This is the core logic for frames track operations, reused by addSegment, moveSegment, etc.
+   */
+  const insertFramesSegmentIntoTrack = (
+    framesSegment: TrackTypeMapSegment['frames'],
+    track: TrackTypeMapTrack['frames'],
+    insertTime: number,
+  ) => {
+    const insertIndex = findInsertFramesSegmentIndex(track.children, insertTime)
+    const duration = framesSegment.endTime - framesSegment.startTime
 
+    // Calculate segment position based on insert index
     if (insertIndex === 0) {
-      framesSegment.endTime -= framesSegment.startTime
       framesSegment.startTime = 0
+      framesSegment.endTime = duration
     }
     else {
       const prevSegment = track.children[insertIndex - 1]
-      framesSegment.endTime = prevSegment.endTime + (framesSegment.endTime - framesSegment.startTime)
       framesSegment.startTime = prevSegment.endTime
+      framesSegment.endTime = prevSegment.endTime + duration
     }
 
+    // Insert segment
     track.children.splice(insertIndex, 0, framesSegment)
 
+    // Rebuild timeline from insert position onwards
     for (let j = insertIndex; j < track.children.length; j++) {
       const segment = track.children[j]
       const preSegmentEndTime = track.children[j - 1]?.endTime ?? 0
-      segment.endTime = preSegmentEndTime + (segment.endTime - segment.startTime)
+      const segDuration = segment.endTime - segment.startTime
       segment.startTime = preSegmentEndTime
+      segment.endTime = preSegmentEndTime + segDuration
     }
+
     return framesSegment.id
+  }
+
+  const addFramesSegment = (framesSegment: TrackTypeMapSegment['frames'], track: TrackTypeMapTrack['frames']) => {
+    return insertFramesSegmentIntoTrack(framesSegment, track, curTime.value)
+  }
+
+  /**
+   * Rebuild track timeline from a specific segment index
+   * - Main frames track: ensures no gaps (continuous timeline)
+   * - Other tracks (including non-main frames): allows gaps but prevents overlaps
+   */
+  const rebuildTrackTimeline = (track: TrackUnion, fromIndex = 0) => {
+    const children = track.children as SegmentUnion[]
+
+    // Sort by startTime first
+    children.sort((a, b) => a.startTime - b.startTime)
+
+    // Check if this is main frames track
+    const isMainFramesTrack = track.trackType === 'frames' && (track as TrackTypeMapTrack['frames']).isMain
+
+    // Rebuild timeline from the specified index
+    for (let i = fromIndex; i < children.length; i++) {
+      const seg = children[i]
+      const duration = seg.endTime - seg.startTime
+      const prevSeg = children[i - 1]
+
+      if (!prevSeg) {
+        // First segment: main frames track must start at 0
+        if (isMainFramesTrack) {
+          seg.startTime = 0
+          seg.endTime = duration
+        }
+        continue
+      }
+
+      if (isMainFramesTrack) {
+        // Main frames track: no gaps allowed, each segment follows previous immediately
+        seg.startTime = prevSeg.endTime
+        seg.endTime = prevSeg.endTime + duration
+      }
+      else {
+        // Other tracks: allow gaps but prevent overlaps
+        if (seg.startTime < prevSeg.endTime) {
+          // Overlap detected, push this segment to start right after previous
+          seg.startTime = prevSeg.endTime
+          seg.endTime = prevSeg.endTime + duration
+        }
+        // else: no overlap, keep original time (allows gaps)
+      }
+    }
   }
 
   const normalizedSegment = (segment: PartialByKeys<TrackTypeMapSegment[ITrackType], 'id'>) => {
@@ -131,6 +195,137 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     })
   }
 
+  const moveSegment = (options: {
+    segmentId: string
+    sourceTrackId: string
+    targetTrackId?: string
+    startTime: number
+    endTime: number
+    isNewTrack?: boolean
+    newTrackInsertIndex?: number
+  }) => {
+    return updateProtocol((protocol) => {
+      // Find source track and segment
+      const sourceTrack = protocol.tracks.find(t => t.trackId === options.sourceTrackId)
+      if (!sourceTrack)
+        return false
+
+      const segmentIndex = sourceTrack.children.findIndex(seg => seg.id === options.segmentId)
+      if (segmentIndex < 0)
+        return false
+
+      const segment = sourceTrack.children[segmentIndex] as SegmentUnion
+
+      // Check if moving within same track (same trackId and not creating new track)
+      const isSameTrack = options.targetTrackId === options.sourceTrackId && options.isNewTrack !== true
+
+      if (isSameTrack) {
+        // Moving within same track - just update time and rebuild to avoid overlaps
+        segment.startTime = options.startTime
+        segment.endTime = options.endTime
+        rebuildTrackTimeline(sourceTrack)
+      }
+      else {
+        // Moving to different track or creating new track
+        // Step 1: Remove from source track
+        sourceTrack.children.splice(segmentIndex, 1)
+
+        // Step 2: Rebuild source track timeline to avoid overlaps
+        if (sourceTrack.children.length > 0) {
+          rebuildTrackTimeline(sourceTrack)
+        }
+
+        // Step 3: Delete source track if empty
+        if (sourceTrack.children.length === 0) {
+          const trackIdx = protocol.tracks.findIndex(t => t.trackId === sourceTrack.trackId)
+          if (trackIdx >= 0) {
+            protocol.tracks.splice(trackIdx, 1)
+          }
+        }
+
+        // Step 4: Update segment time
+        segment.startTime = options.startTime
+        segment.endTime = options.endTime
+
+        // Step 5: Add to target track or create new track
+        if (options.isNewTrack && options.newTrackInsertIndex !== undefined) {
+          // Create new track
+          const isFirstFramesTrack = segment.segmentType === 'frames'
+            && !protocol.tracks.some(t => t.trackType === 'frames' && (t as any).isMain)
+
+          const newTrack: TrackUnion = {
+            trackId: genRandomId(),
+            trackType: segment.segmentType,
+            children: [segment],
+            ...(isFirstFramesTrack ? { isMain: true } : {}),
+          } as TrackUnion
+
+          // Only main frames track requires segments to start at 0
+          // Non-main frames tracks can have segments at any time position
+          if (isFirstFramesTrack) {
+            const duration = segment.endTime - segment.startTime
+            segment.startTime = 0
+            segment.endTime = duration
+          }
+          // For non-main tracks (including non-main frames), keep user's drag position
+
+          protocol.tracks.splice(options.newTrackInsertIndex, 0, newTrack)
+        }
+        else if (options.targetTrackId) {
+          // Add to existing target track
+          const targetTrack = protocol.tracks.find(t => t.trackId === options.targetTrackId)
+          if (!targetTrack || targetTrack.trackType !== segment.segmentType)
+            return false
+
+          if (targetTrack.trackType === 'frames') {
+            // Frames track: reuse insertFramesSegmentIntoTrack helper
+            const framesSegment = segment as TrackTypeMapSegment['frames']
+            insertFramesSegmentIntoTrack(
+              framesSegment,
+              targetTrack as TrackTypeMapTrack['frames'],
+              segment.startTime,
+            )
+          }
+          else {
+            // Other tracks: add and rebuild to avoid overlaps
+            ;(targetTrack.children as SegmentUnion[]).push(segment)
+            rebuildTrackTimeline(targetTrack)
+          }
+        }
+      }
+
+      return true
+    })
+  }
+
+  const resizeSegment = (options: {
+    segmentId: string
+    trackId: string
+    startTime: number
+    endTime: number
+  }) => {
+    return updateProtocol((protocol) => {
+      const track = protocol.tracks.find(t => t.trackId === options.trackId)
+      if (!track)
+        return false
+
+      const segmentIndex = track.children.findIndex(seg => seg.id === options.segmentId)
+      if (segmentIndex < 0)
+        return false
+
+      const segment = track.children[segmentIndex] as SegmentUnion
+
+      // Update segment time
+      segment.startTime = options.startTime
+      segment.endTime = options.endTime
+
+      // Rebuild timeline from current segment onwards to avoid overlaps
+      rebuildTrackTimeline(track, segmentIndex)
+
+      return true
+    })
+  }
+
   function updateSegment<T extends ITrackType>(updater: (segment: TrackTypeMapSegment[T]) => void, id?: string, type?: T) {
     updateProtocol((protocol) => {
       const _id = id ?? selectedSegment.value?.id
@@ -155,47 +350,82 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
   }
 
   const addTransition = (transition: ITransition, addTime?: number) => {
-    const mainTrack = tracks.value.frames?.find(track => track.trackType === 'frames' && track.isMain) as TrackTypeMapTrack['frames'] | undefined
-    if (!mainTrack || mainTrack.children.length < 2)
-      return false
-    const insertTime = Math.max(0, addTime ?? curTime.value)
-    let startSegmentIdx = findInsertFramesSegmentIndex(mainTrack.children, insertTime) - 1
+    return updateProtocol((protocol) => {
+      const mainTrack = protocol.tracks.find(track => track.trackType === 'frames' && (track as any).isMain) as TrackTypeMapTrack['frames'] | undefined
+      if (!mainTrack || mainTrack.children.length < 2)
+        return false
 
-    // cross first segment left half time, or
-    // cross last segment right half time
-    startSegmentIdx = Math.min(Math.max(0, startSegmentIdx), mainTrack.children.length - 2)
+      const insertTime = Math.max(0, addTime ?? curTime.value)
+      let startSegmentIdx = findInsertFramesSegmentIndex(mainTrack.children, insertTime) - 1
 
-    // update transition
-    // slice handle error transition data
-    updateSegment((segment) => {
-      segment.transitionIn = clone(transition)
-    }, mainTrack.children[startSegmentIdx].id, 'frames')
-    updateSegment((segment) => {
-      segment.transitionOut = clone(transition)
-    }, mainTrack.children[startSegmentIdx + 1].id, 'frames')
+      // cross first segment left half time, or
+      // cross last segment right half time
+      startSegmentIdx = Math.min(Math.max(0, startSegmentIdx), mainTrack.children.length - 2)
 
-    return true
+      // Validate transition object before applying
+      // Transition requires: id (string), name (string), duration (number >= 0)
+      if (!transition || typeof transition !== 'object'
+        || typeof transition.id !== 'string'
+        || typeof transition.name !== 'string'
+        || typeof transition.duration !== 'number'
+        || transition.duration < 0) {
+        // Invalid transition, return true but don't modify segments
+        return true
+      }
+
+      // update transition - modify both segments in a single atomic operation
+      const segment1 = mainTrack.children[startSegmentIdx] as TrackTypeMapSegment['frames']
+      const segment2 = mainTrack.children[startSegmentIdx + 1] as TrackTypeMapSegment['frames']
+
+      const clonedTransition = clone(transition)
+
+      // Apply the transition to both segments
+      segment1.transitionIn = clonedTransition
+      segment2.transitionOut = clonedTransition
+
+      return true
+    })
   }
 
   const removeTransition = (segmentId: string) => {
-    const mainTrack = tracks.value.frames?.find(track => track.trackType === 'frames' && track.isMain) as TrackTypeMapTrack['frames'] | undefined
-    if (!mainTrack)
-      return false
-    const idx = mainTrack.children.findIndex(segment => segment.id === segmentId)
+    return updateProtocol((protocol) => {
+      const mainTrack = protocol.tracks.find(track => track.trackType === 'frames' && (track as any).isMain) as TrackTypeMapTrack['frames'] | undefined
+      if (!mainTrack)
+        return false
 
-    if (idx === -1)
-      return false
+      const idx = mainTrack.children.findIndex(segment => segment.id === segmentId)
+      if (idx === -1)
+        return false
 
-    // update transition
-    // slice handle error transition data
-    updateSegment((segment) => {
-      segment.transitionIn = undefined
-    }, mainTrack.children[idx].id, 'frames')
-    updateSegment((segment) => {
-      segment.transitionOut = undefined
-    }, mainTrack.children[idx + 1].id, 'frames')
+      // Remove transition: can be called with either segment of the transition pair
+      // If segment has transitionIn, it's the start - clear transitionIn and next segment's transitionOut
+      // If segment has transitionOut, it's the end - clear transitionOut and previous segment's transitionIn
+      const currentSegment = mainTrack.children[idx] as TrackTypeMapSegment['frames']
+      const prevSegment = idx > 0 ? mainTrack.children[idx - 1] as TrackTypeMapSegment['frames'] : undefined
+      const nextSegment = idx < mainTrack.children.length - 1 ? mainTrack.children[idx + 1] as TrackTypeMapSegment['frames'] : undefined
 
-    return true
+      let removed = false
+
+      // If current has transitionIn, it's the first segment of the pair
+      if (currentSegment.transitionIn) {
+        currentSegment.transitionIn = undefined
+        if (nextSegment) {
+          nextSegment.transitionOut = undefined
+        }
+        removed = true
+      }
+
+      // If current has transitionOut, it's the second segment of the pair
+      if (currentSegment.transitionOut) {
+        currentSegment.transitionOut = undefined
+        if (prevSegment) {
+          prevSegment.transitionIn = undefined
+        }
+        removed = true
+      }
+
+      return removed
+    })
   }
 
   const updateTransition = (segmentId: string, updater: (transition: ITransition) => void) => {
@@ -234,6 +464,8 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     addSegment,
     removeSegment,
     updateSegment,
+    moveSegment,
+    resizeSegment,
     exportProtocol,
     addTransition,
     removeTransition,

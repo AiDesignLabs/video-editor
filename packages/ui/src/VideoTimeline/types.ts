@@ -12,6 +12,7 @@ export interface TimelineTrack {
   label?: string
   type?: string
   color?: string
+  isMain?: boolean
   payload?: unknown
   segments: TimelineSegment[]
 }
@@ -49,6 +50,11 @@ export interface SegmentDragPayload {
   endTime: number
   targetTrackIndex: number
   targetTrackId: string
+  isNewTrack: boolean
+  newTrackInsertIndex?: number
+  visualTrackIndex: number // Visual preview track index that follows mouse
+  isValidTarget: boolean // Whether the current mouse position is a valid drop target
+  mouseDeltaY: number // Raw mouse Y-axis offset in pixels
 }
 
 export interface SegmentResizePayload {

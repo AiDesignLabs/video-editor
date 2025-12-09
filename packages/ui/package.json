@@ -21,7 +21,7 @@
     "preview": "vite preview"
   },
   "peerDependencies": {
-    "vue": "^3.2.47"
+    "vue": "catalog:"
   },
   "dependencies": {
     "@video-editor/protocol": "workspace:*",

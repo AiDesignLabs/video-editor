@@ -86,7 +86,7 @@ const initialProtocol: IVideoProtocol = {
   ],
 }
 
-const { curTime, exportProtocol, trackMap, addSegment, updateSegment } = createVideoProtocolManager(initialProtocol)
+const { curTime, exportProtocol, trackMap, addSegment, updateSegment, moveSegment, resizeSegment } = createVideoProtocolManager(initialProtocol)
 const protocolRef = computed(() => clone(exportProtocol()))
 const protocol = reactive(protocolRef.value)
 watch(protocolRef, next => Object.assign(protocol, clone(next)), { immediate: true })
@@ -215,15 +215,29 @@ function handleTimelineCurrentTime(next: number) {
   seekTo(next)
 }
 
-function handleTimelineSegmentTiming(payload: { segment: SegmentUnion }) {
-  updateSegment((segment) => {
-    segment.startTime = payload.segment.startTime
-    segment.endTime = payload.segment.endTime
-  }, payload.segment.id, payload.segment.segmentType)
-}
-
 function handleTimelineSegmentClick(payload: { segment: SegmentUnion }) {
   selectedSegmentId.value = payload.segment.id
+}
+
+function handleSegmentDragEnd(payload: any) {
+  moveSegment({
+    segmentId: payload.segment.id,
+    sourceTrackId: payload.track.id,
+    targetTrackId: payload.targetTrackId,
+    startTime: payload.startTime,
+    endTime: payload.endTime,
+    isNewTrack: payload.isNewTrack,
+    newTrackInsertIndex: payload.newTrackInsertIndex,
+  })
+}
+
+function handleSegmentResizeEnd(payload: any) {
+  resizeSegment({
+    segmentId: payload.segment.id,
+    trackId: payload.track.id,
+    startTime: payload.startTime,
+    endTime: payload.endTime,
+  })
 }
 
 function swapMainClip() {
@@ -363,8 +377,8 @@ const formatMs = (val: number | Ref<number>) => `${(unref(val) / 1000).toFixed(2
           :track-types="['frames', 'text']"
           @update:current-time="handleTimelineCurrentTime"
           @segment-click="handleTimelineSegmentClick"
-          @segment-drag-end="handleTimelineSegmentTiming"
-          @segment-resize-end="handleTimelineSegmentTiming"
+          @segment-drag-end="handleSegmentDragEnd"
+          @segment-resize-end="handleSegmentResizeEnd"
         />
         <div class="timeline-meta">
           <div>时间轴使用 UI 包的默认 toolbar / ruler / playhead（主色 #222226）。</div>
