@@ -1,4 +1,4 @@
-import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IStickerSegment, ITextSegment, ITransition, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
+import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageFramesSegment, IStickerSegment, ITextSegment, ITransition, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import { createVideoProtocolManager } from './index'
 
 const protocol: IVideoProtocol = {
@@ -62,13 +62,16 @@ describe('video protocol segment curd', () => {
         type: 'video',
         url: 'http://example.com/video.mp4',
       }
-      const insertId = addSegment(segment)
-      expect(insertId).toBe('1')
+      const addResult = addSegment(segment)
+      expect(addResult.id).toBe('1')
+      expect(addResult.affectedSegments.map(seg => seg.id)).toEqual(['1'])
       expect(segmentMap.value['1']).toEqual(segment)
       expect(trackMap.value.frames[0].children[0]).toEqual(segment)
 
       curTime.value = 1000
-      setSelectedSegment(addSegment(segment))
+      const secondResult = addSegment(segment)
+      setSelectedSegment(secondResult.id)
+      expect(secondResult.affectedSegments.map(seg => seg.id)).toEqual(['1', secondResult.id])
       expect(trackMap.value.frames[0].children[1].startTime).toEqual(1000)
       expect(selectedSegment.value?.startTime).toBe(1000)
     })
@@ -84,13 +87,13 @@ describe('video protocol segment curd', () => {
           type: 'video',
           url: 'http://example.com/video.mp4',
         }
-        const insertId = addSegment(segment)
+        const insertId = addSegment(segment).id
         setSelectedSegment(insertId)
         expect(insertId).toBe('11')
         expect(selectedSegment.value?.startTime).toBe(0)
 
         curTime.value = 1000
-        setSelectedSegment(addSegment(segment))
+        setSelectedSegment(addSegment(segment).id)
         expect(selectedSegment.value?.startTime).toBe(1000)
       })
 
@@ -103,18 +106,20 @@ describe('video protocol segment curd', () => {
           segmentType: 'text',
           texts: [{ content: 'wendraw' }],
         }
-        const insertId = addSegment(segment)
-        setSelectedSegment(insertId)
-        expect(insertId).toBe('11')
-        expect(segmentMap.value[insertId]?.id).toBe('11')
+        const addResult = addSegment(segment)
+        setSelectedSegment(addResult.id)
+        expect(addResult.id).toBe('11')
+        expect(addResult.affectedSegments.map(seg => seg.id)).toEqual([addResult.id])
+        expect(segmentMap.value[addResult.id]?.id).toBe('11')
         expect(selectedSegment.value?.startTime).toBe(0)
         expect(selectedSegment.value?.id).toBe('11')
 
         curTime.value = 500
-        const newId = addSegment(segment)
-        setSelectedSegment(newId)
-        expect(segmentMap.value[newId]?.id).toBe(newId)
-        expect(selectedSegment.value?.id).toBe(newId)
+        const newAddResult = addSegment(segment)
+        setSelectedSegment(newAddResult.id)
+        expect(segmentMap.value[newAddResult.id]?.id).toBe(newAddResult.id)
+        expect(newAddResult.affectedSegments.map(seg => seg.id)).toEqual([newAddResult.id])
+        expect(selectedSegment.value?.id).toBe(newAddResult.id)
         expect(selectedSegment.value?.startTime).toBe(500)
         expect(trackMap.value.text).toHaveLength(2)
       })
@@ -131,12 +136,41 @@ describe('video protocol segment curd', () => {
           type: 'video',
           url: 'http://example.com/video.mp4',
         }
-        const insertId = addSegment(segment)
+        const insertId = addSegment(segment).id
         expect(insertId).toBe('1')
         curTime.value = 1000
-        const newId = addSegment({ ...segment, startTime: 500, endTime: 1500 })
+        const newId = addSegment({ ...segment, startTime: 500, endTime: 1500 }).id
         expect(trackMap.value.frames).toHaveLength(1)
         expect(segmentMap.value[newId]?.startTime).toBe(1000)
+      })
+
+      it('reports affected segments when frames timeline is rebuilt', () => {
+        const { addSegment, curTime } = createVideoProtocolManager(protocol)
+        const baseSegment: IVideoFramesSegment = {
+          id: 'clip-a',
+          startTime: 0,
+          endTime: 1000,
+          segmentType: 'frames',
+          type: 'video',
+          url: 'http://example.com/video.mp4',
+        }
+
+        addSegment(baseSegment)
+        curTime.value = 1000
+        addSegment({ ...baseSegment, id: 'clip-b' })
+
+        curTime.value = 500
+        const result = addSegment({ ...baseSegment, id: 'clip-c', endTime: 500 })
+
+        expect(result.affectedSegments.map(seg => ({
+          id: seg.id,
+          startTime: seg.startTime,
+          endTime: seg.endTime,
+        }))).toEqual([
+          { id: 'clip-a', startTime: 0, endTime: 1000 },
+          { id: 'clip-c', startTime: 1000, endTime: 1500 },
+          { id: 'clip-b', startTime: 1500, endTime: 2500 },
+        ])
       })
 
       it('with other segment', () => {
@@ -149,9 +183,9 @@ describe('video protocol segment curd', () => {
           format: 'img',
           url: 'http://example.com/image.jpg',
         }
-        const insertId = addSegment(segment)
+        const insertId = addSegment(segment).id
         expect(insertId).toBe('1')
-        const newId = addSegment({ ...segment, startTime: 500, endTime: 1500 })
+        const newId = addSegment({ ...segment, startTime: 500, endTime: 1500 }).id
         expect(trackMap.value.sticker).toHaveLength(2)
         expect(segmentMap.value[newId]?.startTime).toBe(0)
       })
@@ -167,11 +201,11 @@ describe('video protocol segment curd', () => {
         type: 'video',
         url: 'http://example.com/video.mp4',
       }
-      const insertId = addSegment(segment)
+      const insertId = addSegment(segment).id
       expect(insertId).toBe('1')
       expect(segmentMap.value[insertId]).toEqual({ ...segment, id: insertId })
 
-      const insertId2 = addSegment(segment)
+      const insertId2 = addSegment(segment).id
       expect(insertId2).not.toBe('1')
     })
 
@@ -234,7 +268,7 @@ describe('video protocol segment curd', () => {
         startTime: 0,
         endTime: 2000,
       }
-      const newId = addSegment(newSegment)
+      const newId = addSegment(newSegment).id
 
       const framesTrack = trackMap.value.frames?.find(track => track.isMain)
       expect(framesTrack?.children.map(segment => segment.id)).toEqual(['clip-a', 'clip-b', 'clip-c', newId])
@@ -260,10 +294,47 @@ describe('video protocol segment curd', () => {
     addSegment(segment)
     expect(trackMap.value.frames).toHaveLength(1)
     expect(segmentMap.value['1']?.id).toBe('1')
-    expect(removeSegment('1')).toBe(true)
-    expect(removeSegment('1')).toBe(false)
+    expect(removeSegment('1').success).toBe(true)
+    expect(removeSegment('1').success).toBe(false)
     expect(segmentMap.value['1']).toBeUndefined()
     expect(trackMap.value.frames).toBeUndefined()
+  })
+
+  it('returns affected segments when removing from main frames track', () => {
+    const { trackMap, removeSegment, addSegment, curTime } = createVideoProtocolManager(protocol)
+    const frame1: IVideoFramesSegment = {
+      id: 'frame-1',
+      startTime: 0,
+      endTime: 1000,
+      segmentType: 'frames',
+      type: 'video',
+      url: 'http://example.com/video.mp4',
+    }
+    const frame2: IVideoFramesSegment = {
+      id: 'frame-2',
+      startTime: 0,
+      endTime: 1000,
+      segmentType: 'frames',
+      type: 'video',
+      url: 'http://example.com/video2.mp4',
+    }
+
+    addSegment(frame1)
+    curTime.value = 1000
+    addSegment(frame2)
+
+    const result = removeSegment('frame-1')
+    expect(result.success).toBe(true)
+    expect(result.affectedSegments.map(seg => ({
+      id: seg.id,
+      startTime: seg.startTime,
+      endTime: seg.endTime,
+    }))).toEqual([
+      { id: 'frame-2', startTime: 0, endTime: 1000 },
+    ])
+    expect(trackMap.value.frames?.[0].children.map(({ id, startTime, endTime }) => ({ id, startTime, endTime }))).toEqual([
+      { id: 'frame-2', startTime: 0, endTime: 1000 },
+    ])
   })
 
   describe('selected segment', () => {
@@ -276,7 +347,7 @@ describe('video protocol segment curd', () => {
       type: 'video',
       url: 'http://example.com/video.mp4',
     }
-    setSelectedSegment(addSegment(segment))
+    setSelectedSegment(addSegment(segment).id)
 
     it('clear', () => {
       expect(selectedSegment.value?.id).toEqual('1')
@@ -301,9 +372,9 @@ describe('video protocol segment curd', () => {
         type: 'video',
         url: 'http://example.com/video.mp4',
       }
-      const video1Id = addSegment(segment)
+      const video1Id = addSegment(segment).id
       curTime.value = 1000
-      const video2Id = addSegment(segment)
+      const video2Id = addSegment(segment).id
 
       it('update time duration', () => {
         setSelectedSegment(video2Id)
@@ -349,7 +420,7 @@ describe('video protocol segment curd', () => {
       }
       expect(exportProtocol()).toEqual(protocol)
 
-      const insertId = addSegment(segment)
+      const insertId = addSegment(segment).id
       expect(insertId).toBe('1')
 
       expect(exportProtocol()).toEqual({
@@ -390,7 +461,6 @@ describe('video protocol segment curd', () => {
       addSegment(textSegment)
       addSegment(stickerSegment)
       addSegment(textSegment)
-
       expect(exportProtocol().tracks.map(track => track.trackType)).toEqual(['sticker', 'text', 'sticker', 'text'])
     })
   })
@@ -411,14 +481,14 @@ describe('frames segment', () => {
 
     describe('happy path', () => {
       it('add segment', () => {
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(id).toBe('1')
         expect(trackMap.value.frames).toHaveLength(1)
       })
 
       it('add segment by current time', () => {
         curTime.value = 1100
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1000)
         expect(trackMap.value.frames).toHaveLength(1)
       })
@@ -426,8 +496,8 @@ describe('frames segment', () => {
       describe('cross time', () => {
         it('left half', () => {
           const { addSegment, segmentMap, trackMap } = createVideoProtocolManager(protocol)
-          const id = addSegment(segment)
-          const idLeft = addSegment(segment)
+          const id = addSegment(segment).id
+          const idLeft = addSegment(segment).id
 
           expect(segmentMap.value[idLeft]?.startTime).toBe(0)
           expect(segmentMap.value[id]?.startTime).toBe(1000)
@@ -436,9 +506,9 @@ describe('frames segment', () => {
 
         it('right half', () => {
           const { addSegment, segmentMap, trackMap, curTime } = createVideoProtocolManager(protocol)
-          const id = addSegment(segment)
+          const id = addSegment(segment).id
           curTime.value = 600
-          const idRight = addSegment(segment)
+          const idRight = addSegment(segment).id
           expect(segmentMap.value[idRight]?.startTime).toBe(1000)
           expect(segmentMap.value[id]?.startTime).toBe(0)
           expect(trackMap.value.frames).toHaveLength(1)
@@ -448,9 +518,9 @@ describe('frames segment', () => {
 
     describe('bad path', () => {
       it('invalid segment', () => {
-        expect(() => addSegment(null as any)).toThrowError()
-        // addSegment({} as any)
-        expect(() => addSegment({} as any)).toThrowError()
+        expect(() => addSegment(null as any).id).toThrowError()
+        // addSegment({} as any).id
+        expect(() => addSegment({} as any).id).toThrowError()
       })
     })
   })
@@ -469,22 +539,22 @@ describe('frames segment', () => {
     const { addSegment, segmentMap, trackMap, removeSegment } = createVideoProtocolManager(protocol)
     addSegment(segment)
     it('exist id', () => {
-      expect(removeSegment('1')).toBe(true)
+      expect(removeSegment('1').success).toBe(true)
       expect(segmentMap.value['1']).toBeUndefined()
       expect(trackMap.value.frames).toBeUndefined()
     })
 
     it('not exist id', () => {
-      expect(removeSegment('not exist id')).toBe(false)
+      expect(removeSegment('not exist id').success).toBe(false)
     })
   })
 
   describe('modify', () => {
     describe('happy path', () => {
       const { addSegment, segmentMap, updateSegment, curTime } = createVideoProtocolManager(protocol)
-      const id1 = addSegment(segment)
+      const id1 = addSegment(segment).id
       curTime.value = 1000
-      const id2 = addSegment(segment)
+      const id2 = addSegment(segment).id
 
       it('modify basic info', () => {
         updateSegment((segment) => {
@@ -511,7 +581,7 @@ describe('frames segment', () => {
 
     describe('bad path', () => {
       const { addSegment, updateSegment, segmentMap, undoCount } = createVideoProtocolManager(protocol)
-      const id = addSegment(segment)
+      const id = addSegment(segment).id
 
       expect(undoCount.value).toBe(1)
 
@@ -558,7 +628,7 @@ describe('audio segment', () => {
 
     describe('happy path', () => {
       it('add segment', () => {
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(id).toBe('1')
         expect(trackMap.value.audio).toHaveLength(1)
         expect(segmentMap.value[id]?.id).toBe('1')
@@ -567,7 +637,7 @@ describe('audio segment', () => {
 
       it('add segment by current time', () => {
         curTime.value = 1100
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.audio).toHaveLength(1)
         expect(trackMap.value.audio[0].children[0]).toEqual(segment)
@@ -575,7 +645,7 @@ describe('audio segment', () => {
       })
 
       it('cross time', () => {
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.audio).toHaveLength(2)
         expect(trackMap.value.audio[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
@@ -584,9 +654,9 @@ describe('audio segment', () => {
 
     describe('bad path', () => {
       it('invalid segment', () => {
-        expect(() => addSegment(null as any)).toThrowError()
-        // addSegment({} as any)
-        expect(() => addSegment({} as any)).toThrowError()
+        expect(() => addSegment(null as any).id).toThrowError()
+        // addSegment({} as any).id
+        expect(() => addSegment({} as any).id).toThrowError()
       })
     })
   })
@@ -605,24 +675,24 @@ describe('audio segment', () => {
     const { addSegment, segmentMap, trackMap, removeSegment } = createVideoProtocolManager(protocol)
     addSegment(segment)
     it('exist id', () => {
-      expect(removeSegment('1')).toBe(true)
+      expect(removeSegment('1').success).toBe(true)
       expect(segmentMap.value['1']).toBeUndefined()
       expect(trackMap.value.audio).toBeUndefined()
     })
 
     it('not exist id', () => {
-      expect(removeSegment('not exist id')).toBe(false)
+      expect(removeSegment('not exist id').success).toBe(false)
     })
   })
 
   describe('modify', () => {
     describe('happy path', () => {
       const { curTime, addSegment, segmentMap, updateSegment } = createVideoProtocolManager(protocol)
-      const id1 = addSegment(segment)
+      const id1 = addSegment(segment).id
       curTime.value = 1000
-      const id2 = addSegment(segment)
+      const id2 = addSegment(segment).id
       curTime.value = 2000
-      const id3 = addSegment(segment)
+      const id3 = addSegment(segment).id
 
       it('modify basic info', () => {
         updateSegment((segment) => {
@@ -660,7 +730,7 @@ describe('audio segment', () => {
 
     describe('bad path', () => {
       const { addSegment, updateSegment, segmentMap, undoCount } = createVideoProtocolManager(protocol)
-      const id = addSegment(segment)
+      const id = addSegment(segment).id
 
       expect(undoCount.value).toBe(1)
 
@@ -707,7 +777,7 @@ describe('text segment', () => {
 
     describe('happy path', () => {
       it('add segment', () => {
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(id).toBe('1')
         expect(trackMap.value.text).toHaveLength(1)
         expect(segmentMap.value[id]?.id).toBe('1')
@@ -716,7 +786,7 @@ describe('text segment', () => {
 
       it('add segment by current time', () => {
         curTime.value = 1100
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.text).toHaveLength(1)
         expect(trackMap.value.text[0].children[0]).toEqual(segment)
@@ -724,7 +794,7 @@ describe('text segment', () => {
       })
 
       it('cross time', () => {
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.text).toHaveLength(2)
         expect(trackMap.value.text[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
@@ -733,9 +803,9 @@ describe('text segment', () => {
 
     describe('bad path', () => {
       it('invalid segment', () => {
-        expect(() => addSegment(null as any)).toThrowError()
-        // addSegment({} as any)
-        expect(() => addSegment({} as any)).toThrowError()
+        expect(() => addSegment(null as any).id).toThrowError()
+        // addSegment({} as any).id
+        expect(() => addSegment({} as any).id).toThrowError()
       })
     })
   })
@@ -758,24 +828,24 @@ describe('text segment', () => {
     const { addSegment, segmentMap, trackMap, removeSegment } = createVideoProtocolManager(protocol)
     addSegment(segment)
     it('exist id', () => {
-      expect(removeSegment('1')).toBe(true)
+      expect(removeSegment('1').success).toBe(true)
       expect(segmentMap.value['1']).toBeUndefined()
       expect(trackMap.value.text).toBeUndefined()
     })
 
     it('not exist id', () => {
-      expect(removeSegment('not exist id')).toBe(false)
+      expect(removeSegment('not exist id').success).toBe(false)
     })
   })
 
   describe('modify', () => {
     describe('happy path', () => {
       const { curTime, getSegment, addSegment, segmentMap, updateSegment } = createVideoProtocolManager(protocol)
-      const id1 = addSegment(segment)
+      const id1 = addSegment(segment).id
       curTime.value = 1000
-      const id2 = addSegment(segment)
+      const id2 = addSegment(segment).id
       curTime.value = 2000
-      const id3 = addSegment(segment)
+      const id3 = addSegment(segment).id
 
       it('modify basic info', () => {
         updateSegment((segment) => {
@@ -815,7 +885,7 @@ describe('text segment', () => {
 
     describe('bad path', () => {
       const { addSegment, updateSegment, segmentMap, undoCount } = createVideoProtocolManager(protocol)
-      const id = addSegment(segment)
+      const id = addSegment(segment).id
 
       expect(undoCount.value).toBe(1)
 
@@ -855,7 +925,7 @@ describe('sticker segment', () => {
 
     describe('happy path', () => {
       it('add segment', () => {
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(id).toBe('1')
         expect(trackMap.value.sticker).toHaveLength(1)
         expect(segmentMap.value[id]?.id).toBe('1')
@@ -864,7 +934,7 @@ describe('sticker segment', () => {
 
       it('add segment by current time', () => {
         curTime.value = 1100
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.sticker).toHaveLength(1)
         expect(trackMap.value.sticker[0].children[0]).toEqual(segment)
@@ -872,7 +942,7 @@ describe('sticker segment', () => {
       })
 
       it('cross time', () => {
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.sticker).toHaveLength(2)
         expect(trackMap.value.sticker[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
@@ -881,9 +951,9 @@ describe('sticker segment', () => {
 
     describe('bad path', () => {
       it('invalid segment', () => {
-        expect(() => addSegment(null as any)).toThrowError()
-        // addSegment({} as any)
-        expect(() => addSegment({} as any)).toThrowError()
+        expect(() => addSegment(null as any).id).toThrowError()
+        // addSegment({} as any).id
+        expect(() => addSegment({} as any).id).toThrowError()
       })
     })
   })
@@ -904,24 +974,24 @@ describe('sticker segment', () => {
     const { addSegment, segmentMap, trackMap, removeSegment } = createVideoProtocolManager(protocol)
     addSegment(segment)
     it('exist id', () => {
-      expect(removeSegment('1')).toBe(true)
+      expect(removeSegment('1').success).toBe(true)
       expect(segmentMap.value['1']).toBeUndefined()
       expect(trackMap.value.sticker).toBeUndefined()
     })
 
     it('not exist id', () => {
-      expect(removeSegment('not exist id')).toBe(false)
+      expect(removeSegment('not exist id').success).toBe(false)
     })
   })
 
   describe('modify', () => {
     describe('happy path', () => {
       const { curTime, getSegment, addSegment, segmentMap, updateSegment } = createVideoProtocolManager(protocol)
-      const id1 = addSegment(segment)
+      const id1 = addSegment(segment).id
       curTime.value = 1000
-      const id2 = addSegment(segment)
+      const id2 = addSegment(segment).id
       curTime.value = 2000
-      const id3 = addSegment(segment)
+      const id3 = addSegment(segment).id
 
       it('modify basic info', () => {
         updateSegment((segment) => {
@@ -962,7 +1032,7 @@ describe('sticker segment', () => {
 
     describe('bad path', () => {
       const { addSegment, updateSegment, segmentMap, undoCount } = createVideoProtocolManager(protocol)
-      const id = addSegment(segment)
+      const id = addSegment(segment).id
 
       expect(undoCount.value).toBe(1)
 
@@ -1002,7 +1072,7 @@ describe('effect segment', () => {
 
     describe('happy path', () => {
       it('add segment', () => {
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(id).toBe('1')
         expect(trackMap.value.effect).toHaveLength(1)
         expect(segmentMap.value[id]?.id).toBe('1')
@@ -1011,7 +1081,7 @@ describe('effect segment', () => {
 
       it('add segment by current time', () => {
         curTime.value = 1100
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.effect).toHaveLength(1)
         expect(trackMap.value.effect[0].children[0]).toEqual(segment)
@@ -1019,7 +1089,7 @@ describe('effect segment', () => {
       })
 
       it('cross time', () => {
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.effect).toHaveLength(2)
         expect(trackMap.value.effect[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
@@ -1028,9 +1098,9 @@ describe('effect segment', () => {
 
     describe('bad path', () => {
       it('invalid segment', () => {
-        expect(() => addSegment(null as any)).toThrowError()
-        // addSegment({} as any)
-        expect(() => addSegment({} as any)).toThrowError()
+        expect(() => addSegment(null as any).id).toThrowError()
+        // addSegment({} as any).id
+        expect(() => addSegment({} as any).id).toThrowError()
       })
     })
   })
@@ -1052,24 +1122,24 @@ describe('effect segment', () => {
     const { addSegment, segmentMap, trackMap, removeSegment } = createVideoProtocolManager(protocol)
     addSegment(segment)
     it('exist id', () => {
-      expect(removeSegment('1')).toBe(true)
+      expect(removeSegment('1').success).toBe(true)
       expect(segmentMap.value['1']).toBeUndefined()
       expect(trackMap.value.effect).toBeUndefined()
     })
 
     it('not exist id', () => {
-      expect(removeSegment('not exist id')).toBe(false)
+      expect(removeSegment('not exist id').success).toBe(false)
     })
   })
 
   describe('modify', () => {
     describe('happy path', () => {
       const { curTime, getSegment, addSegment, segmentMap, updateSegment } = createVideoProtocolManager(protocol)
-      const id1 = addSegment(segment)
+      const id1 = addSegment(segment).id
       curTime.value = 1000
-      const id2 = addSegment(segment)
+      const id2 = addSegment(segment).id
       curTime.value = 2000
-      const id3 = addSegment(segment)
+      const id3 = addSegment(segment).id
 
       it('modify basic info', () => {
         updateSegment((segment) => {
@@ -1109,7 +1179,7 @@ describe('effect segment', () => {
 
     describe('bad path', () => {
       const { addSegment, updateSegment, segmentMap, undoCount } = createVideoProtocolManager(protocol)
-      const id = addSegment(segment)
+      const id = addSegment(segment).id
 
       expect(undoCount.value).toBe(1)
 
@@ -1149,7 +1219,7 @@ describe('filter segment', () => {
 
     describe('happy path', () => {
       it('add segment', () => {
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(id).toBe('1')
         expect(trackMap.value.filter).toHaveLength(1)
         expect(segmentMap.value[id]?.id).toBe('1')
@@ -1158,7 +1228,7 @@ describe('filter segment', () => {
 
       it('add segment by current time', () => {
         curTime.value = 1100
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.filter).toHaveLength(1)
         expect(trackMap.value.filter[0].children[0]).toEqual(segment)
@@ -1166,7 +1236,7 @@ describe('filter segment', () => {
       })
 
       it('cross time', () => {
-        const id = addSegment(segment)
+        const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.filter).toHaveLength(2)
         expect(trackMap.value.filter[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
@@ -1175,9 +1245,9 @@ describe('filter segment', () => {
 
     describe('bad path', () => {
       it('invalid segment', () => {
-        expect(() => addSegment(null as any)).toThrowError()
-        // addSegment({} as any)
-        expect(() => addSegment({} as any)).toThrowError()
+        expect(() => addSegment(null as any).id).toThrowError()
+        // addSegment({} as any).id
+        expect(() => addSegment({} as any).id).toThrowError()
       })
     })
   })
@@ -1199,24 +1269,24 @@ describe('filter segment', () => {
     const { addSegment, segmentMap, trackMap, removeSegment } = createVideoProtocolManager(protocol)
     addSegment(segment)
     it('exist id', () => {
-      expect(removeSegment('1')).toBe(true)
+      expect(removeSegment('1').success).toBe(true)
       expect(segmentMap.value['1']).toBeUndefined()
       expect(trackMap.value.filter).toBeUndefined()
     })
 
     it('not exist id', () => {
-      expect(removeSegment('not exist id')).toBe(false)
+      expect(removeSegment('not exist id').success).toBe(false)
     })
   })
 
   describe('modify', () => {
     describe('happy path', () => {
       const { curTime, getSegment, addSegment, segmentMap, updateSegment } = createVideoProtocolManager(protocol)
-      const id1 = addSegment(segment)
+      const id1 = addSegment(segment).id
       curTime.value = 1000
-      const id2 = addSegment(segment)
+      const id2 = addSegment(segment).id
       curTime.value = 2000
-      const id3 = addSegment(segment)
+      const id3 = addSegment(segment).id
 
       it('modify basic info', () => {
         updateSegment((segment) => {
@@ -1256,7 +1326,7 @@ describe('filter segment', () => {
 
     describe('bad path', () => {
       const { addSegment, updateSegment, segmentMap, undoCount } = createVideoProtocolManager(protocol)
-      const id = addSegment(segment)
+      const id = addSegment(segment).id
 
       expect(undoCount.value).toBe(1)
 
@@ -1289,11 +1359,11 @@ describe('transition', () => {
   describe('add', () => {
     describe('happy path', () => {
       const { addSegment, curTime, addTransition, getSegment } = createVideoProtocolManager(protocol)
-      const id1 = addSegment(videoSegment)
+      const id1 = addSegment(videoSegment).id
       curTime.value = 1000
-      const id2 = addSegment(videoSegment)
+      const id2 = addSegment(videoSegment).id
       curTime.value = 2000
-      const id3 = addSegment(videoSegment)
+      const id3 = addSegment(videoSegment).id
 
       it('add transition with left half time', () => {
         const added = addTransition(transition, 1100)
@@ -1324,9 +1394,9 @@ describe('transition', () => {
 
       it('cross first segment left half time', () => {
         const { addSegment, addTransition, curTime, getSegment } = createVideoProtocolManager(protocol)
-        const id1 = addSegment(videoSegment)
+        const id1 = addSegment(videoSegment).id
         curTime.value = 1000
-        const id2 = addSegment(videoSegment)
+        const id2 = addSegment(videoSegment).id
         expect(addTransition(transition, 0)).toBe(true)
         expect(getSegment(id1, 'frames')?.transitionIn).toEqual(transition)
         expect(getSegment(id2, 'frames')?.transitionOut).toEqual(transition)
@@ -1334,9 +1404,9 @@ describe('transition', () => {
 
       it('cross last segment right half time', () => {
         const { addSegment, addTransition, curTime, getSegment } = createVideoProtocolManager(protocol)
-        const id1 = addSegment(videoSegment)
+        const id1 = addSegment(videoSegment).id
         curTime.value = 1000
-        const id2 = addSegment(videoSegment)
+        const id2 = addSegment(videoSegment).id
         expect(addTransition(transition, 2000)).toBe(true)
         expect(getSegment(id1, 'frames')?.transitionIn).toEqual(transition)
         expect(getSegment(id2, 'frames')?.transitionOut).toEqual(transition)
@@ -1344,9 +1414,9 @@ describe('transition', () => {
 
       it('invalid transition', () => {
         const { addSegment, addTransition, curTime, getSegment } = createVideoProtocolManager(protocol)
-        const id1 = addSegment(videoSegment)
+        const id1 = addSegment(videoSegment).id
         curTime.value = 1000
-        const id2 = addSegment(videoSegment)
+        const id2 = addSegment(videoSegment).id
         expect(addTransition({} as any)).toBe(true)
         expect(getSegment(id1, 'frames')?.transitionIn).toBeUndefined()
         expect(getSegment(id2, 'frames')?.transitionOut).toBeUndefined()
@@ -1356,9 +1426,9 @@ describe('transition', () => {
 
   describe('get', () => {
     const { addSegment, addTransition, getSegment, curTime } = createVideoProtocolManager(protocol)
-    const id1 = addSegment(videoSegment)
+    const id1 = addSegment(videoSegment).id
     curTime.value = 501
-    const id2 = addSegment(videoSegment)
+    const id2 = addSegment(videoSegment).id
     addTransition(transition)
 
     it('get', () => {
@@ -1369,9 +1439,9 @@ describe('transition', () => {
 
   describe('remove', () => {
     const { addSegment, addTransition, removeTransition, getSegment, curTime } = createVideoProtocolManager(protocol)
-    const id1 = addSegment(videoSegment)
+    const id1 = addSegment(videoSegment).id
     curTime.value = 501
-    const id2 = addSegment(videoSegment)
+    const id2 = addSegment(videoSegment).id
     addTransition(transition)
 
     it('exist id', () => {
@@ -1387,9 +1457,9 @@ describe('transition', () => {
 
   describe('modify', () => {
     const { addSegment, addTransition, updateTransition, getSegment, curTime } = createVideoProtocolManager(protocol)
-    const id1 = addSegment(videoSegment)
+    const id1 = addSegment(videoSegment).id
     curTime.value = 501
-    const id2 = addSegment(videoSegment)
+    const id2 = addSegment(videoSegment).id
     addTransition(transition)
 
     it('modify name', () => {
@@ -1420,7 +1490,7 @@ describe('undo and redo', () => {
     type: 'video',
     url: 'http://example.com/video.mp4',
   }
-  const id = addSegment(segment)
+  const id = addSegment(segment).id
 
   it('undo', () => {
     expect(undoCount.value).toBe(1)
@@ -1453,7 +1523,7 @@ describe('undo and redo', () => {
   })
 
   it('undo and redo', () => {
-    const id2 = addSegment(segment)
+    const id2 = addSegment(segment).id
     expect(undoCount.value).toBe(2)
     expect(redoCount.value).toBe(0)
     expect(segmentMap.value[id2]).toEqual({ ...segment, id: id2 })
@@ -1463,7 +1533,7 @@ describe('undo and redo', () => {
     expect(undoCount.value).toBe(1)
     expect(redoCount.value).toBe(1)
 
-    const id3 = addSegment(segment)
+    const id3 = addSegment(segment).id
     expect(undoCount.value).toBe(2)
     expect(redoCount.value).toBe(0)
     expect(segmentMap.value[id3]).toEqual({ ...segment, id: id3 })
@@ -1493,20 +1563,28 @@ describe('moveSegment', () => {
     addSegment(text1)
     curTime.value = 1000
     addSegment(text2)
-
     const p1 = exportProtocol()
     const track = p1.tracks[0]
 
     // Move text-1 to overlap with text-2
     // text-2 is at 1000-2000, moving text-1 to 1500-2500 causes overlap
     // Expected: text-1 should be pushed to 2000-3000 to avoid overlap
-    moveSegment({
+    const moveResult = moveSegment({
       segmentId: 'text-1',
       sourceTrackId: track.trackId,
       targetTrackId: track.trackId,
       startTime: 1500,
       endTime: 2500,
     })
+    expect(moveResult.success).toBe(true)
+    expect(moveResult.affectedSegments.map(seg => ({
+      id: seg.id,
+      startTime: seg.startTime,
+      endTime: seg.endTime,
+    }))).toEqual([
+      { id: 'text-2', startTime: 1000, endTime: 2000 },
+      { id: 'text-1', startTime: 2000, endTime: 3000 },
+    ])
 
     const p2 = exportProtocol()
     expect(p2.tracks).toHaveLength(1)
@@ -1535,7 +1613,7 @@ describe('moveSegment', () => {
     const sourceTrack = p1.tracks[0]
 
     // Move to new track
-    moveSegment({
+    const moveResult = moveSegment({
       segmentId: 'text-1',
       sourceTrackId: sourceTrack.trackId,
       startTime: 500,
@@ -1543,12 +1621,83 @@ describe('moveSegment', () => {
       isNewTrack: true,
       newTrackInsertIndex: 0,
     })
+    expect(moveResult.success).toBe(true)
+    expect(moveResult.affectedSegments.map(seg => seg.id)).toEqual(['text-1'])
 
     const p2 = exportProtocol()
     expect(p2.tracks).toHaveLength(1) // Old track deleted, new track created
     expect(p2.tracks[0].children).toHaveLength(1)
     expect(p2.tracks[0].children[0].startTime).toBe(500)
     expect(p2.tracks[0].children[0].endTime).toBe(1500)
+  })
+
+  it('returns affected segments when moving between existing tracks', () => {
+    const { addSegment, moveSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    const text2: ITextSegment = {
+      id: 'text-2',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 2' }],
+    }
+
+    const text3: ITextSegment = {
+      id: 'text-3',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 3' }],
+    }
+
+    addSegment(text1)
+    curTime.value = 500
+    addSegment(text2) // overlaps, should create new text track
+    curTime.value = 1000
+    addSegment(text3)
+
+    const p1 = exportProtocol()
+    const sourceTrack = p1.tracks.find(track => track.children.some(seg => seg.id === 'text-1'))!
+    const targetTrack = p1.tracks.find(track => track.children.some(seg => seg.id === 'text-2'))!
+
+    const moveResult = moveSegment({
+      segmentId: 'text-1',
+      sourceTrackId: sourceTrack.trackId,
+      targetTrackId: targetTrack.trackId,
+      startTime: 0,
+      endTime: 1000,
+    })
+
+    expect(moveResult.success).toBe(true)
+    expect(moveResult.affectedSegments.map(seg => ({
+      id: seg.id,
+      startTime: seg.startTime,
+      endTime: seg.endTime,
+    }))).toEqual([
+      { id: 'text-3', startTime: 1000, endTime: 2000 },
+      { id: 'text-1', startTime: 0, endTime: 1000 },
+      { id: 'text-2', startTime: 1000, endTime: 2000 },
+    ])
+
+    const p2 = exportProtocol()
+    expect(p2.tracks).toHaveLength(2)
+    const updatedSource = p2.tracks.find(track => track.trackId === sourceTrack.trackId)
+    const updatedTarget = p2.tracks.find(track => track.trackId === targetTrack.trackId)
+    expect(updatedSource?.children.map(({ id, startTime, endTime }) => ({ id, startTime, endTime }))).toEqual([
+      { id: 'text-3', startTime: 1000, endTime: 2000 },
+    ])
+    expect(updatedTarget?.children.map(({ id, startTime, endTime }) => ({ id, startTime, endTime }))).toEqual([
+      { id: 'text-1', startTime: 0, endTime: 1000 },
+      { id: 'text-2', startTime: 1000, endTime: 2000 },
+    ])
   })
 
   it('should handle frames track correctly', () => {
@@ -1586,7 +1735,6 @@ describe('moveSegment', () => {
     addSegment(frame2)
     curTime.value = 2000
     addSegment(frame3)
-
     const p1 = exportProtocol()
     expect(p1.tracks[0].children[0].startTime).toBe(0)
     expect(p1.tracks[0].children[0].endTime).toBe(1000)
@@ -1598,7 +1746,7 @@ describe('moveSegment', () => {
     const track = p1.tracks[0]
 
     // Move frame-2 to new track
-    moveSegment({
+    const moveResultFrames = moveSegment({
       segmentId: 'frame-2',
       sourceTrackId: track.trackId,
       startTime: 500,
@@ -1606,6 +1754,16 @@ describe('moveSegment', () => {
       isNewTrack: true,
       newTrackInsertIndex: 1,
     })
+    expect(moveResultFrames.success).toBe(true)
+    expect(moveResultFrames.affectedSegments.map(seg => ({
+      id: seg.id,
+      startTime: seg.startTime,
+      endTime: seg.endTime,
+    }))).toEqual([
+      { id: 'frame-1', startTime: 0, endTime: 1000 },
+      { id: 'frame-3', startTime: 1000, endTime: 2000 },
+      { id: 'frame-2', startTime: 500, endTime: 1500 },
+    ])
 
     const p2 = exportProtocol()
     expect(p2.tracks).toHaveLength(2)
@@ -1648,7 +1806,6 @@ describe('moveSegment - undo/redo', () => {
     addSegment(text1)
     curTime.value = 1000
     addSegment(text2)
-
     const p1 = exportProtocol()
     expect(p1.tracks[0].children[0].id).toBe('text-1')
     expect(p1.tracks[0].children[0].startTime).toBe(0)
@@ -1772,7 +1929,6 @@ describe('moveSegment - undo/redo', () => {
     addSegment(frame2)
     curTime.value = 2000
     addSegment(frame3)
-
     const p1 = exportProtocol()
     expect(p1.tracks[0].children).toHaveLength(3)
     expect(p1.tracks[0].children[0].startTime).toBe(0)
@@ -1830,12 +1986,20 @@ describe('resizeSegment', () => {
     const p1 = exportProtocol()
     const track = p1.tracks[0]
 
-    resizeSegment({
+    const result = resizeSegment({
       segmentId: 'text-1',
       trackId: track.trackId,
       startTime: 500,
       endTime: 2000,
     })
+    expect(result.success).toBe(true)
+    expect(result.affectedSegments.map(seg => ({
+      id: seg.id,
+      startTime: seg.startTime,
+      endTime: seg.endTime,
+    }))).toEqual([
+      { id: 'text-1', startTime: 500, endTime: 2000 },
+    ])
 
     const p2 = exportProtocol()
     expect(p2.tracks[0].children[0].startTime).toBe(500)
@@ -1864,17 +2028,25 @@ describe('resizeSegment', () => {
     addSegment(text1)
     curTime.value = 1000
     addSegment(text2)
-
     const p1 = exportProtocol()
     const track = p1.tracks[0]
 
     // Resize text-1 from 1000ms to 1500ms, causing overlap with text-2
-    resizeSegment({
+    const resizeResult = resizeSegment({
       segmentId: 'text-1',
       trackId: track.trackId,
       startTime: 0,
       endTime: 1500,
     })
+    expect(resizeResult.success).toBe(true)
+    expect(resizeResult.affectedSegments.map(seg => ({
+      id: seg.id,
+      startTime: seg.startTime,
+      endTime: seg.endTime,
+    }))).toEqual([
+      { id: 'text-1', startTime: 0, endTime: 1500 },
+      { id: 'text-2', startTime: 1500, endTime: 2500 },
+    ])
 
     const p2 = exportProtocol()
     expect(p2.tracks[0].children[0].startTime).toBe(0)
@@ -1906,7 +2078,6 @@ describe('resizeSegment', () => {
     addSegment(text1)
     curTime.value = 1000
     addSegment(text2)
-
     const p1 = exportProtocol()
     const track = p1.tracks[0]
 
@@ -2055,7 +2226,6 @@ describe('resizeSegment', () => {
     addSegment(frame1)
     curTime.value = 1000
     addSegment(frame2)
-
     const p1 = exportProtocol()
     expect(p1.tracks[0].children[0].startTime).toBe(0)
     expect(p1.tracks[0].children[0].endTime).toBe(1000)
@@ -2119,7 +2289,6 @@ describe('resizeSegment', () => {
     addSegment(frame1)
     curTime.value = 1000
     addSegment(frame2)
-
     const p1 = exportProtocol()
     expect(p1.tracks[0].children[0].startTime).toBe(0)
     expect(p1.tracks[0].children[0].endTime).toBe(1000)
@@ -2293,7 +2462,7 @@ describe('removeSegment - undo/redo', () => {
     expect(p1.tracks[0].children.length).toBe(1)
 
     // Remove segment
-    removeSegment('frame-1')
+    expect(removeSegment('frame-1').success).toBe(true)
     const p2 = exportProtocol()
     expect(p2.tracks.length).toBe(0) // Track should be removed when empty
 
@@ -2337,7 +2506,7 @@ describe('removeSegment - undo/redo', () => {
     expect(p1.tracks[0].children.length).toBe(2)
 
     // Remove first segment
-    removeSegment('text-1')
+    expect(removeSegment('text-1').success).toBe(true)
     const p2 = exportProtocol()
     expect(p2.tracks.length).toBe(1) // Track still exists
     expect(p2.tracks[0].children.length).toBe(1)
@@ -2463,7 +2632,6 @@ describe('addTransition - undo/redo', () => {
     addSegment(frame1)
     curTime.value = 1000
     addSegment(frame2)
-
     // Verify transition fields are undefined before adding
     expect(getSegment('frame-1', 'frames')?.transitionIn).toBeUndefined()
     expect(getSegment('frame-2', 'frames')?.transitionOut).toBeUndefined()
@@ -2519,7 +2687,6 @@ describe('removeTransition - undo/redo', () => {
     addSegment(frame1)
     curTime.value = 1000
     addSegment(frame2)
-
     const transition: ITransition = {
       id: 'transition-1',
       name: 'fade',
@@ -2564,7 +2731,6 @@ describe('complex undo/redo scenarios', () => {
       opacity: 1,
     }
     addSegment(frame1)
-
     // Operation 2: Add frame-2
     curTime.value = 1000
     const frame2: IVideoFramesSegment = {
@@ -2577,7 +2743,6 @@ describe('complex undo/redo scenarios', () => {
       opacity: 1,
     }
     addSegment(frame2)
-
     // Operation 3: Update frame-1 opacity
     updateSegment((segment) => {
       segment.opacity = 0.5
@@ -2647,7 +2812,6 @@ describe('complex undo/redo scenarios', () => {
     curTime.value = 1000
     // Add frame-2
     addSegment(frame2)
-
     const p1 = exportProtocol()
     expect(p1.tracks[0].children.length).toBe(2)
 

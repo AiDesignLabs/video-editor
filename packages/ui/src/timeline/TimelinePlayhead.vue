@@ -40,7 +40,7 @@ const emit = defineEmits<{
 
 <style scoped>
 :where(.ve-playhead) {
-  --ve-playhead-nudge: 0.5px;
+  --ve-playhead-nudge: 0px;
   --at-apply: absolute z-20 pointer-events-auto cursor-ew-resize h-full;
   transform: translateX(calc(-50% - var(--ve-playhead-nudge)));
 }

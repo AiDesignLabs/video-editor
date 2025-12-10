@@ -870,7 +870,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 }
 
 :where(.ve-timeline .ve-segment__handle) {
-  --at-apply: absolute h-full w-1 bg-[var(--ve-primary)] cursor-ew-resize pointer-events-auto top-50% translate-y--50%;
+  --at-apply: absolute h-full w-1 bg-[var(--ve-primary)] cursor-ew-resize pointer-events-auto;
   border: 2px solid var(--ve-primary);
 }
 

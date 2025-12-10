@@ -7,6 +7,13 @@ import { useHistory } from './immer'
 import { checkSegment, handleSegmentUpdate } from './segment'
 import { clone, findInsertFramesSegmentIndex, findInsertSegmentIndex, genRandomId } from './utils'
 
+function cloneAffectedSegments(segments: SegmentUnion | SegmentUnion[]) {
+  const toPlain = (segment: SegmentUnion) => JSON.parse(JSON.stringify(toRaw(segment))) as SegmentUnion
+  return Array.isArray(segments)
+    ? segments.map(segment => toPlain(segment))
+    : [toPlain(segments)]
+}
+
 export function createVideoProtocolManager(protocol: IVideoProtocol) {
   const validator = createValidator()
 
@@ -82,7 +89,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
    * - Other tracks (including non-main frames): allows gaps but prevents overlaps
    */
   const rebuildTrackTimeline = (track: TrackUnion, fromIndex = 0) => {
-    const children = track.children as SegmentUnion[]
+    const children = track.children
 
     // Sort by startTime first
     children.sort((a, b) => a.startTime - b.startTime)
@@ -143,8 +150,12 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     return undefined
   }
 
-  const addSegment = (segment: PartialByKeys<TrackTypeMapSegment[ITrackType], 'id'>) => {
+  const addSegment = (segment: PartialByKeys<TrackTypeMapSegment[ITrackType], 'id'>): { id: string, affectedSegments: SegmentUnion[] } => {
     const theSegment = normalizedSegment(segment)
+    const affectedSegments: SegmentUnion[] = []
+    const recordAffected = (segments: SegmentUnion | SegmentUnion[]) => {
+      affectedSegments.push(...cloneAffectedSegments(segments))
+    }
 
     try {
       validator.verifySegment(theSegment)
@@ -153,14 +164,20 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
       throw new Error('invalid segment data')
     }
 
-    return updateProtocol((protocol) => {
+    const id = updateProtocol((protocol) => {
       if (theSegment.segmentType === 'frames') {
         const frameTracks = protocol.tracks.filter(track => track.trackType === 'frames') as TrackTypeMapTrack['frames'][]
         const mainTrack = frameTracks.find(track => track.isMain)
-        if (!mainTrack)
-          return addSegmentToTrack(theSegment, protocol.tracks)
+        if (!mainTrack) {
+          const newId = addSegmentToTrack(theSegment, protocol.tracks)
+          recordAffected(theSegment)
+          return newId
+        }
 
-        return addFramesSegment(theSegment, mainTrack)
+        const newId = addFramesSegment(theSegment, mainTrack)
+        // All segments in the main track may be affected due to timeline rebuild
+        recordAffected(mainTrack.children)
+        return newId
       }
 
       const tracks = protocol.tracks
@@ -171,28 +188,54 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
         const index = findInsertSegmentIndex(theSegment, children, curTime.value)
         if (index !== -1) {
           children.splice(index, 0, theSegment)
+          // For non-frames tracks, only the added segment is affected (no auto-rebuild)
+          recordAffected(theSegment)
           return theSegment.id
         }
       }
 
-      return addSegmentToTrack(theSegment, tracks)
+      const newId = addSegmentToTrack(theSegment, tracks)
+      recordAffected(theSegment)
+      return newId
     })
+
+    return { id, affectedSegments }
   }
 
-  const removeSegment = (id: SegmentUnion['id']) => {
-    return updateProtocol((protocol) => {
+  const removeSegment = (id: SegmentUnion['id']): { success: boolean, affectedSegments: SegmentUnion[] } => {
+    const affectedSegments: SegmentUnion[] = []
+    const recordAffected = (segments: SegmentUnion | SegmentUnion[]) => {
+      affectedSegments.push(...cloneAffectedSegments(segments))
+    }
+
+    const success = updateProtocol((protocol) => {
       for (let i = 0; i < protocol.tracks.length; i++) {
         const track = protocol.tracks[i]
         const index = track.children.findIndex(segment => segment.id === id)
         if (index !== -1) {
           track.children.splice(index, 1)
-          if (track.children.length === 0)
+
+          // If track still has segments and it's a main frames track, rebuild timeline
+          if (track.children.length > 0) {
+            const isMainFramesTrack = track.trackType === 'frames' && (track as TrackTypeMapTrack['frames']).isMain
+            if (isMainFramesTrack) {
+              rebuildTrackTimeline(track, 0)
+              // All remaining segments may be affected
+              recordAffected(track.children)
+            }
+          }
+          else {
+            // Remove empty track
             protocol.tracks.splice(i, 1)
+          }
+
           return true
         }
       }
       return false
     })
+
+    return { success, affectedSegments }
   }
 
   const moveSegment = (options: {
@@ -203,8 +246,13 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     endTime: number
     isNewTrack?: boolean
     newTrackInsertIndex?: number
-  }) => {
-    return updateProtocol((protocol) => {
+  }): { success: boolean, affectedSegments: SegmentUnion[] } => {
+    const affectedSegments: SegmentUnion[] = []
+    const recordAffected = (segments: SegmentUnion | SegmentUnion[]) => {
+      affectedSegments.push(...cloneAffectedSegments(segments))
+    }
+
+    const success = updateProtocol((protocol) => {
       // Find source track and segment
       const sourceTrack = protocol.tracks.find(t => t.trackId === options.sourceTrackId)
       if (!sourceTrack)
@@ -214,7 +262,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
       if (segmentIndex < 0)
         return false
 
-      const segment = sourceTrack.children[segmentIndex] as SegmentUnion
+      const segment = sourceTrack.children[segmentIndex]
 
       // Check if moving within same track (same trackId and not creating new track)
       const isSameTrack = options.targetTrackId === options.sourceTrackId && options.isNewTrack !== true
@@ -224,6 +272,9 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
         segment.startTime = options.startTime
         segment.endTime = options.endTime
         rebuildTrackTimeline(sourceTrack)
+
+        // All segments in the track may be affected
+        recordAffected(sourceTrack.children)
       }
       else {
         // Moving to different track or creating new track
@@ -233,6 +284,8 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
         // Step 2: Rebuild source track timeline to avoid overlaps
         if (sourceTrack.children.length > 0) {
           rebuildTrackTimeline(sourceTrack)
+          // Source track segments are affected
+          recordAffected(sourceTrack.children)
         }
 
         // Step 3: Delete source track if empty
@@ -270,6 +323,9 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
           // For non-main tracks (including non-main frames), keep user's drag position
 
           protocol.tracks.splice(options.newTrackInsertIndex, 0, newTrack)
+
+          // The moved segment is affected
+          recordAffected(segment)
         }
         else if (options.targetTrackId) {
           // Add to existing target track
@@ -291,11 +347,16 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
             ;(targetTrack.children as SegmentUnion[]).push(segment)
             rebuildTrackTimeline(targetTrack)
           }
+
+          // All segments in target track are affected
+          recordAffected(targetTrack.children)
         }
       }
 
       return true
     })
+
+    return { success, affectedSegments }
   }
 
   const resizeSegment = (options: {
@@ -303,8 +364,13 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
     trackId: string
     startTime: number
     endTime: number
-  }) => {
-    return updateProtocol((protocol) => {
+  }): { success: boolean, affectedSegments: SegmentUnion[] } => {
+    const affectedSegments: SegmentUnion[] = []
+    const recordAffected = (segments: SegmentUnion | SegmentUnion[]) => {
+      affectedSegments.push(...cloneAffectedSegments(segments))
+    }
+
+    const success = updateProtocol((protocol) => {
       const track = protocol.tracks.find(t => t.trackId === options.trackId)
       if (!track)
         return false
@@ -313,7 +379,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
       if (segmentIndex < 0)
         return false
 
-      const segment = track.children[segmentIndex] as SegmentUnion
+      const segment = track.children[segmentIndex]
 
       // Update segment time
       segment.startTime = options.startTime
@@ -322,8 +388,15 @@ export function createVideoProtocolManager(protocol: IVideoProtocol) {
       // Rebuild timeline from current segment onwards to avoid overlaps
       rebuildTrackTimeline(track, segmentIndex)
 
+      // Collect all affected segments (from segmentIndex onwards)
+      for (let i = segmentIndex; i < track.children.length; i++) {
+        recordAffected(track.children[i])
+      }
+
       return true
     })
+
+    return { success, affectedSegments }
   }
 
   function updateSegment<T extends ITrackType>(updater: (segment: TrackTypeMapSegment[T]) => void, id?: string, type?: T) {
