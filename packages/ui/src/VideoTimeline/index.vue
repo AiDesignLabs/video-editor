@@ -807,11 +807,11 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 <style scoped>
 :where(.ve-timeline) {
   --ve-primary: #222226;
-  --at-apply: flex flex-col w-full max-w-full min-w-0 border border-[#e5e7eb] rounded-10px;
+  --at-apply: flex flex-col w-full max-w-full min-w-0 rounded-10px;
 }
 
 :where(.ve-timeline .ve-timeline__viewport) {
-  --at-apply: relative overflow-x-auto overflow-y-hidden w-full h-340px bg-white;
+  --at-apply: relative overflow-x-auto overflow-y-hidden w-full bg-white;
 }
 
 :where(.ve-timeline .ve-timeline__content) {

@@ -17,7 +17,7 @@ export default defineConfig({
     lib: {
       entry: fileURLToPath(new URL('./src/index.ts', import.meta.url)),
       formats: ['es'],
-      fileName: 'videoEditorShared',
+      fileName: 'index',
     },
     rollupOptions: {
       output: {

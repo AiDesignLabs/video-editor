@@ -170,6 +170,21 @@ function handleSegmentResizeEnd(payload: SegmentResizePayload) {
     @segment-resize-end="handleSegmentResizeEnd"
     @background-click="emitSelection(null)"
   >
+    <!-- Pass through toolbar slot -->
+    <template v-if="$slots.toolbar" #toolbar="slotProps">
+      <slot name="toolbar" v-bind="slotProps" />
+    </template>
+
+    <!-- Pass through ruler slot -->
+    <template v-if="$slots.ruler" #ruler="slotProps">
+      <slot name="ruler" v-bind="slotProps" />
+    </template>
+
+    <!-- Pass through playhead slot -->
+    <template v-if="$slots.playhead" #playhead="slotProps">
+      <slot name="playhead" v-bind="slotProps" />
+    </template>
+
     <template #segment="{ layout }">
       <template v-for="segment in [resolveSegment(layout.segment.payload)]" :key="segment?.id || layout.segment.id">
         <div
