@@ -1781,6 +1781,41 @@ describe('moveSegment', () => {
     expect(p2.tracks[1].children).toHaveLength(1)
     expect(p2.tracks[1].children[0].id).toBe('frame-2')
   })
+
+  it('reports track creation/removal and supports replacing trackId', () => {
+    const { addSegment, moveSegment, exportProtocol, replaceTrackId } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    const addResult = addSegment(text1)
+    expect(addResult.createdTracks).toHaveLength(1)
+    const initialTrackId = addResult.createdTracks[0].trackId
+
+    const moveResult = moveSegment({
+      segmentId: 'text-1',
+      sourceTrackId: initialTrackId,
+      startTime: 0,
+      endTime: 1000,
+      isNewTrack: true,
+      newTrackInsertIndex: 0,
+    })
+
+    expect(moveResult.createdTracks).toHaveLength(1)
+    expect(moveResult.removedTrackIds).toContain(initialTrackId)
+    const newTrackId = moveResult.createdTracks[0].trackId
+
+    replaceTrackId(newTrackId, 'server-track-id')
+    const p2 = exportProtocol()
+    expect(p2.tracks).toHaveLength(1)
+    expect(p2.tracks[0].trackId).toBe('server-track-id')
+    expect(p2.tracks[0].children[0].id).toBe('text-1')
+  })
 })
 
 describe('moveSegment - undo/redo', () => {

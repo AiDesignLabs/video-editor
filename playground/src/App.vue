@@ -368,10 +368,11 @@ const formatMs = (val: number | Ref<number>) => `${(unref(val) / 1000).toFixed(2
         </div>
       </div>
 
-      <div class="timeline">
+      <div class="timeline min-h-400px">
         <VideoEditorTimeline
           v-model:zoom="timelineZoom"
           v-model:selected-segment-id="selectedSegmentId"
+          class="flex-1"
           :protocol="protocol"
           :current-time="currentTimeMs"
           :track-types="['frames', 'text']"
