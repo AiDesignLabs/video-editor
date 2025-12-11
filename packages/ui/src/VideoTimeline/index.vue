@@ -815,7 +815,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 }
 
 :where(.ve-timeline .ve-timeline__content) {
-  --at-apply: relative min-h-full min-w-full;
+  --at-apply: min-h-full min-w-full;
 }
 
 :where(.ve-timeline .ve-timeline__tracks) {
@@ -835,11 +835,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 }
 
 :where(.ve-timeline .ve-segment) {
-  --at-apply: absolute top-0 bottom-0 rounded-[4px] text-[#0f172a] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)] cursor-pointer flex items-center overflow-hidden transition-[box-shadow] duration-150;
-}
-
-:where(.ve-timeline .ve-segment--selected) {
-  --at-apply: shadow-[0_0_0_2px_var(--ve-primary),inset_0_0_0_1px_rgba(255,255,255,0.45)];
+  --at-apply: absolute top-0 bottom-0 rounded-[4px] text-[#0f172a] cursor-pointer flex items-center overflow-hidden duration-150;
 }
 
 :where(.ve-timeline .ve-segment--dragging) {
@@ -875,15 +871,15 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 }
 
 :where(.ve-timeline .ve-segment__handle--left) {
-  --at-apply: left-0 top-0 translate-x--50% rounded-l-1;
+  --at-apply: left-0 top-0 rounded-l-1;
 }
 
 :where(.ve-timeline .ve-segment__handle--right) {
-  --at-apply: right-0 top-0 translate-x-50% rounded-r-1;
+  --at-apply: right-0 top-0 rounded-r-1;
 }
 
 :where(.ve-timeline .ve-segment__handle-dots) {
-  --at-apply: absolute left-0 top-50% translate-x--50% translate-y--50% flex flex-col items-center gap-0.5 w-1;
+  --at-apply: absolute left-0 top-50% translate-y--50% flex flex-col items-center gap-0.5 w-1;
   justify-content: center;
 }
 
@@ -897,7 +893,6 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
   --at-apply: absolute pointer-events-none rounded-[4px] z-24;
   background: rgba(34, 34, 38, 0.12);
   border: 2px solid rgba(34, 34, 38, 0.6);
-  box-shadow: 0 2px 8px rgba(34, 34, 38, 0.3);
 }
 
 :where(.ve-timeline .ve-segment--placeholder-inner) {
