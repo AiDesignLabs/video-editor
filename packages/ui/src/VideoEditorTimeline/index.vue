@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import type {
+  IAudioSegment,
+  IEffectSegment,
+  IFilterSegment,
+  IFramesSegmentUnion,
+  IStickerSegment,
+  ITextSegment,
   ITrackType,
   IVideoProtocol,
   SegmentUnion,
@@ -193,24 +199,37 @@ function handleSegmentResizeEnd(payload: SegmentResizePayload) {
           :style="{ '--ve-segment-accent': layout.track.color || PRIMARY_COLOR }"
         >
           <div class="ve-editor-segment__preview">
-            <!-- Dynamic slot based on segment type: segment-frames, segment-text, etc. -->
-            <slot
-              :name="`segment-${segment.segmentType}`"
-              :segment="segment"
-              :layout="layout"
-            >
-              <!-- Default rendering if no custom slot provided -->
-              <FramesSegment
-                v-if="segment.segmentType === 'frames'"
-                :segment="segment"
-              />
-              <SegmentBase
-                v-else
-                :segment="segment"
-                :track-type="layout.track.type || 'unknown'"
-                :accent-color="layout.track.color"
-              />
-            </slot>
+            <!-- Separate slots by segment type for automatic type narrowing -->
+            <template v-if="segment.segmentType === 'frames'">
+              <slot name="segment-frames" :segment="segment as IFramesSegmentUnion" :layout="layout">
+                <FramesSegment :segment="segment" />
+              </slot>
+            </template>
+            <template v-else-if="segment.segmentType === 'text'">
+              <slot name="segment-text" :segment="segment as ITextSegment" :layout="layout">
+                <SegmentBase :segment="segment" :track-type="layout.track.type || 'unknown'" :accent-color="layout.track.color" />
+              </slot>
+            </template>
+            <template v-else-if="segment.segmentType === 'sticker'">
+              <slot name="segment-sticker" :segment="segment as IStickerSegment" :layout="layout">
+                <SegmentBase :segment="segment" :track-type="layout.track.type || 'unknown'" :accent-color="layout.track.color" />
+              </slot>
+            </template>
+            <template v-else-if="segment.segmentType === 'audio'">
+              <slot name="segment-audio" :segment="segment as IAudioSegment" :layout="layout">
+                <SegmentBase :segment="segment" :track-type="layout.track.type || 'unknown'" :accent-color="layout.track.color" />
+              </slot>
+            </template>
+            <template v-else-if="segment.segmentType === 'effect'">
+              <slot name="segment-effect" :segment="segment as IEffectSegment" :layout="layout">
+                <SegmentBase :segment="segment" :track-type="layout.track.type || 'unknown'" :accent-color="layout.track.color" />
+              </slot>
+            </template>
+            <template v-else-if="segment.segmentType === 'filter'">
+              <slot name="segment-filter" :segment="segment as IFilterSegment" :layout="layout">
+                <SegmentBase :segment="segment" :track-type="layout.track.type || 'unknown'" :accent-color="layout.track.color" />
+              </slot>
+            </template>
           </div>
         </div>
       </template>
