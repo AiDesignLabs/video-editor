@@ -4,6 +4,8 @@ import VideoTimeline from './VideoTimeline/index.vue'
 
 export * from './VideoTimeline/types'
 
+export * from './VideoEditorTimeline/segments'
+
 // 导出单独组件
 export { VideoEditorTimeline, VideoTimeline }
 
