@@ -1,7 +1,7 @@
 {
   "name": "@video-editor/ui",
   "type": "module",
-  "version": "0.0.1-beta.13",
+  "version": "0.0.1-beta.14",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
