@@ -879,7 +879,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 }
 
 :where(.ve-timeline .ve-segment__handle-dots) {
-  --at-apply: absolute left-0 top-50% translate-y--50% flex flex-col items-center gap-0.5 w-1;
+  --at-apply: absolute left-0 top-50% translate-y--50% flex flex-col items-center gap-0.5;
   justify-content: center;
 }
 

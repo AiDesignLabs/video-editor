@@ -92,38 +92,57 @@ function getImageStyle() {
 <template>
   <div class="frames-segment">
     <!-- Image Type: Tiled background -->
-    <div
-      v-if="segment.type === 'image'"
-      class="frames-segment__image"
-      :style="getImageStyle()"
-    />
+    <template v-if="segment.type === 'image'">
+      <slot name="image" :segment="segment" :style="getImageStyle()">
+        <div
+          class="frames-segment__image"
+          :style="getImageStyle()"
+        />
+      </slot>
+    </template>
 
     <!-- Video Type: Extracted frame thumbnails -->
     <template v-else-if="segment.type === 'video'">
-      <div v-if="thumbnailState.items.length" class="frames-segment__video">
-        <div
-          v-for="thumb in thumbnailState.items"
-          :key="`${segment.id}-${thumb.tsMs}`"
-          class="frames-segment__thumb"
-          :style="{ backgroundImage: `url(${thumb.url})` }"
-        />
-      </div>
+      <template v-if="thumbnailState.items.length">
+        <slot name="video" :segment="segment" :thumbnails="thumbnailState.items">
+          <div class="frames-segment__video">
+            <div
+              v-for="thumb in thumbnailState.items"
+              :key="`${segment.id}-${thumb.tsMs}`"
+              class="frames-segment__thumb"
+              :style="{ backgroundImage: `url(${thumb.url})` }"
+            />
+          </div>
+        </slot>
+      </template>
       <div v-else class="frames-segment__placeholder">
-        <span v-if="thumbnailState.loading">抽帧中…</span>
-        <span v-else-if="thumbnailState.error">生成失败</span>
-        <span v-else>未生成缩略图</span>
+        <slot v-if="thumbnailState.loading" name="loading" :segment="segment">
+          <span>抽帧中…</span>
+        </slot>
+        <slot v-else-if="thumbnailState.error" name="error" :segment="segment" :error="thumbnailState.error">
+          <span>生成失败</span>
+        </slot>
+        <slot v-else name="empty" :segment="segment">
+          <span>未生成缩略图</span>
+        </slot>
       </div>
     </template>
 
     <!-- 3D or other types -->
-    <div v-else class="frames-segment__placeholder">
-      <span>{{ segment.type }}</span>
-    </div>
+    <template v-else>
+      <slot name="fallback" :segment="segment">
+        <div class="frames-segment__placeholder">
+          <span>{{ segment.type }}</span>
+        </div>
+      </slot>
+    </template>
 
-    <!-- Label badge -->
-    <span v-if="segment.extra?.label" class="frames-segment__badge">
-      {{ segment.extra?.label }}
-    </span>
+    <!-- Overlay (badge, labels, etc.) -->
+    <slot name="overlay" :segment="segment">
+      <span v-if="segment.extra?.label" class="frames-segment__badge">
+        {{ segment.extra?.label }}
+      </span>
+    </slot>
   </div>
 </template>
 
@@ -150,7 +169,7 @@ function getImageStyle() {
 }
 
 :where(.frames-segment .frames-segment__placeholder) {
-  --at-apply: flex items-center justify-center w-full h-full text-[12px] rounded-4px;
+  --at-apply: flex items-center justify-center w-full h-full text-[12px] rounded-4px whitespace-nowrap;
   color: rgba(15, 23, 42, 0.75);
   background: rgba(0, 0, 0, 0.05);
 }

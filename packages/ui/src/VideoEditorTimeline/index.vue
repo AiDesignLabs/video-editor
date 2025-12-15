@@ -193,16 +193,24 @@ function handleSegmentResizeEnd(payload: SegmentResizePayload) {
           :style="{ '--ve-segment-accent': layout.track.color || PRIMARY_COLOR }"
         >
           <div class="ve-editor-segment__preview">
-            <FramesSegment
-              v-if="segment.segmentType === 'frames'"
+            <!-- Dynamic slot based on segment type: segment-frames, segment-text, etc. -->
+            <slot
+              :name="`segment-${segment.segmentType}`"
               :segment="segment"
-            />
-            <SegmentBase
-              v-else
-              :segment="segment"
-              :track-type="layout.track.type || 'unknown'"
-              :accent-color="layout.track.color"
-            />
+              :layout="layout"
+            >
+              <!-- Default rendering if no custom slot provided -->
+              <FramesSegment
+                v-if="segment.segmentType === 'frames'"
+                :segment="segment"
+              />
+              <SegmentBase
+                v-else
+                :segment="segment"
+                :track-type="layout.track.type || 'unknown'"
+                :accent-color="layout.track.color"
+              />
+            </slot>
           </div>
         </div>
       </template>
