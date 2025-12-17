@@ -1,4 +1,4 @@
-import { createResourceManager } from '.'
+import { DEFAULT_RESOURCE_DIR, createResourceManager } from '.'
 import { getResourceType } from './fetch'
 
 describe('resource manager', () => {
@@ -7,6 +7,8 @@ describe('resource manager', () => {
   const videoUrl = 'https://mogic-static.oss-cn-hangzhou.aliyuncs.com/test/output.mp4'
   const notFoundUrl = 'https://mogic-static.oss-cn-hangzhou.aliyuncs.com/not-found.png'
   const notSupportUrl = 'https://mogic-static.oss-cn-hangzhou.aliyuncs.com/subtitle-transtion/vc-upload-1683964073583-22.pag'
+  const imgUrlQuery1 = `${imgUrl}?v=1`
+  const imgUrlQuery2 = `${imgUrl}?v=2`
 
   describe('get resource type', () => {
     it('should return image if url is image', async () => {
@@ -51,6 +53,20 @@ describe('resource manager', () => {
     it('breakpoint continue save', async () => {
       // TODO: support breakpoint continue save
       expect(true).toBeTruthy()
+    })
+  })
+
+  describe('key normalization', () => {
+    it('treats query variations as same cache entry', async () => {
+      const keyManager = createResourceManager({ dir: `${DEFAULT_RESOURCE_DIR}/test-key-normalization` })
+      await keyManager.clear()
+
+      await keyManager.add(imgUrlQuery1)
+      const img = await keyManager.get(imgUrlQuery2)
+      expect(img instanceof HTMLImageElement).toBeTruthy()
+
+      await keyManager.remove(imgUrlQuery2)
+      expect(await keyManager.get(imgUrlQuery1)).toBeUndefined()
     })
   })
 
