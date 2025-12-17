@@ -63,3 +63,4 @@ export function createResourceManager(opts?: { dir?: string }) {
 
 export { DEFAULT_RESOURCE_DIR } from './constants'
 export { generateThumbnails } from './thumbnails'
+export { getMp4Meta } from './meta'

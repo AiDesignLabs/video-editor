@@ -4,6 +4,7 @@ export {
   createResourceManager,
   DEFAULT_RESOURCE_DIR,
   generateThumbnails,
+  getMp4Meta,
 } from './resource'
 export {
   fileTo,

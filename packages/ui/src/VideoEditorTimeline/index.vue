@@ -11,8 +11,10 @@ import type {
   SegmentUnion,
   TrackUnion,
 } from '@video-editor/shared'
+import { getMp4Meta } from '@video-editor/protocol'
+import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
 import type { SegmentDragPayload, SegmentLayout, SegmentResizePayload, TimelineTrack } from '../VideoTimeline/types'
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch, watchEffect } from 'vue'
 import VideoTimeline from '../VideoTimeline/index.vue'
 import { FramesSegment, SegmentBase } from './segments'
 
@@ -68,6 +70,32 @@ const filteredTracks = computed(() => {
   return props.protocol.tracks.filter((track: TrackUnion) => props.trackTypes?.includes(track.trackType))
 })
 
+const videoDurationMsByUrl = reactive(new Map<string, number>())
+const pendingVideoDurationJobs = new Map<string, Promise<void>>()
+
+function ensureVideoDurationMs(url: string) {
+  if (!url)
+    return
+  if (videoDurationMsByUrl.has(url))
+    return
+  if (pendingVideoDurationJobs.has(url))
+    return
+
+  const job = (async () => {
+    try {
+      const meta = await getMp4Meta(url)
+      videoDurationMsByUrl.set(url, meta.durationMs)
+    }
+    catch {
+      // ignore, leave duration unknown
+    }
+  })().finally(() => {
+    pendingVideoDurationJobs.delete(url)
+  })
+
+  pendingVideoDurationJobs.set(url, job)
+}
+
 const timelineTracks = computed<TimelineTrack[]>(() => filteredTracks.value.map((track: TrackUnion, index: number) => {
   const accent = colorByType[track.trackType] || PRIMARY_COLOR
   const surface = toAlphaColor(accent, SURFACE_ALPHA)
@@ -80,6 +108,11 @@ const timelineTracks = computed<TimelineTrack[]>(() => filteredTracks.value.map(
     isMain,
     payload: track,
     segments: track.children.map((segment: SegmentUnion) => ({
+      ...(isVideoFramesSegment(segment)
+        ? { fromTime: segment.fromTime ?? 0, sourceDurationMs: videoDurationMsByUrl.get(segment.url) }
+        : isAudioSegment(segment)
+          ? { fromTime: segment.fromTime ?? 0 }
+          : {}),
       id: segment.id,
       start: segment.startTime,
       end: segment.endTime,
@@ -89,6 +122,15 @@ const timelineTracks = computed<TimelineTrack[]>(() => filteredTracks.value.map(
     })),
   }
 }))
+
+watchEffect(() => {
+  for (const track of filteredTracks.value) {
+    for (const segment of track.children) {
+      if (isVideoFramesSegment(segment))
+        ensureVideoDurationMs(segment.url)
+    }
+  }
+})
 
 const timelineDuration = computed(() => {
   if (!props.protocol?.tracks?.length)

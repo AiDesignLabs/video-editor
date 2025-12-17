@@ -2346,6 +2346,36 @@ describe('resizeSegment', () => {
     expect(p2.tracks[0].children[1].startTime).toBe(1500) // Adjusted +500
     expect(p2.tracks[0].children[1].endTime).toBe(2500) // Adjusted +500
   })
+
+  it('should sync fromTime when resizing video segment start', () => {
+    const { addSegment, resizeSegment, exportProtocol } = createVideoProtocolManager(protocol)
+
+    const frame: IVideoFramesSegment = {
+      id: 'frame-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'file:///video1.mp4',
+      fromTime: 1000,
+      startTime: 0,
+      endTime: 1000,
+    }
+
+    addSegment(frame)
+    const track = exportProtocol().tracks[0]
+
+    resizeSegment({
+      segmentId: 'frame-1',
+      trackId: track.trackId,
+      startTime: 500,
+      endTime: 1000,
+    })
+
+    const p2 = exportProtocol()
+    const updated = p2.tracks[0].children[0] as IVideoFramesSegment
+    expect(updated.startTime).toBe(0)
+    expect(updated.endTime).toBe(500)
+    expect(updated.fromTime).toBe(1500)
+  })
 })
 
 describe('addSegment - undo/redo', () => {

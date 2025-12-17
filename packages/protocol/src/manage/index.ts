@@ -1,6 +1,7 @@
-import type { ITrack, ITrackType, ITransition, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
+import type { IAudioSegment, ITrack, ITrackType, ITransition, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
 import type { DeepReadonly } from '@vue/reactivity'
 import type { PartialByKeys } from './utils'
+import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
 import { computed, reactive, readonly, ref, toRaw } from '@vue/reactivity'
 import { createValidator } from '../verify'
 import { useHistory } from './immer'
@@ -16,6 +17,10 @@ function cloneAffectedSegments(segments: SegmentUnion | SegmentUnion[]) {
 
 function cloneTrack(track: TrackUnion): TrackUnion {
   return JSON.parse(JSON.stringify(toRaw(track))) as TrackUnion
+}
+
+function isSegmentWithFromTime(segment: SegmentUnion): segment is IVideoFramesSegment | IAudioSegment {
+  return isVideoFramesSegment(segment) || isAudioSegment(segment)
 }
 
 export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
@@ -465,9 +470,39 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
 
       const segment = track.children[segmentIndex]
 
-      // Update segment time
-      segment.startTime = options.startTime
-      segment.endTime = options.endTime
+      const originalStartTime = segment.startTime
+
+      let nextStartTime = options.startTime
+      let nextEndTime = options.endTime
+      let nextDuration = nextEndTime - nextStartTime
+      if (!Number.isFinite(nextDuration) || nextDuration < 0)
+        return false
+
+      const segmentWithFromTime = isSegmentWithFromTime(segment) ? segment : null
+      let nextFromTime = segmentWithFromTime ? (segmentWithFromTime.fromTime ?? 0) : 0
+
+      // When resizing the start edge, keep the media content aligned by updating fromTime.
+      // - Trimming in (startTime increases) => fromTime increases
+      // - Extending left (startTime decreases) => fromTime decreases (clamped at 0)
+      if (segmentWithFromTime && nextStartTime !== originalStartTime) {
+        const originalFromTime = segmentWithFromTime.fromTime ?? 0
+        const requestedDeltaStart = nextStartTime - originalStartTime
+        const clampedDeltaStart = Math.max(requestedDeltaStart, -originalFromTime)
+
+        if (clampedDeltaStart !== requestedDeltaStart) {
+          nextStartTime = originalStartTime + clampedDeltaStart
+          nextDuration = nextEndTime - nextStartTime
+        }
+        if (!Number.isFinite(nextDuration) || nextDuration < 0)
+          return false
+
+        nextFromTime = originalFromTime + clampedDeltaStart
+        segmentWithFromTime.fromTime = nextFromTime
+      }
+
+      // Update segment time (duration is the primary invariant, especially for main frames tracks).
+      segment.startTime = nextStartTime
+      segment.endTime = nextEndTime
 
       // Rebuild timeline from current segment onwards to avoid overlaps
       rebuildTrackTimeline(track, segmentIndex)

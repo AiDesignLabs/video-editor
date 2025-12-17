@@ -4,6 +4,8 @@ export interface TimelineSegment {
   end: number
   type?: string
   color?: string
+  fromTime?: number
+  sourceDurationMs?: number
   payload?: unknown
 }
 

@@ -410,6 +410,21 @@ function emitResizePreview(state: ResizeState, clientX: number, trigger: 'drag' 
   }
   else {
     nextEnd = snap(Math.max(layout.segment.start + minDuration, layout.segment.end + deltaMs))
+
+    const { sourceDurationMs, fromTime: fromTimeMs } = layout.segment
+    if (
+      typeof sourceDurationMs === 'number'
+      && Number.isFinite(sourceDurationMs)
+      && sourceDurationMs > 0
+      && typeof fromTimeMs === 'number'
+      && Number.isFinite(fromTimeMs)
+      && fromTimeMs >= 0
+    ) {
+      const maxDuration = Math.max(0, sourceDurationMs - fromTimeMs)
+      const maxEnd = nextStart + maxDuration
+      if (nextEnd > maxEnd)
+        nextEnd = maxEnd
+    }
   }
 
   const payload: SegmentResizePayload = {
