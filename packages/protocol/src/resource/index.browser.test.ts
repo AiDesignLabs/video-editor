@@ -1,5 +1,6 @@
 import { DEFAULT_RESOURCE_DIR, createResourceManager } from '.'
 import { getResourceType } from './fetch'
+import { generateThumbnails } from './thumbnails'
 
 describe('resource manager', () => {
   const manager = createResourceManager()
@@ -99,6 +100,13 @@ describe('resource manager', () => {
     it('invalid file data url', async () => {
       // TODO: support invalid file data check
       expect(true).toBeTruthy()
+    })
+  })
+
+  describe('thumbnails', () => {
+    it('returns empty list for non-video url', async () => {
+      const thumbs = await generateThumbnails(imgUrl)
+      expect(Array.isArray(thumbs) && thumbs.length === 0).toBeTruthy()
     })
   })
 })

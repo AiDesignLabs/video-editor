@@ -310,10 +310,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         return placeholder(segment.segmentType)
 
       if ('type' in segment && segment.type === 'video') {
-        const sprite = await loadVideoSprite(segment)
-        if (sprite)
-          return sprite
-        return placeholder(segment.segmentType, segment.url)
+        if (isRenderableVideoUrl(segment.url)) {
+          const sprite = await loadVideoSprite(segment)
+          if (sprite)
+            return sprite
+          return placeholder(segment.segmentType, segment.url)
+        }
       }
 
       const texture = await loadTexture(segment.url)
@@ -469,6 +471,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     return segment.segmentType === 'frames'
       && segment.type === 'video'
       && typeof segment.url === 'string'
+      && isRenderableVideoUrl(segment.url)
   }
 
   function normalizeRenderTime(protocol: IVideoProtocol, at: number) {
@@ -621,6 +624,14 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac'].includes(ext))
       return 'audio'
     return 'unknown'
+  }
+
+  function isRenderableVideoUrl(url: string) {
+    const kind = inferUrlMediaType(url)
+    if (kind === 'image' || kind === 'audio')
+      return false
+    // Treat unknown as video to support blob URLs or extension-less endpoints.
+    return true
   }
 
   async function loadVideoSpriteViaElement(url: string, reuse?: { sprite: Sprite, oldTexture?: Texture }): Promise<VideoEntry | undefined> {

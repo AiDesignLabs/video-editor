@@ -1,7 +1,7 @@
 import { MP4Clip } from '@webav/av-cliper'
 import { file as opfsFile, write as opfsWrite } from 'opfs-tools'
 import { DEFAULT_RESOURCE_DIR } from './constants'
-import { getResourceKey, getResourceOpfsPath } from './key'
+import { inferResourceTypeFromUrl, getResourceKey, getResourceOpfsPath } from './key'
 
 export interface GenerateThumbnailsOptions {
   /** Thumbnail width in pixels (default 100). */
@@ -28,6 +28,10 @@ const mp4ClipUnsupportedKeys = new Set<string>()
 export async function generateThumbnails(url: string, options?: GenerateThumbnailsOptions): Promise<Thumbnail[]> {
   if (!url)
     throw new Error('url is required')
+
+  const type = inferResourceTypeFromUrl(url)
+  if (type && type !== 'video')
+    return []
 
   const {
     imgWidth = 100,
