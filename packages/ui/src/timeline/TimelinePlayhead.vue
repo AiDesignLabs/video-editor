@@ -50,6 +50,6 @@ const emit = defineEmits<{
 }
 
 :where(.ve-playhead__line) {
-  --at-apply: bg-[#222226] h-full w-px translate-x--50% left-50% top-2px absolute pointer-events-none;
+  --at-apply: bg-[#222226] bottom-0 w-px translate-x--50% left-50% top-2px absolute pointer-events-none;
 }
 </style>

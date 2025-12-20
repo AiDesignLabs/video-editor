@@ -7,6 +7,8 @@ import { createRenderer } from '@video-editor/renderer'
 import { VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 
+const clone = <T>(val: T): T => (typeof structuredClone === 'function' ? structuredClone(val) : JSON.parse(JSON.stringify(val)))
+
 const swatches = {
   primary: 'https://dummyimage.com/1280x720/6aa7ff/ffffff.png&text=Clip+A',
   alt: 'https://dummyimage.com/1280x720/f97316/ffffff.png&text=Clip+C',

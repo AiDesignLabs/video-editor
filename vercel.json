@@ -2,6 +2,6 @@
   "version": 2,
   "framework": "vite",
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm -C playground build",
+  "buildCommand": "pnpm build",
   "outputDirectory": "playground/dist"
 }
