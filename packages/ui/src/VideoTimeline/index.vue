@@ -11,6 +11,7 @@ import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import TimelinePlayhead from '../timeline/TimelinePlayhead.vue'
 import TimelineRuler from '../timeline/TimelineRuler.vue'
 import TimelineToolbar from '../timeline/TimelineToolbar.vue'
+import TimelineTracks from '../timeline/TimelineTracks.vue'
 import { useDragAndDrop } from './hooks'
 
 defineOptions({ name: 'VideoTimeline' })
@@ -635,94 +636,37 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
           />
         </slot>
 
-        <div
-          ref="tracksRef"
-          class="ve-timeline__tracks"
-          :style="{ gap: `${trackGapPx}px`, paddingTop: `${trackGapPx}px` }"
-        >
-          <div
-            v-for="trackLayout in segmentLayouts"
-            :key="trackLayout.track.id"
-            class="ve-track"
-            :class="{ 've-track--main': trackLayout.track.isMain }"
-            :style="{ height: `${trackHeightPx}px` }"
+        <div ref="tracksRef">
+          <TimelineTracks
+            :tracks="segmentLayouts"
+            :track-height="trackHeightPx"
+            :track-gap="trackGapPx"
+            :selected-segment-id="props.selectedSegmentId"
+            :drag-preview="dragPreview"
+            :resize-preview="resizePreview"
+            @segment-click="handleSegmentClick"
+            @segment-mousedown="startDrag"
+            @resize-start="startResize"
           >
-            <slot
-              name="track"
-              :track="trackLayout.track"
-              :index="trackLayout.trackIndex"
-              :segments="trackLayout.segments"
-              :pixels-per-ms="pixelsPerMs"
-              :height="trackHeightPx"
-            >
-              <div class="ve-track__body">
-                <div
-                  v-for="layout in trackLayout.segments"
-                  v-show="dragPreview?.segment.id !== layout.segment.id && resizePreview?.segment.id !== layout.segment.id"
-                  :key="layout.segment.id"
-                  class="ve-segment"
-                  :class="{
-                    've-segment--selected': layout.isSelected,
-                  }"
-                  :style="{
-                    left: `${layout.left}px`,
-                    width: `${layout.width}px`,
-                    backgroundColor: layout.segment.color || trackLayout.track.color || 'var(--ve-primary)',
-                  }"
-                  @mousedown.prevent.stop="startDrag(layout, $event)"
-                  @click.stop="handleSegmentClick(layout, $event)"
-                >
-                  <slot
-                    name="segment"
-                    :layout="layout"
-                    :segment="layout.segment"
-                    :track="layout.track"
-                    :is-selected="layout.isSelected"
-                  >
-                    <div class="ve-segment__content">
-                      <div class="ve-segment__title">
-                        {{ layout.segment.type || 'segment' }}
-                      </div>
-                      <div class="ve-segment__time">
-                        {{ formatTime(layout.segment.start) }} - {{ formatTime(layout.segment.end) }}
-                      </div>
-                    </div>
-                  </slot>
-
-                  <!-- Selection border and handles -->
-                  <div
-                    v-if="layout.isSelected"
-                    class="ve-segment__selection"
-                  >
-                    <!-- Left handle -->
-                    <div
-                      class="ve-segment__handle ve-segment__handle--left"
-                      @mousedown.stop="startResize(layout, 'start', $event)"
-                    >
-                      <div class="ve-segment__handle-dots">
-                        <div class="ve-segment__handle-dot" />
-                        <div class="ve-segment__handle-dot" />
-                        <div class="ve-segment__handle-dot" />
-                        <div class="ve-segment__handle-dot" />
-                      </div>
-                    </div>
-                    <!-- Right handle -->
-                    <div
-                      class="ve-segment__handle ve-segment__handle--right"
-                      @mousedown.stop="startResize(layout, 'end', $event)"
-                    >
-                      <div class="ve-segment__handle-dots">
-                        <div class="ve-segment__handle-dot" />
-                        <div class="ve-segment__handle-dot" />
-                        <div class="ve-segment__handle-dot" />
-                        <div class="ve-segment__handle-dot" />
-                      </div>
-                    </div>
+            <template #segment="{ layout, segment, track, isSelected }">
+              <slot
+                name="segment"
+                :layout="layout"
+                :segment="segment"
+                :track="track"
+                :is-selected="isSelected"
+              >
+                <div class="ve-segment__content">
+                  <div class="ve-segment__title">
+                    {{ segment.type || 'segment' }}
+                  </div>
+                  <div class="ve-segment__time">
+                    {{ formatTime(segment.start) }} - {{ formatTime(segment.end) }}
                   </div>
                 </div>
-              </div>
-            </slot>
-          </div>
+              </slot>
+            </template>
+          </TimelineTracks>
         </div>
 
         <!-- 拖拽中的 segment (提升到轨道外避免被 overflow 裁剪) -->
@@ -833,39 +777,22 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
   --at-apply: min-h-full min-w-full;
 }
 
-:where(.ve-timeline .ve-timeline__tracks) {
-  --at-apply: relative z-1 pb-3 flex flex-col gap-2px flex-1;
-}
-
-:where(.ve-timeline .ve-track) {
-  --at-apply: relative bg-[#f8fafc] overflow-hidden;
-}
-
-:where(.ve-timeline .ve-track--main) {
-  background-color: #F4F4F6;
-}
-
-:where(.ve-timeline .ve-track__body) {
-  --at-apply: relative h-full;
-}
-
-:where(.ve-timeline .ve-segment) {
-  --at-apply: absolute top-0 bottom-0 rounded-[4px] text-[#0f172a] cursor-pointer flex items-center overflow-hidden duration-150;
-}
-
+/* Dragging segment (VideoTimeline specific) */
 :where(.ve-timeline .ve-segment--dragging) {
   --at-apply: absolute z-50 rounded-[4px] text-[#0f172a] cursor-pointer flex items-center overflow-hidden pointer-events-none;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 0 0 2px rgba(255, 255, 255, 0.5);
 }
 
+/* Resize preview (VideoTimeline specific) */
 :where(.ve-timeline .ve-segment--preview) {
   --at-apply: absolute z-45 rounded-[4px] pointer-events-none;
   opacity: 0.7;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 0 0 2px rgba(255, 255, 255, 0.4);
 }
 
+/* Segment content for dragging segment */
 :where(.ve-timeline .ve-segment__content) {
-  --at-apply: flex flex-col gap-1;
+  --at-apply: flex flex-col gap-1 px-2.5 py-1.5;
 }
 
 :where(.ve-timeline .ve-segment__title) {
@@ -876,34 +803,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
   --at-apply: text-[11px] text-[rgba(15,23,42,0.8)] font-mono;
 }
 
-:where(.ve-timeline .ve-segment__selection) {
-  --at-apply: absolute bottom-0 left-0 right-0 top-0 pointer-events-none z-10;
-}
-
-:where(.ve-timeline .ve-segment__handle) {
-  --at-apply: absolute h-full w-1 bg-[var(--ve-primary)] cursor-ew-resize pointer-events-auto;
-  border: 2px solid var(--ve-primary);
-}
-
-:where(.ve-timeline .ve-segment__handle--left) {
-  --at-apply: left-0 top-0 rounded-l-1;
-}
-
-:where(.ve-timeline .ve-segment__handle--right) {
-  --at-apply: right-0 top-0 rounded-r-1;
-}
-
-:where(.ve-timeline .ve-segment__handle-dots) {
-  --at-apply: absolute left-0 top-50% translate-y--50% flex flex-col items-center gap-0.5;
-  justify-content: center;
-}
-
-:where(.ve-timeline .ve-segment__handle-dot) {
-  --at-apply: rounded-full bg-white;
-  width: 1px;
-  height: 1px;
-}
-
+/* Drop placeholder (VideoTimeline specific) */
 :where(.ve-timeline .ve-segment--placeholder) {
   --at-apply: absolute pointer-events-none rounded-[4px] z-24;
   background: rgba(34, 34, 38, 0.12);
@@ -917,14 +817,14 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 
 :where(.ve-timeline .ve-snap-guide) {
   --at-apply: absolute pointer-events-none z-20;
-  width: 2px;
+  width: 1px;
   background: var(--ve-primary);
   opacity: 0.7;
 }
 
 :where(.ve-timeline .ve-new-track-line) {
   --at-apply: absolute pointer-events-none z-25;
-  height: 2px;
+  height: 1px;
   background: var(--ve-primary);
   opacity: 0.8;
 }

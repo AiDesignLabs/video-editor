@@ -1,26 +1,63 @@
 <script setup lang="ts">
-import type { SegmentLayout, TimelineTrack } from '../VideoTimeline/types'
+import type { SegmentLayout } from '../VideoTimeline/types'
 
 defineOptions({ name: 'TimelineTracks' })
 
+interface TrackLayout {
+  track: {
+    id: string
+    label?: string
+    type?: string
+    color?: string
+    isMain?: boolean
+    payload?: unknown
+  }
+  trackIndex: number
+  segments: SegmentLayout[]
+}
+
 defineProps<{
-  tracks: Array<{
-    track: TimelineTrack
-    trackIndex: number
-    segments: SegmentLayout[]
-  }>
+  tracks: TrackLayout[]
   trackHeight: number
   trackGap: number
-  pixelsPerMs: number
+  selectedSegmentId?: string | null
+  dragPreview?: {
+    segment: { id: string }
+  } | null
+  resizePreview?: {
+    segment: { id: string }
+  } | null
 }>()
+
+const emit = defineEmits<{
+  'segment-click': [layout: SegmentLayout, event: MouseEvent]
+  'segment-mousedown': [layout: SegmentLayout, event: MouseEvent]
+  'resize-start': [layout: SegmentLayout, edge: 'start' | 'end', event: MouseEvent]
+}>()
+
+function handleSegmentClick(layout: SegmentLayout, event: MouseEvent) {
+  emit('segment-click', layout, event)
+}
+
+function handleSegmentMouseDown(layout: SegmentLayout, event: MouseEvent) {
+  emit('segment-mousedown', layout, event)
+}
+
+function handleResizeStart(layout: SegmentLayout, edge: 'start' | 'end', event: MouseEvent) {
+  emit('resize-start', layout, edge, event)
+}
 </script>
 
 <template>
-  <div class="ve-tracks" :style="{ gap: `${trackGap}px`, paddingTop: `${trackGap}px` }">
+  <div class="ve-timeline__tracks" :style="{ gap: `${trackGap}px`, paddingTop: `${trackGap}px` }">
     <div
       v-for="trackLayout in tracks"
       :key="trackLayout.track.id"
       class="ve-track"
+      :class="{
+        've-track--main': trackLayout.track.isMain,
+        've-track--has-selection': trackLayout.segments.some((layout: SegmentLayout) => layout.isSelected)
+      }"
       :style="{ height: `${trackHeight}px` }"
     >
       <slot
@@ -28,23 +65,24 @@ defineProps<{
         :track="trackLayout.track"
         :index="trackLayout.trackIndex"
         :segments="trackLayout.segments"
-        :pixels-per-ms="pixelsPerMs"
         :height="trackHeight"
       >
         <div class="ve-track__body">
           <div
             v-for="layout in trackLayout.segments"
+            v-show="dragPreview?.segment.id !== layout.segment.id && resizePreview?.segment.id !== layout.segment.id"
             :key="layout.segment.id"
             class="ve-segment"
             :class="{
               've-segment--selected': layout.isSelected,
-              've-segment--dragging': false,
             }"
             :style="{
               left: `${layout.left}px`,
               width: `${layout.width}px`,
-              backgroundColor: layout.segment.color || trackLayout.track.color || 'var(--ve-primary)',
+              backgroundColor: layout.segment.color || trackLayout.track.color || '#222226',
             }"
+            @mousedown.prevent.stop="handleSegmentMouseDown(layout, $event)"
+            @click.stop="handleSegmentClick(layout, $event)"
           >
             <slot
               name="segment"
@@ -62,6 +100,37 @@ defineProps<{
                 </div>
               </div>
             </slot>
+
+            <!-- Selection border and handles -->
+            <div
+              v-if="layout.isSelected"
+              class="ve-segment__selection"
+            >
+              <!-- Left handle -->
+              <div
+                class="ve-segment__handle ve-segment__handle--left"
+                @mousedown.stop="handleResizeStart(layout, 'start', $event)"
+              >
+                <div class="ve-segment__handle-dots">
+                  <div class="ve-segment__handle-dot" />
+                  <div class="ve-segment__handle-dot" />
+                  <div class="ve-segment__handle-dot" />
+                  <div class="ve-segment__handle-dot" />
+                </div>
+              </div>
+              <!-- Right handle -->
+              <div
+                class="ve-segment__handle ve-segment__handle--right"
+                @mousedown.stop="handleResizeStart(layout, 'end', $event)"
+              >
+                <div class="ve-segment__handle-dots">
+                  <div class="ve-segment__handle-dot" />
+                  <div class="ve-segment__handle-dot" />
+                  <div class="ve-segment__handle-dot" />
+                  <div class="ve-segment__handle-dot" />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </slot>
@@ -70,39 +139,116 @@ defineProps<{
 </template>
 
 <style scoped>
-:where(.ve-tracks) {
-  --at-apply: relative z-1 pb-3;
+.ve-timeline__tracks {
+  position: relative;
+  z-index: 1;
+  padding-bottom: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
 }
 
-:where(.ve-track) {
-  --at-apply: relative flex bg-[#f8fafc] border border-[#e5e7eb] rounded-[10px] overflow-hidden;
+.ve-track {
+  position: relative;
+  background-color: #f8fafc;
+  overflow: hidden;
 }
 
-:where(.ve-track__body) {
-  --at-apply: relative h-full;
+.ve-track--main {
+  background-color: #F4F4F6;
 }
 
-:where(.ve-segment) {
-  --at-apply: absolute top-1.5 bottom-1.5 rounded-[10px] text-[#0f172a] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)] cursor-pointer flex items-center px-2.5 py-1.5 overflow-hidden transition-[box-shadow,transform] duration-150;
+.ve-track--has-selection {
+  background-color: #F2F2FA !important;
+  box-shadow: inset 0 1px 0 0 #E4E4FC, inset 0 -1px 0 0 #E4E4FC;
 }
 
-:where(.ve-segment--selected) {
-  --at-apply: shadow-[0_0_0_2px_var(--ve-primary),inset_0_0_0_1px_rgba(255,255,255,0.45)];
+.ve-track__body {
+  position: relative;
+  height: 100%;
 }
 
-:where(.ve-segment--dragging) {
-  --at-apply: opacity-50;
+.ve-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 4px;
+  color: #0f172a;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  transition-duration: 150ms;
 }
 
-:where(.ve-segment__content) {
-  --at-apply: flex flex-col gap-1;
+.ve-segment__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.375rem 0.625rem;
 }
 
-:where(.ve-segment__title) {
-  --at-apply: text-[12px] font-bold capitalize;
+.ve-segment__title {
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: capitalize;
 }
 
-:where(.ve-segment__time) {
-  --at-apply: text-[11px] text-[rgba(15,23,42,0.8)] font-mono;
+.ve-segment__time {
+  font-size: 11px;
+  color: rgba(15, 23, 42, 0.8);
+  font-family: monospace;
+}
+
+.ve-segment__selection {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.ve-segment__handle {
+  position: absolute;
+  height: 100%;
+  width: 4px;
+  background-color: #222226;
+  cursor: ew-resize;
+  pointer-events: auto;
+  border: 2px solid #222226;
+}
+
+.ve-segment__handle--left {
+  left: 0;
+  top: 0;
+  border-radius: 0.25rem 0 0 0.25rem;
+}
+
+.ve-segment__handle--right {
+  right: 0;
+  top: 0;
+  border-radius: 0 0.25rem 0.25rem 0;
+}
+
+.ve-segment__handle-dots {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.125rem;
+  justify-content: center;
+}
+
+.ve-segment__handle-dot {
+  border-radius: 9999px;
+  background-color: white;
+  width: 1px;
+  height: 1px;
 }
 </style>
