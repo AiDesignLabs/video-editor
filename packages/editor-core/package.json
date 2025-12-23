@@ -1,5 +1,5 @@
 {
-  "name": "@video-editor/protocol",
+  "name": "@video-editor/editor-core",
   "type": "module",
   "version": "0.0.1-beta.16",
   "exports": {
@@ -17,23 +17,14 @@
   "scripts": {
     "build:types": "vue-tsc --declaration --emitDeclarationOnly",
     "build": "vite build",
-    "preview": "vite preview",
-    "test:ui": "vitest",
-    "test": "vitest --run --browser.headless"
+    "preview": "vite preview"
   },
   "peerDependencies": {
     "@vue/reactivity": "catalog:"
   },
   "dependencies": {
-    "@video-editor/shared": "workspace:*",
-    "@webav/av-cliper": "catalog:",
-    "@webav/mp4box.js": "catalog:",
-    "ajv": "catalog:",
-    "ajv-errors": "catalog:",
-    "ajv-formats": "catalog:",
-    "ajv-keywords": "catalog:",
-    "immer": "catalog:",
-    "opfs-tools": "catalog:"
+    "@video-editor/protocol": "workspace:*",
+    "@video-editor/shared": "workspace:*"
   },
   "devDependencies": {
     "@vue/reactivity": "catalog:"

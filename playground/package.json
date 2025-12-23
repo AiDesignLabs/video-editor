@@ -9,6 +9,7 @@
     "preview": "starry preview"
   },
   "dependencies": {
+    "@video-editor/editor-core": "workspace:*",
     "@video-editor/protocol": "workspace:*",
     "@video-editor/renderer": "workspace:*",
     "@video-editor/shared": "workspace:*",

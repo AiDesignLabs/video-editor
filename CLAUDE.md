@@ -194,6 +194,15 @@ emit('update:protocol', next) // Triggers undo/redo history
 
 ## Important Notes
 
+### Reactivity Dependency Hygiene
+
+Packages that rely on Vue reactivity (`@video-editor/protocol`, `@video-editor/editor-core`, `@video-editor/renderer`) declare `@vue/reactivity` as a peer dependency to avoid bundling multiple reactivity runtimes.
+
+Consumer guidance:
+- Ensure a single `@vue/reactivity` instance in the app (pnpm dedupe or overrides).
+- Externalize `@vue/reactivity` in library builds (Vite/Rollup `external`) to prevent bundling.
+- If integrating outside Vue, bridge reactive state via snapshots/subscriptions instead of passing raw reactive objects to UI.
+
 ### Commit Message Convention
 
 This project enforces conventional commits via git hook (`scripts/verifyCommit.mjs`):

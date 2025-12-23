@@ -19,6 +19,78 @@ function cloneTrack(track: TrackUnion): TrackUnion {
   return JSON.parse(JSON.stringify(toRaw(track))) as TrackUnion
 }
 
+type ProtocolSnapshot = {
+  trackIds: Set<string>
+  trackById: Map<string, TrackUnion>
+  segments: Map<string, { signature: string, trackId: string, segment: SegmentUnion }>
+}
+
+function snapshotProtocolState(protocol: IVideoProtocol): ProtocolSnapshot {
+  const trackIds = new Set<string>()
+  const trackById = new Map<string, TrackUnion>()
+  const segments = new Map<string, { signature: string, trackId: string, segment: SegmentUnion }>()
+
+  for (const track of protocol.tracks) {
+    const trackCopy = cloneTrack(track)
+    trackIds.add(trackCopy.trackId)
+    trackById.set(trackCopy.trackId, trackCopy)
+    for (const segment of trackCopy.children) {
+      const signature = JSON.stringify(segment)
+      segments.set(segment.id, { signature, trackId: trackCopy.trackId, segment })
+    }
+  }
+
+  return { trackIds, trackById, segments }
+}
+
+function diffProtocolSnapshots(prev: ProtocolSnapshot, next: ProtocolSnapshot) {
+  const addedTracks: TrackUnion[] = []
+  const removedTrackIds: string[] = []
+  const affectedTrackIds = new Set<string>()
+  const affectedSegments: SegmentUnion[] = []
+  const removedSegmentIds: string[] = []
+
+  for (const [trackId, track] of next.trackById.entries()) {
+    if (!prev.trackIds.has(trackId))
+      addedTracks.push(track)
+  }
+
+  for (const trackId of prev.trackIds) {
+    if (!next.trackIds.has(trackId))
+      removedTrackIds.push(trackId)
+  }
+
+  for (const [segmentId, nextEntry] of next.segments.entries()) {
+    const prevEntry = prev.segments.get(segmentId)
+    if (!prevEntry || prevEntry.signature !== nextEntry.signature) {
+      affectedSegments.push(nextEntry.segment)
+      affectedTrackIds.add(nextEntry.trackId)
+    }
+  }
+
+  for (const [segmentId, prevEntry] of prev.segments.entries()) {
+    if (!next.segments.has(segmentId) && !removedTrackIds.includes(prevEntry.trackId)) {
+      removedSegmentIds.push(segmentId)
+      affectedTrackIds.add(prevEntry.trackId)
+    }
+  }
+
+  const affectedTracks: TrackUnion[] = []
+  for (const trackId of affectedTrackIds) {
+    const track = next.trackById.get(trackId)
+    if (track)
+      affectedTracks.push(track)
+  }
+
+  return {
+    affectedSegments,
+    affectedTracks,
+    addedTracks,
+    removedTrackIds,
+    removedSegmentIds,
+  }
+}
+
 function isSegmentWithFromTime(segment: SegmentUnion): segment is IVideoFramesSegment | IAudioSegment {
   return isVideoFramesSegment(segment) || isAudioSegment(segment)
 }
@@ -31,7 +103,18 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
 }) {
   const validator = createValidator()
 
-  const { videoBasicInfo, segments, tracks, updateProtocol, undo, redo, exportProtocol, undoCount, redoCount } = normalizedProtocol(validator.verify(protocol))
+  const {
+    videoBasicInfo,
+    segments,
+    tracks,
+    updateProtocol,
+    undo: undoHistory,
+    redo: redoHistory,
+    exportProtocol,
+    undoCount,
+    redoCount,
+    protocol: protocolRef,
+  } = normalizedProtocol(validator.verify(protocol))
 
   const curTime = ref(0)
   const selectedSegmentId = ref<string>()
@@ -539,11 +622,11 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       effect((draft) => {
         // verify all modified segments
         if (checkSegment(patches, inversePatches, draft, validator)) {
-          handleSegmentUpdate(patches, inversePatches, draft, undo)
+          handleSegmentUpdate(patches, inversePatches, draft, undoHistory)
         }
         else {
           // rollback all changes
-          undo()
+          undoHistory()
         }
       })
     })
@@ -663,6 +746,60 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     })
   }
 
+  type HistoryMutationResult = {
+    success: boolean
+    affectedSegments: SegmentUnion[]
+    affectedTracks: TrackUnion[]
+    createdTracks: TrackUnion[]
+    removedTrackIds: string[]
+    removedSegmentIds: string[]
+  }
+
+  const emptyHistoryResult: HistoryMutationResult = {
+    success: false,
+    affectedSegments: [],
+    affectedTracks: [],
+    createdTracks: [],
+    removedTrackIds: [],
+    removedSegmentIds: [],
+  }
+
+  const takeSnapshot = () => snapshotProtocolState(clone(toRaw(protocolRef.value)) as IVideoProtocol)
+
+  const undo = (): HistoryMutationResult => {
+    if (undoCount.value <= 0)
+      return emptyHistoryResult
+    const prev = takeSnapshot()
+    undoHistory()
+    const next = takeSnapshot()
+    const diff = diffProtocolSnapshots(prev, next)
+    return {
+      success: true,
+      affectedSegments: diff.affectedSegments,
+      affectedTracks: diff.affectedTracks,
+      createdTracks: diff.addedTracks,
+      removedTrackIds: diff.removedTrackIds,
+      removedSegmentIds: diff.removedSegmentIds,
+    }
+  }
+
+  const redo = (): HistoryMutationResult => {
+    if (redoCount.value <= 0)
+      return emptyHistoryResult
+    const prev = takeSnapshot()
+    redoHistory()
+    const next = takeSnapshot()
+    const diff = diffProtocolSnapshots(prev, next)
+    return {
+      success: true,
+      affectedSegments: diff.affectedSegments,
+      affectedTracks: diff.affectedTracks,
+      createdTracks: diff.addedTracks,
+      removedTrackIds: diff.removedTrackIds,
+      removedSegmentIds: diff.removedSegmentIds,
+    }
+  }
+
   return {
     videoBasicInfo,
     curTime,
@@ -670,6 +807,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     selectedSegment,
     trackMap: tracks,
     segmentMap: segments,
+    protocol: protocolRef,
     getSegment,
     addSegment,
     removeSegment,
@@ -701,6 +839,8 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     height: protocolState.value.height,
     fps: protocolState.value.fps,
   })
+
+  const protocolRef = computed(() => protocolState.value)
 
   const segments = computed(() => {
     const map: Record<string, DeepReadonly<SegmentUnion | undefined>> = {}
@@ -735,6 +875,7 @@ function normalizedProtocol(protocol: IVideoProtocol) {
   return {
     videoBasicInfo,
     updateProtocol,
+    protocol: protocolRef,
     segments,
     tracks,
     redo,

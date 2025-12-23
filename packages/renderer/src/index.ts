@@ -34,6 +34,7 @@ export interface RendererOptions {
   appOptions?: Partial<ApplicationOptions>
   resourceDir?: string
   autoPlay?: boolean
+  freezeOnPause?: boolean
 }
 
 export interface Renderer {
@@ -247,7 +248,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (rafId !== undefined)
       cancelAnimationFrame(rafId)
     rafId = undefined
-    freezeVideoEntries()
+    if (opts.freezeOnPause !== false)
+      freezeVideoEntries()
   }
 
   function loop() {

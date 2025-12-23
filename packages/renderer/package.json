@@ -20,7 +20,10 @@
     "preview": "vite preview"
   },
   "peerDependencies": {
-    "@vue/reactivity": "^3.4.19"
+    "@vue/reactivity": "catalog:"
+  },
+  "devDependencies": {
+    "@vue/reactivity": "catalog:"
   },
   "dependencies": {
     "@video-editor/protocol": "workspace:*",

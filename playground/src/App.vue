@@ -2,12 +2,11 @@
 import type { Renderer } from '@video-editor/renderer'
 import type { IFramesSegmentUnion, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { Ref } from 'vue'
-import { createVideoProtocolManager, generateThumbnails } from '@video-editor/protocol'
+import { createEditorCore } from '@video-editor/editor-core'
+import { generateThumbnails } from '@video-editor/protocol'
 import { createRenderer } from '@video-editor/renderer'
 import { VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
-
-const clone = <T>(val: T): T => (typeof structuredClone === 'function' ? structuredClone(val) : JSON.parse(JSON.stringify(val)))
 
 const swatches = {
   primary: 'https://dummyimage.com/1280x720/6aa7ff/ffffff.png&text=Clip+A',
@@ -88,14 +87,17 @@ const initialProtocol: IVideoProtocol = {
   ],
 }
 
-const { curTime, exportProtocol, trackMap, addSegment, updateSegment, moveSegment, resizeSegment } = createVideoProtocolManager(initialProtocol)
-const protocolRef = computed(() => clone(exportProtocol()))
-const protocol = reactive(protocolRef.value)
-watch(protocolRef, next => Object.assign(protocol, clone(next)), { immediate: true })
-const scrub = curTime
+const editor = createEditorCore({ protocol: initialProtocol })
+const { state, commands } = editor
+const protocol = state.protocol
+const scrub = state.currentTime
+const selectedSegmentId = computed({
+  get: () => state.selectedSegmentId.value ?? null,
+  set: value => commands.setSelectedSegment(value ?? undefined),
+})
 
 const mainFramesTrack = computed(() => {
-  const framesTracks = trackMap.value.frames ?? []
+  const framesTracks = state.trackMap.value.frames ?? []
   return framesTracks.find(track => track.isMain) ?? framesTracks[0]
 })
 
@@ -116,20 +118,19 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const captionShifted = ref(false)
 const timelineZoom = ref<number | undefined>(undefined)
-const selectedSegmentId = ref<string | null>(null)
 
 const protocolDuration = computed(() => {
-  const endTimes = protocol.tracks.flatMap(track => track.children.map(seg => seg.endTime))
+  const endTimes = protocol.value.tracks.flatMap(track => track.children.map(seg => seg.endTime))
   return endTimes.length ? Math.max(...endTimes) : 0
 })
 
 const durationMs = computed(() => renderer.value?.duration.value ?? protocolDuration.value)
 const currentTimeMs = computed(() => renderer.value?.currentTime.value ?? scrub.value)
 const isPlaying = computed(() => renderer.value?.isPlaying.value ?? false)
-const clipCount = computed(() => protocol.tracks.reduce((acc, track) => acc + track.children.length, 0))
+const clipCount = computed(() => protocol.value.tracks.reduce((acc, track) => acc + track.children.length, 0))
 const protocolPreview = computed(() => {
   return JSON.stringify({
-    tracks: protocol.tracks.map(track => ({
+    tracks: protocol.value.tracks.map(track => ({
       type: track.trackType,
       children: track.children.map(child => ({
         id: child.id,
@@ -181,20 +182,20 @@ watch(renderer, (instance, _, onCleanup) => {
   if (!instance)
     return
 
-  const stop = watch(
-    () => instance.currentTime.value,
-    (val) => {
-      scrub.value = val
-    },
-    { immediate: true },
-  )
+    const stop = watch(
+      () => instance.currentTime.value,
+      (val) => {
+        commands.setCurrentTime(val)
+      },
+      { immediate: true },
+    )
 
   onCleanup(() => stop())
 })
 
 watch(durationMs, (val) => {
   if (scrub.value > val)
-    scrub.value = val
+    commands.setCurrentTime(val)
 })
 
 function togglePlay() {
@@ -210,7 +211,7 @@ function togglePlay() {
 function seekTo(time: number | Ref<number>) {
   const next = unref(time)
   renderer.value?.seek(next)
-  scrub.value = next
+  commands.setCurrentTime(next)
 }
 
 function handleTimelineCurrentTime(next: number) {
@@ -218,11 +219,11 @@ function handleTimelineCurrentTime(next: number) {
 }
 
 function handleTimelineSegmentClick(payload: { segment: SegmentUnion }) {
-  selectedSegmentId.value = payload.segment.id
+  commands.setSelectedSegment(payload.segment.id)
 }
 
 function handleSegmentDragEnd(payload: any) {
-  moveSegment({
+  commands.moveSegment({
     segmentId: payload.segment.id,
     sourceTrackId: payload.track.id,
     targetTrackId: payload.targetTrackId,
@@ -234,7 +235,7 @@ function handleSegmentDragEnd(payload: any) {
 }
 
 function handleSegmentResizeEnd(payload: any) {
-  resizeSegment({
+  commands.resizeSegment({
     segmentId: payload.segment.id,
     trackId: payload.track.id,
     startTime: payload.startTime,
@@ -247,18 +248,18 @@ function swapMainClip() {
   if (!segmentId)
     return
 
-  updateSegment((segment) => {
+  commands.updateSegment((segment) => {
     segment.url = segment.url === swatches.primary ? swatches.alt : swatches.primary
   }, segmentId, 'frames')
 }
 
 function moveCaption() {
-  const captionId = trackMap.value.text?.[0]?.children[0]?.id
+  const captionId = state.trackMap.value.text?.[0]?.children[0]?.id
   if (!captionId)
     return
 
   const shiftBy = 1000
-  updateSegment((segment) => {
+  commands.updateSegment((segment) => {
     if (!captionShifted.value) {
       segment.startTime = shiftBy
       segment.endTime += shiftBy
@@ -276,7 +277,7 @@ function moveCaption() {
 function appendClip() {
   const lastEnd = mainFramesTrack.value?.children.at(-1)?.endTime ?? 0
   const end = lastEnd + 2000
-  curTime.value = lastEnd
+  commands.setCurrentTime(lastEnd)
 
   const seg: IFramesSegmentUnion = {
     id: `clip-${Date.now()}`,
@@ -289,7 +290,7 @@ function appendClip() {
     opacity: 0.95,
     extra: { aiTag: 'appended', label: 'Clip D' },
   }
-  addSegment(seg)
+  commands.addSegment(seg)
 }
 
 function clearThumbnails() {
