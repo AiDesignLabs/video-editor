@@ -4,7 +4,7 @@ import type { IFramesSegmentUnion, IVideoProtocol, SegmentUnion } from '@video-e
 import type { Ref } from 'vue'
 import { createEditorCore } from '@video-editor/editor-core'
 import { generateThumbnails } from '@video-editor/protocol'
-import { createRenderer } from '@video-editor/renderer'
+import { composeProtocol, createRenderer } from '@video-editor/renderer'
 import { VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 
@@ -114,6 +114,14 @@ const thumbnailsState = reactive({
   loading: false,
   error: null as string | null,
 })
+const composeState = reactive({
+  loading: false,
+  error: null as string | null,
+  progress: 0,
+  blobUrl: null as string | null,
+  size: 0,
+  durationMs: 0,
+})
 const loading = ref(true)
 const error = ref<string | null>(null)
 const captionShifted = ref(false)
@@ -147,12 +155,20 @@ const thumbnailSourceUrl = computed(() => {
   return videoSegment && 'url' in videoSegment ? videoSegment.url : swatches.video
 })
 
+const composeSourcePreview = computed(() => {
+  const summary = protocol.value.tracks
+    .map(track => `${track.trackType}:${track.children.length}`)
+    .join(' | ')
+  return summary || '无片段'
+})
+
 onMounted(async () => {
   try {
     const host = canvasHost.value
     const instance = await createRenderer({
       protocol,
       autoPlay: true,
+      videoSourceMode: 'mp4clip',
       appOptions: {
         resizeTo: host ?? window,
         background: '#0f172a',
@@ -176,6 +192,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   renderer.value?.destroy()
   clearThumbnails()
+  clearComposeOutput()
 })
 
 watch(renderer, (instance, _, onCleanup) => {
@@ -299,6 +316,15 @@ function clearThumbnails() {
   thumbnailsState.items = []
 }
 
+function clearComposeOutput() {
+  if (composeState.blobUrl) {
+    URL.revokeObjectURL(composeState.blobUrl)
+  }
+  composeState.blobUrl = null
+  composeState.size = 0
+  composeState.durationMs = 0
+}
+
 async function runThumbnailDemo() {
   thumbnailsState.error = null
   thumbnailsState.loading = true
@@ -322,6 +348,31 @@ async function runThumbnailDemo() {
   }
   finally {
     thumbnailsState.loading = false
+  }
+}
+
+async function runComposeDemo() {
+  composeState.error = null
+  composeState.loading = true
+  composeState.progress = 0
+  clearComposeOutput()
+
+  try {
+    const { stream, durationMs } = await composeProtocol(protocol.value, {
+      onProgress: (progress) => {
+        composeState.progress = progress
+      },
+    })
+    const blob = await new Response(stream).blob()
+    composeState.blobUrl = URL.createObjectURL(blob)
+    composeState.size = blob.size
+    composeState.durationMs = durationMs
+  }
+  catch (err) {
+    composeState.error = err instanceof Error ? err.message : String(err)
+  }
+  finally {
+    composeState.loading = false
   }
 }
 
@@ -440,6 +491,34 @@ const formatMs = (val: number | Ref<number>) => `${(unref(val) / 1000).toFixed(2
         </div>
         <p v-else class="muted">
           点击按钮调用 generateThumbnails，查看返回的 Blob 缩略图。
+        </p>
+      </div>
+
+      <div class="thumbnails compose">
+        <div class="protocol__header">
+          <span>composeProtocol 示例</span>
+          <span class="muted">基于当前协议合成</span>
+        </div>
+        <p class="muted">
+          轨道统计：<span class="mono">{{ composeSourcePreview }}</span>
+        </p>
+        <div class="thumb-actions">
+          <button class="btn" :disabled="composeState.loading" @click="runComposeDemo">
+            {{ composeState.loading ? '合成中…' : '合成视频' }}
+          </button>
+          <span v-if="composeState.error" class="error-text">失败: {{ composeState.error }}</span>
+          <span v-else class="muted">进度: {{ Math.round(composeState.progress * 100) }}%</span>
+        </div>
+        <progress v-if="composeState.loading || composeState.progress" :value="composeState.progress" max="1" />
+        <div v-if="composeState.blobUrl" class="compose-output">
+          <video class="compose-video" controls :src="composeState.blobUrl" />
+          <div class="muted">
+            时长 {{ formatMs(composeState.durationMs) }} · 大小 {{ (composeState.size / 1024 / 1024).toFixed(2) }} MB
+          </div>
+          <a class="btn ghost" :href="composeState.blobUrl" download="compose-demo.mp4">下载文件</a>
+        </div>
+        <p v-else class="muted">
+          点击按钮触发 composeProtocol，完成后可直接预览和下载合成视频。
         </p>
       </div>
 

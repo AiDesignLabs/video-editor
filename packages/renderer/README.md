@@ -24,3 +24,35 @@ renderer.tick(16.7) // or rely on requestAnimationFrame loop
 // mutate protocol reactively; the renderer will verify and update visuals
 protocol.tracks.push(/* ... */)
 ```
+
+## Video composition
+
+```ts
+import { composeProtocol } from '@video-editor/renderer'
+
+const { stream, durationMs } = await composeProtocol(protocol, {
+  onProgress: (progress) => console.log('progress', progress),
+})
+
+const blob = await new Response(stream).blob()
+console.log('duration (ms)', durationMs, blob)
+```
+
+## Concatenate videos
+
+```ts
+import { concatVideos } from '@video-editor/renderer'
+
+const { stream, durationMs } = await concatVideos(
+  [
+    'https://example.com/intro.mp4',
+    'https://example.com/main.mp4',
+  ],
+  {
+    onProgress: (progress) => console.log('progress', progress),
+  },
+)
+
+const blob = await new Response(stream).blob()
+console.log('duration (ms)', durationMs, blob)
+```

@@ -1,7 +1,8 @@
-import type { ITransform, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { PixiDisplayObject } from './types'
 import { toRaw } from '@vue/reactivity'
 import { Graphics, Sprite, Texture } from 'pixi.js'
+import { computeSegmentLayout } from './layout'
 
 export function collectResourceUrls(protocol: IVideoProtocol) {
   const urls = new Set<string>()
@@ -32,13 +33,16 @@ export function collectActiveSegments(protocol: IVideoProtocol, at: number) {
 
 export function applyDisplayProps(display: PixiDisplayObject, segment: SegmentUnion, width: number, height: number) {
   const opacity = readOpacity(segment)
-  // size
+  const sourceWidth = display instanceof Sprite ? display.texture.width || width : width
+  const sourceHeight = display instanceof Sprite ? display.texture.height || height : height
+  const layout = computeSegmentLayout(segment, width, height, sourceWidth, sourceHeight)
+
   if (display instanceof Sprite) {
     display.anchor.set(0.5)
-    display.width = width
-    display.height = height
-    display.x = width / 2
-    display.y = height / 2
+    display.width = layout.width
+    display.height = layout.height
+    display.position.set(layout.centerX, layout.centerY)
+    display.rotation = layout.rotationRad
     const src = display.texture.source as { addEventListener?: (type: string, cb: () => void, opts?: AddEventListenerOptions) => void } | undefined
     src?.addEventListener?.('error', () => {
       // fallback to a colored rect if texture failed
@@ -48,25 +52,14 @@ export function applyDisplayProps(display: PixiDisplayObject, segment: SegmentUn
   else if (display instanceof Graphics) {
     display.clear()
     display
-      .rect(0, 0, width, height)
+      .rect(0, 0, layout.width, layout.height)
       .fill({ color: stringToColor('url' in segment && typeof segment.url === 'string' ? segment.url : segment.segmentType), alpha: hasOpacity(segment) ? opacity : 0.35 })
-    display.pivot.set(width / 2, height / 2)
-    display.position.set(width / 2, height / 2)
+    display.pivot.set(layout.width / 2, layout.height / 2)
+    display.position.set(layout.centerX, layout.centerY)
+    display.rotation = layout.rotationRad
   }
 
   display.alpha = opacity
-
-  // simple 2D transform
-  const transform = readTransform(segment)
-  if (transform) {
-    const [px, py] = transform.position ?? [0, 0]
-    const [sx, sy] = transform.scale ?? [1, 1]
-    const rotation = transform.rotation?.[2] ?? 0
-
-    display.position.set(width / 2 + (px * width) / 2, height / 2 - (py * height) / 2)
-    display.scale.set(sx, sy)
-    display.rotation = (rotation / 180) * Math.PI
-  }
 }
 
 export function placeholder(key: string, url?: string) {
@@ -110,14 +103,4 @@ function readOpacity(segment: SegmentUnion) {
   if (hasOpacity(segment) && typeof segment.opacity === 'number')
     return segment.opacity
   return 1
-}
-
-function hasTransform(segment: SegmentUnion): segment is SegmentUnion & { transform?: ITransform } {
-  return 'transform' in segment
-}
-
-function readTransform(segment: SegmentUnion) {
-  if (hasTransform(segment))
-    return segment.transform
-  return undefined
 }
