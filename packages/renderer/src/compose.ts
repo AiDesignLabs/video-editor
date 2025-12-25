@@ -76,8 +76,11 @@ export async function composeProtocol(
 
   const fps = requestedFps ?? protocol.fps
 
+  const hasAudioSprites = typeof audioSprites === 'function'
+  const audio = combinatorOpts.audio ?? (hasAudioSprites ? undefined : false)
   const combinator = new Combinator({
     ...combinatorOpts,
+    audio,
     width,
     height,
     fps,
@@ -87,16 +90,21 @@ export async function composeProtocol(
     combinator.on('OutputProgress', onProgress)
 
   let clip: ProtocolVideoClip | undefined
+  let sprite: OffscreenSprite | undefined
   try {
     clip = new ProtocolVideoClip(protocol, {
       width,
       height,
       fps,
       ...clipOptions,
+      rendererOptions: {
+        warmUpResources: false,
+        ...clipOptions?.rendererOptions,
+      },
     })
     await clip.ready
 
-    const sprite = new OffscreenSprite(clip)
+    sprite = new OffscreenSprite(clip)
     await sprite.ready
     sprite.time.offset = 0
     sprite.time.duration = clip.meta.duration
@@ -106,7 +114,6 @@ export async function composeProtocol(
     sprite.rect.h = clip.meta.height
 
     await combinator.addSprite(sprite, { main: true })
-    sprite.destroy()
 
     if (audioSprites) {
       const sprites = await audioSprites(protocol)
@@ -125,6 +132,8 @@ export async function composeProtocol(
 
   const stream = combinator.output({ maxTime })
   const destroy = () => {
+    sprite?.destroy()
+    clip?.destroy()
     combinator.destroy()
   }
 

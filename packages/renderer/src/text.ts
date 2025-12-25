@@ -1,4 +1,33 @@
 import type { ITextBasic } from '@video-editor/shared'
+import { renderTxt2ImgBitmap } from '@webav/av-cliper'
+
+const DEFAULT_TEXT_BITMAP_CACHE_LIMIT = 100
+const textBitmapCache = new Map<string, ImageBitmap>()
+let textBitmapCacheLimit = DEFAULT_TEXT_BITMAP_CACHE_LIMIT
+
+function touchCache(key: string, value: ImageBitmap) {
+  textBitmapCache.delete(key)
+  textBitmapCache.set(key, value)
+}
+
+function trimCache() {
+  while (textBitmapCache.size > textBitmapCacheLimit) {
+    const [oldestKey, bitmap] = textBitmapCache.entries().next().value as [string, ImageBitmap]
+    textBitmapCache.delete(oldestKey)
+    bitmap.close?.()
+  }
+}
+
+export function setTextBitmapCacheLimit(limit: number) {
+  textBitmapCacheLimit = Math.max(0, Math.floor(limit))
+  trimCache()
+}
+
+export function clearTextBitmapCache() {
+  for (const bitmap of textBitmapCache.values())
+    bitmap.close?.()
+  textBitmapCache.clear()
+}
 
 export function buildTextContent(texts: ITextBasic[]) {
   return texts.map(item => item.content).filter(Boolean).join('\n')
@@ -44,4 +73,20 @@ export function buildTextCss(text: ITextBasic) {
   }
 
   return css.join('; ')
+}
+
+export async function renderTextBitmap(content: string, cssText: string) {
+  const key = `${cssText}::${content}`
+  const cached = textBitmapCache.get(key)
+  if (cached) {
+    touchCache(key, cached)
+    return cached
+  }
+
+  const bitmap = await renderTxt2ImgBitmap(content, cssText)
+  if (textBitmapCacheLimit > 0) {
+    textBitmapCache.set(key, bitmap)
+    trimCache()
+  }
+  return bitmap
 }

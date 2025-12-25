@@ -59,6 +59,7 @@ export class ProtocolVideoClip implements IClip {
       backgroundAlpha: 0,
       ...this.options.appOptions,
     })
+    app.ticker.stop()
     this.app = app
 
     const rendererOptions = this.options.rendererOptions ?? {}
@@ -97,6 +98,9 @@ export class ProtocolVideoClip implements IClip {
       return { audio: emptyAudio, state: 'done' }
 
     const durationUs = this.meta.duration
+    if (time >= durationUs)
+      return { audio: emptyAudio, state: 'done' }
+
     const clampedUs = Math.max(0, Math.min(time, durationUs))
     await this.renderer.renderAt(clampedUs / 1000)
 
@@ -104,11 +108,10 @@ export class ProtocolVideoClip implements IClip {
       timestamp: time,
     })
 
-    const state: 'done' | 'success' = time > durationUs ? 'done' : 'success'
     return {
       video: frame,
       audio: emptyAudio,
-      state,
+      state: 'success',
     }
   }
 

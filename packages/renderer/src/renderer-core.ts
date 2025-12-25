@@ -12,7 +12,7 @@ import {
   unref,
   watch,
 } from '@vue/reactivity'
-import { MP4Clip, renderTxt2ImgBitmap } from '@webav/av-cliper'
+import { MP4Clip } from '@webav/av-cliper'
 import { file as opfsFile } from 'opfs-tools'
 import { Container, Sprite, Texture } from 'pixi.js'
 import { createApp as create2dApp } from './2d'
@@ -25,7 +25,7 @@ import {
   computeDuration,
   placeholder,
 } from './helpers'
-import { buildTextContent, buildTextCss } from './text'
+import { buildTextContent, buildTextCss, renderTextBitmap } from './text'
 
 const DEFAULT_RES_DIR = '/video-editor-res'
 
@@ -38,6 +38,7 @@ export interface RendererOptions {
   freezeOnPause?: boolean
   manualRender?: boolean
   videoSourceMode?: 'auto' | 'mp4clip' | 'element'
+  warmUpResources?: boolean
 }
 
 export interface Renderer {
@@ -168,10 +169,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
           return
         }
         clearDisplays()
-        warmUpResources(validatedProtocol.value)
+        if (opts.warmUpResources !== false)
+          warmUpResources(validatedProtocol.value)
         cleanupCache(validatedProtocol.value)
         clampCurrentTime()
-        queueRender()
+        if (!opts.manualRender)
+          queueRender()
       },
       { deep: true, immediate: true },
     )
@@ -357,7 +360,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (!text)
       return undefined
 
-    const bitmap = await renderTxt2ImgBitmap(content, buildTextCss(text))
+    const bitmap = await renderTextBitmap(content, buildTextCss(text))
     const texture = Texture.from(bitmap)
     return new Sprite(texture)
   }
