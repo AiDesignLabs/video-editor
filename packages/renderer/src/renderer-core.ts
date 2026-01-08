@@ -113,6 +113,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   let rafId: number | undefined
   let lastTickAt = 0
+  let renderGeneration = 0
 
   interface RenderTask {
     app: Application
@@ -123,6 +124,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   async function renderScene(task: RenderTask) {
+    const generation = renderGeneration
     const { protocol, at, layer } = task
     const renderAt = normalizeRenderTime(protocol, at)
     const active = collectActiveSegments(protocol, renderAt)
@@ -131,19 +133,31 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
     const renders: (PixiDisplayObject | undefined)[] = []
     for (const { segment } of active) {
+      if (generation !== renderGeneration)
+        return
       const display = await task.getDisplay(segment)
+      if (generation !== renderGeneration)
+        return
       if (!display)
+        continue
+      if ((display as { destroyed?: boolean }).destroyed)
         continue
       applyDisplayProps(display, segment, stageWidth, stageHeight)
       if (isVideoSegment(segment))
         await updateVideoFrame(segment, renderAt)
+      if (generation !== renderGeneration)
+        return
       renders.push(display)
     }
 
+    if (generation !== renderGeneration)
+      return
     layer.removeChildren()
     const cleaned = renders.filter(Boolean) as PixiDisplayObject[]
     if (cleaned.length)
       layer.addChild(...cleaned)
+    if (generation !== renderGeneration)
+      return
     task.app.render()
   }
 
@@ -168,6 +182,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
           console.error('[renderer] invalid protocol update', err)
           return
         }
+        renderGeneration += 1
         clearDisplays()
         if (opts.warmUpResources !== false)
           warmUpResources(validatedProtocol.value)
@@ -785,6 +800,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   function destroy() {
     pause()
+    renderGeneration += 1
     scope.stop()
     clearDisplays()
     layer.destroy({ children: true })
