@@ -1,7 +1,7 @@
 {
   "name": "@video-editor/devtools",
   "type": "module",
-  "version": "0.0.1-beta.19",
+  "version": "0.0.1-beta.20",
   "bin": {
     "video-editor-check-reactivity": "./bin/check-reactivity.mjs"
   },
