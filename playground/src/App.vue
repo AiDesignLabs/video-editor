@@ -295,7 +295,7 @@ function appendClip() {
   const end = lastEnd + 2000
   commands.setCurrentTime(lastEnd)
 
-  const seg: IFramesSegmentUnion = {
+  const seg: IImageFramesSegment = {
     id: `clip-${Date.now()}`,
     segmentType: 'frames',
     type: 'image',
@@ -399,7 +399,7 @@ function handleAddSegmentClick(data: {
         opacity: 1,
         extra: { label: 'New Clip' },
       }
-      commands.addSegment(newSegment as any, track.trackId)
+      commands.addSegment(newSegment, track.trackId)
       break
     }
     case 'text': {
@@ -408,8 +408,9 @@ function handleAddSegmentClick(data: {
         startTime: 0,
         endTime: duration,
         texts: [{ content: 'New Text', fontSize: 24, fill: '#ffffff' }],
+        extra: null,
       }
-      commands.addSegment(newSegment as any, track.trackId)
+      commands.addSegment(newSegment, track.trackId)
       break
     }
     default:

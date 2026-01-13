@@ -1,18 +1,11 @@
 <script setup lang="ts">
-import type { SegmentLayout } from '../VideoTimeline/types'
+import type { SegmentLayout, TimelineTrack } from '../VideoTimeline/types'
 import { computed } from 'vue'
 
 defineOptions({ name: 'TimelineTracks' })
 
 interface TrackLayout {
-  track: {
-    id: string
-    label?: string
-    type?: string
-    color?: string
-    isMain?: boolean
-    payload?: unknown
-  }
+  track: TimelineTrack
   trackIndex: number
   segments: SegmentLayout[]
 }
