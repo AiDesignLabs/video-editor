@@ -35,3 +35,4 @@ tsconfig.tsbuildinfo
 
 # npm token (sensitive)
 .npmrc
+.gemini-clipboard

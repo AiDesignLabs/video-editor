@@ -147,30 +147,37 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     track: TrackTypeMapTrack['frames'],
     insertTime: number,
   ) => {
-    const insertIndex = findInsertFramesSegmentIndex(track.children, insertTime)
-    const duration = framesSegment.endTime - framesSegment.startTime
+    if (track.isMain) {
+      const insertIndex = findInsertFramesSegmentIndex(track.children, insertTime)
+      const duration = framesSegment.endTime - framesSegment.startTime
 
-    // Calculate segment position based on insert index
-    if (insertIndex === 0) {
-      framesSegment.startTime = 0
-      framesSegment.endTime = duration
+      // Calculate segment position based on insert index
+      if (insertIndex === 0) {
+        framesSegment.startTime = 0
+        framesSegment.endTime = duration
+      }
+      else {
+        const prevSegment = track.children[insertIndex - 1]
+        framesSegment.startTime = prevSegment.endTime
+        framesSegment.endTime = prevSegment.endTime + duration
+      }
+
+      // Insert segment
+      track.children.splice(insertIndex, 0, framesSegment)
+
+      // Rebuild timeline from insert position onwards
+      for (let j = insertIndex; j < track.children.length; j++) {
+        const segment = track.children[j]
+        const preSegmentEndTime = track.children[j - 1]?.endTime ?? 0
+        const segDuration = segment.endTime - segment.startTime
+        segment.startTime = preSegmentEndTime
+        segment.endTime = preSegmentEndTime + segDuration
+      }
     }
     else {
-      const prevSegment = track.children[insertIndex - 1]
-      framesSegment.startTime = prevSegment.endTime
-      framesSegment.endTime = prevSegment.endTime + duration
-    }
-
-    // Insert segment
-    track.children.splice(insertIndex, 0, framesSegment)
-
-    // Rebuild timeline from insert position onwards
-    for (let j = insertIndex; j < track.children.length; j++) {
-      const segment = track.children[j]
-      const preSegmentEndTime = track.children[j - 1]?.endTime ?? 0
-      const segDuration = segment.endTime - segment.startTime
-      segment.startTime = preSegmentEndTime
-      segment.endTime = preSegmentEndTime + segDuration
+      // For non-main tracks, just add the segment and sort
+      track.children.push(framesSegment)
+      track.children.sort((a, b) => a.startTime - b.startTime)
     }
 
     return framesSegment.id
@@ -247,7 +254,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     return undefined
   }
 
-  const addSegment = (segment: PartialByKeys<TrackTypeMapSegment[ITrackType], 'id'>): {
+  const addSegment = (segment: PartialByKeys<TrackTypeMapSegment[ITrackType], 'id'>, trackId?: string): {
     id: string
     affectedSegments: SegmentUnion[]
     affectedTracks: TrackUnion[]
@@ -270,8 +277,11 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     const id = updateProtocol((protocol) => {
       if (theSegment.segmentType === 'frames') {
         const frameTracks = protocol.tracks.filter(track => track.trackType === 'frames') as TrackTypeMapTrack['frames'][]
-        const mainTrack = frameTracks.find(track => track.isMain)
-        if (!mainTrack) {
+        let targetTrack = frameTracks.find(track => track.trackId === trackId)
+        if (!targetTrack)
+          targetTrack = frameTracks.find(track => track.isMain)
+
+        if (!targetTrack) {
           const newId = addSegmentToTrack(theSegment, protocol.tracks)
           const newTrack = protocol.tracks.find(t => t.children.some(s => s.id === newId))
           if (newTrack) {
@@ -281,9 +291,9 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
           return newId
         }
 
-        const newId = addFramesSegment(theSegment, mainTrack)
+        const newId = addFramesSegment(theSegment, targetTrack)
         // All segments in the main track may be affected due to timeline rebuild
-        affectedTrackIds.add(mainTrack.trackId)
+        affectedTrackIds.add(targetTrack.trackId)
         return newId
       }
 

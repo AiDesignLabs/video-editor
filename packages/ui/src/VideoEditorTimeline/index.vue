@@ -43,6 +43,7 @@ const emit = defineEmits<{
   (e: 'segmentClick', payload: { segment: SegmentUnion, track: TrackUnion }): void
   (e: 'segmentDragEnd', payload: SegmentDragPayload): void
   (e: 'segmentResizeEnd', payload: SegmentResizePayload): void
+  (e: 'add-segment', { track, startTime, endTime }: { track: TrackUnion, startTime: number, endTime?: number }): void
 }>()
 
 const innerSelectedId = ref<string | null>(props.selectedSegmentId ?? null)
@@ -197,6 +198,12 @@ function handleSegmentResizeStart(payload: SegmentResizePayload) {
 function handleSegmentResizeEnd(payload: SegmentResizePayload) {
   emit('segmentResizeEnd', payload)
 }
+
+function handleAddSegment({ track, startTime, endTime }: { track: TimelineTrack, startTime: number, endTime?: number }) {
+  const trackPayload = track.payload as TrackUnion
+  if (trackPayload)
+    emit('add-segment', { track: trackPayload, startTime, endTime })
+}
 </script>
 
 <template>
@@ -217,6 +224,7 @@ function handleSegmentResizeEnd(payload: SegmentResizePayload) {
     @segment-resize-start="handleSegmentResizeStart"
     @segment-resize-end="handleSegmentResizeEnd"
     @background-click="emitSelection(null)"
+    @add-segment="handleAddSegment"
   >
     <!-- Pass through toolbar slot -->
     <template v-if="$slots.toolbar" #toolbar="slotProps">

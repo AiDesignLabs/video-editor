@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import type { Renderer } from '@video-editor/renderer'
-import type { IFramesSegmentUnion, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { IImageFramesSegment, ITextSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
 import type { Ref } from 'vue'
 import { createEditorCore } from '@video-editor/editor-core'
 import { generateThumbnails } from '@video-editor/protocol'
@@ -377,6 +376,47 @@ async function runComposeDemo() {
 }
 
 const formatMs = (val: number | Ref<number>) => `${(unref(val) / 1000).toFixed(2)}s`
+
+function handleAddSegmentClick(data: {
+  track: TrackUnion
+  startTime: number
+  endTime?: number
+}) {
+  const { track, startTime, endTime } = data
+  const duration = endTime ? endTime - startTime : 2000 // Default duration 2s
+
+  commands.setCurrentTime(startTime)
+
+  switch (track.trackType) {
+    case 'frames': {
+      const newSegment: Omit<IImageFramesSegment, 'id'> = {
+        segmentType: 'frames',
+        type: 'image',
+        format: 'img',
+        url: swatches.extra,
+        startTime: 0,
+        endTime: duration,
+        opacity: 1,
+        extra: { label: 'New Clip' },
+      }
+      commands.addSegment(newSegment as any, track.trackId)
+      break
+    }
+    case 'text': {
+      const newSegment: Omit<ITextSegment, 'id'> = {
+        segmentType: 'text',
+        startTime: 0,
+        endTime: duration,
+        texts: [{ content: 'New Text', fontSize: 24, fill: '#ffffff' }],
+      }
+      commands.addSegment(newSegment as any, track.trackId)
+      break
+    }
+    default:
+      console.warn(`Adding segments to track type "${track.trackType}" is not implemented.`)
+      return
+  }
+}
 </script>
 
 <template>
@@ -434,6 +474,7 @@ const formatMs = (val: number | Ref<number>) => `${(unref(val) / 1000).toFixed(2
           @segment-click="handleTimelineSegmentClick"
           @segment-drag-end="handleSegmentDragEnd"
           @segment-resize-end="handleSegmentResizeEnd"
+          @add-segment="handleAddSegmentClick"
         />
         <div class="timeline-meta">
           <div>时间轴使用 UI 包的默认 toolbar / ruler / playhead（主色 #222226）。</div>

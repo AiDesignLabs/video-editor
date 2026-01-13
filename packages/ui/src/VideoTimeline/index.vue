@@ -55,6 +55,7 @@ const emit = defineEmits<{
   (e: 'segmentResize', payload: SegmentResizePayload): void
   (e: 'segmentResizeEnd', payload: SegmentResizePayload): void
   (e: 'backgroundClick', event: MouseEvent): void
+  (e: 'add-segment', { track, startTime, endTime }: { track: TimelineTrack, startTime: number, endTime?: number }): void
 }>()
 
 const viewportRef = ref<HTMLElement | null>(null)
@@ -451,6 +452,12 @@ function handleSegmentClick(layout: SegmentLayout, event: MouseEvent) {
   emit('segmentClick', layout, event)
 }
 
+function handleAddSegment({ track, startTime, endTime }: { track: TimelineTrack, startTime: number, endTime?: number }) {
+  const trackLayout = segmentLayouts.value.find(t => t.track.id === track.id)
+  if (trackLayout)
+    emit('add-segment', { track: trackLayout.track, startTime, endTime })
+}
+
 function handleGlobalMouseMove(event: MouseEvent) {
   if (draggingPlayhead.value) {
     seekByClientX(event.clientX)
@@ -647,6 +654,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
             @segment-click="handleSegmentClick"
             @segment-mousedown="startDrag"
             @resize-start="startResize"
+            @add-segment="handleAddSegment"
           >
             <template #segment="{ layout, segment, track, isSelected }">
               <slot
