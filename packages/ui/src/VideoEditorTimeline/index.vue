@@ -43,7 +43,7 @@ const emit = defineEmits<{
   (e: 'segmentClick', payload: { segment: SegmentUnion, track: TrackUnion }): void
   (e: 'segmentDragEnd', payload: SegmentDragPayload): void
   (e: 'segmentResizeEnd', payload: SegmentResizePayload): void
-  (e: 'add-segment', { track, startTime, endTime }: { track: TrackUnion, startTime: number, endTime?: number }): void
+  (e: 'add-segment', { track, startTime, endTime, event }: { track: TrackUnion, startTime: number, endTime?: number, event?: MouseEvent }): void
 }>()
 
 const innerSelectedId = ref<string | null>(props.selectedSegmentId ?? null)
@@ -199,10 +199,10 @@ function handleSegmentResizeEnd(payload: SegmentResizePayload) {
   emit('segmentResizeEnd', payload)
 }
 
-function handleAddSegment({ track, startTime, endTime }: { track: TimelineTrack, startTime: number, endTime?: number }) {
+function handleAddSegment({ track, startTime, endTime, event }: { track: TimelineTrack, startTime: number, endTime?: number, event?: MouseEvent }) {
   const trackPayload = track.payload as TrackUnion
   if (trackPayload)
-    emit('add-segment', { track: trackPayload, startTime, endTime })
+    emit('add-segment', { track: trackPayload, startTime, endTime, event })
 }
 </script>
 

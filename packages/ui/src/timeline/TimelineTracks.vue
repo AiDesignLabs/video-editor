@@ -27,7 +27,7 @@ const emit = defineEmits<{
   'segment-click': [layout: SegmentLayout, event: MouseEvent]
   'segment-mousedown': [layout: SegmentLayout, event: MouseEvent]
   'resize-start': [layout: SegmentLayout, edge: 'start' | 'end', event: MouseEvent]
-  'add-segment': [{ track: TrackLayout['track'], startTime: number, endTime?: number }]
+  'add-segment': [{ track: TrackLayout['track'], startTime: number, endTime?: number, event?: MouseEvent }]
 }>()
 
 function handleSegmentClick(layout: SegmentLayout, event: MouseEvent) {
@@ -42,8 +42,8 @@ function handleResizeStart(layout: SegmentLayout, edge: 'start' | 'end', event: 
   emit('resize-start', layout, edge, event)
 }
 
-function handleAddAt(track: TrackLayout['track'], startTime: number, endTime?: number) {
-  emit('add-segment', { track, startTime, endTime })
+function handleAddAt(track: TrackLayout['track'], startTime: number, endTime?: number, event?: MouseEvent) {
+  emit('add-segment', { track, startTime, endTime, event })
 }
 
 const trackGaps = computed(() => {
@@ -179,7 +179,7 @@ function getGapsForTrack(trackId: string) {
             :key="gap.id"
             class="ve-track__gap-add"
             :style="{ left: `${gap.left}px`, width: `${gap.width}px` }"
-            @click.stop="handleAddAt(trackLayout.track, gap.startTime, gap.endTime)"
+            @click.stop="handleAddAt(trackLayout.track, gap.startTime, gap.endTime, $event)"
           >
             <div class="ve-track__gap-add-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -198,7 +198,7 @@ function getGapsForTrack(trackId: string) {
                   ? `${trackLayout.segments[trackLayout.segments.length - 1].left + trackLayout.segments[trackLayout.segments.length - 1].width}px`
                   : '0px'
               }"
-              @click.stop="handleAddAt(trackLayout.track, trackLayout.segments.length > 0 ? trackLayout.segments[trackLayout.segments.length - 1].segment.end : 0)"
+              @click.stop="handleAddAt(trackLayout.track, trackLayout.segments.length > 0 ? trackLayout.segments[trackLayout.segments.length - 1].segment.end : 0, undefined, $event)"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M12 5V19" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" />
@@ -330,7 +330,7 @@ function getGapsForTrack(trackId: string) {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  margin-left: 1rem;
+  margin-left: 0.5rem;
   width: 2.5rem;
   height: 2.5rem;
   border-radius: 0.5rem;

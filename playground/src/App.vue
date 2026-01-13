@@ -381,6 +381,7 @@ function handleAddSegmentClick(data: {
   track: TrackUnion
   startTime: number
   endTime?: number
+  event?: MouseEvent
 }) {
   const { track, startTime, endTime } = data
   const duration = endTime ? endTime - startTime : 2000 // Default duration 2s

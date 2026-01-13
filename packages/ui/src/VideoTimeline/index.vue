@@ -55,7 +55,7 @@ const emit = defineEmits<{
   (e: 'segmentResize', payload: SegmentResizePayload): void
   (e: 'segmentResizeEnd', payload: SegmentResizePayload): void
   (e: 'backgroundClick', event: MouseEvent): void
-  (e: 'add-segment', { track, startTime, endTime }: { track: TimelineTrack, startTime: number, endTime?: number }): void
+  (e: 'add-segment', { track, startTime, endTime, event }: { track: TimelineTrack, startTime: number, endTime?: number, event?: MouseEvent }): void
 }>()
 
 const viewportRef = ref<HTMLElement | null>(null)
@@ -452,10 +452,10 @@ function handleSegmentClick(layout: SegmentLayout, event: MouseEvent) {
   emit('segmentClick', layout, event)
 }
 
-function handleAddSegment({ track, startTime, endTime }: { track: TimelineTrack, startTime: number, endTime?: number }) {
+function handleAddSegment({ track, startTime, endTime, event }: { track: TimelineTrack, startTime: number, endTime?: number, event?: MouseEvent }) {
   const trackLayout = segmentLayouts.value.find(t => t.track.id === track.id)
   if (trackLayout)
-    emit('add-segment', { track: trackLayout.track, startTime, endTime })
+    emit('add-segment', { track: trackLayout.track, startTime, endTime, event })
 }
 
 function handleGlobalMouseMove(event: MouseEvent) {
