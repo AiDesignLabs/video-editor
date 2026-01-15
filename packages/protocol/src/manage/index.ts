@@ -276,12 +276,45 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
 
     const id = updateProtocol((protocol) => {
       if (theSegment.segmentType === 'frames') {
-        const frameTracks = protocol.tracks.filter(track => track.trackType === 'frames') as TrackTypeMapTrack['frames'][]
-        let targetTrack = frameTracks.find(track => track.trackId === trackId)
-        if (!targetTrack)
-          targetTrack = frameTracks.find(track => track.isMain)
+        const newClipStart = theSegment.startTime
+        const newClipEnd = theSegment.endTime
 
+        const frameTracks = protocol.tracks.filter(track => track.trackType === 'frames') as TrackTypeMapTrack['frames'][]
+
+        // Prefer a specified track if it has space
+        let targetTrack: TrackTypeMapTrack['frames'] | undefined
+        if (trackId) {
+          const specifiedTrack = frameTracks.find(track => track.trackId === trackId)
+          if (specifiedTrack) {
+            const hasOverlap = specifiedTrack.children.some(clip => (clip.startTime < newClipEnd) && (clip.endTime > newClipStart))
+            if (!hasOverlap)
+              targetTrack = specifiedTrack
+          }
+        }
+
+        // If no specified track or it had overlap, find any other frames track with space
         if (!targetTrack) {
+          for (const track of frameTracks) {
+            // Don't check the specified track again
+            if (track.trackId === trackId)
+              continue
+            const hasOverlap = track.children.some(clip => (clip.startTime < newClipEnd) && (clip.endTime > newClipStart))
+            if (!hasOverlap) {
+              targetTrack = track
+              break
+            }
+          }
+        }
+
+        if (targetTrack) {
+          // Found a track with space, add segment and sort.
+          targetTrack.children.push(theSegment)
+          targetTrack.children.sort((a, b) => a.startTime - b.startTime)
+          affectedTrackIds.add(targetTrack.trackId)
+          return theSegment.id
+        }
+        else {
+          // No space in any existing frames track, create a new one.
           const newId = addSegmentToTrack(theSegment, protocol.tracks)
           const newTrack = protocol.tracks.find(t => t.children.some(s => s.id === newId))
           if (newTrack) {
@@ -290,11 +323,6 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
           }
           return newId
         }
-
-        const newId = addFramesSegment(theSegment, targetTrack)
-        // All segments in the main track may be affected due to timeline rebuild
-        affectedTrackIds.add(targetTrack.trackId)
-        return newId
       }
 
       const tracks = protocol.tracks

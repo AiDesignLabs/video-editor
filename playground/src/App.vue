@@ -291,18 +291,15 @@ function moveCaption() {
 }
 
 function appendClip() {
-  const lastEnd = mainFramesTrack.value?.children.at(-1)?.endTime ?? 0
-  const end = lastEnd + 2000
-  commands.setCurrentTime(lastEnd)
-
+  const duration = 5000
   const seg: IImageFramesSegment = {
     id: `clip-${Date.now()}`,
     segmentType: 'frames',
     type: 'image',
     format: 'img',
     url: swatches.extra,
-    startTime: 0,
-    endTime: end - lastEnd,
+    startTime: currentTimeMs.value,
+    endTime: currentTimeMs.value + duration,
     opacity: 0.95,
     extra: { aiTag: 'appended', label: 'Clip D' },
   }
