@@ -1,4 +1,5 @@
 import type { IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { TrackTypeMapTrack } from '@video-editor/shared'
 import type { PixiDisplayObject } from './types'
 import { toRaw } from '@vue/reactivity'
 import { Graphics, Sprite, Texture } from 'pixi.js'
@@ -25,6 +26,15 @@ export function collectActiveSegments(protocol: IVideoProtocol, at: number) {
   })
 
   return active.sort((a, b) => {
+    const aTrack = protocol.tracks[a.trackIndex]
+    const bTrack = protocol.tracks[b.trackIndex]
+    const aIsMain = aTrack?.trackType === 'frames' && (aTrack as TrackTypeMapTrack['frames']).isMain
+    const bIsMain = bTrack?.trackType === 'frames' && (bTrack as TrackTypeMapTrack['frames']).isMain
+    const total = protocol.tracks.length
+    const aOrder = aIsMain ? 0 : total - a.trackIndex
+    const bOrder = bIsMain ? 0 : total - b.trackIndex
+    if (aOrder !== bOrder)
+      return aOrder - bOrder
     if (a.trackIndex === b.trackIndex)
       return a.childIndex - b.childIndex
     return a.trackIndex - b.trackIndex

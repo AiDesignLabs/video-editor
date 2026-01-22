@@ -128,13 +128,21 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
   }
 
   const addSegmentToTrack = <T extends SegmentUnion>(segment: T, tracks: IVideoProtocol['tracks']) => {
+    const hasMainFrames = tracks.some(track => track.trackType === 'frames' && (track as TrackTypeMapTrack['frames']).isMain)
+    const isMainFrames = segment.segmentType === 'frames' && !hasMainFrames
     const track = {
-      isMain: segment.segmentType === 'frames' && !(tracks?.length) ? true : undefined,
+      isMain: isMainFrames ? true : undefined,
       trackType: segment.segmentType,
       trackId: options?.idFactory?.track?.() ?? genRandomId(),
       children: [segment],
     } satisfies ITrack<ITrackType> as TrackUnion
-    tracks.push(track)
+
+    if (isMainFrames) {
+      tracks.push(track)
+    }
+    else {
+      tracks.unshift(track)
+    }
     return segment.id
   }
 

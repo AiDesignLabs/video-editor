@@ -66,9 +66,16 @@ const colorByType: Record<ITrackType, string> = {
 const filteredTracks = computed(() => {
   if (!props.protocol?.tracks?.length)
     return [] as TrackUnion[]
-  if (!props.trackTypes?.length)
-    return props.protocol.tracks
-  return props.protocol.tracks.filter((track: TrackUnion) => props.trackTypes?.includes(track.trackType))
+  const tracks = !props.trackTypes?.length
+    ? props.protocol.tracks
+    : props.protocol.tracks.filter((track: TrackUnion) => props.trackTypes?.includes(track.trackType))
+  const ordered = tracks.slice()
+  const mainIndex = ordered.findIndex(track => track.trackType === 'frames' && track.isMain === true)
+  if (mainIndex !== -1) {
+    const [mainTrack] = ordered.splice(mainIndex, 1)
+    ordered.push(mainTrack)
+  }
+  return ordered
 })
 
 const videoDurationMsByUrl = reactive(new Map<string, number>())

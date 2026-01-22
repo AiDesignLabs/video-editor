@@ -459,7 +459,7 @@ describe('video protocol segment curd', () => {
       addSegment(textSegment)
       addSegment(stickerSegment)
       addSegment(textSegment)
-      expect(exportProtocol().tracks.map(track => track.trackType)).toEqual(['sticker', 'text', 'sticker', 'text'])
+      expect(exportProtocol().tracks.map(track => track.trackType)).toEqual(['text', 'sticker', 'text', 'sticker'])
     })
   })
 })
@@ -646,7 +646,7 @@ describe('audio segment', () => {
         const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.audio).toHaveLength(2)
-        expect(trackMap.value.audio[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
+        expect(trackMap.value.audio[0].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
       })
     })
 
@@ -795,7 +795,7 @@ describe('text segment', () => {
         const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.text).toHaveLength(2)
-        expect(trackMap.value.text[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
+        expect(trackMap.value.text[0].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
       })
     })
 
@@ -943,7 +943,7 @@ describe('sticker segment', () => {
         const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.sticker).toHaveLength(2)
-        expect(trackMap.value.sticker[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
+        expect(trackMap.value.sticker[0].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
       })
     })
 
@@ -1090,7 +1090,7 @@ describe('effect segment', () => {
         const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.effect).toHaveLength(2)
-        expect(trackMap.value.effect[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
+        expect(trackMap.value.effect[0].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
       })
     })
 
@@ -1237,7 +1237,7 @@ describe('filter segment', () => {
         const id = addSegment(segment).id
         expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.filter).toHaveLength(2)
-        expect(trackMap.value.filter[1].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
+        expect(trackMap.value.filter[0].children[0]).toEqual({ ...segment, id, startTime: 1100, endTime: 2100 })
       })
     })
 
