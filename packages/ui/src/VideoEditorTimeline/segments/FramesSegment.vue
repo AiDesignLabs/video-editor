@@ -2,13 +2,35 @@
 import type { IFramesSegmentUnion, IVideoFramesSegment } from '@video-editor/shared'
 import { generateThumbnails } from '@video-editor/protocol'
 import { isVideoFramesSegment } from '@video-editor/shared'
-import { onBeforeUnmount, reactive, watch } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 defineOptions({ name: 'FramesSegment' })
 
 const props = defineProps<{
   segment: IFramesSegmentUnion
 }>()
+
+const containerRef = ref<HTMLElement | null>(null)
+const imageCount = ref(1)
+let resizeObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  if (containerRef.value) {
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const nextCount = Math.max(1, Math.ceil(entry.contentRect.width / 56))
+        if (imageCount.value !== nextCount)
+          imageCount.value = nextCount
+      }
+    })
+    resizeObserver.observe(containerRef.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  cleanupThumbnails()
+})
 
 interface ThumbnailPreview { tsMs: number, url: string }
 interface ThumbnailState { items: ThumbnailPreview[], loading: boolean, error: string | null }
@@ -23,10 +45,6 @@ watch(() => props.segment, (segment, prev) => {
   if (shouldRefresh)
     loadVideoThumbnails(segment as IVideoFramesSegment)
 }, { immediate: true, deep: true })
-
-onBeforeUnmount(() => {
-  cleanupThumbnails()
-})
 
 function hasVideoSegmentChanged(prev: IVideoFramesSegment, next: IVideoFramesSegment) {
   return prev.url !== next.url
@@ -78,26 +96,21 @@ function cleanupThumbnails() {
   thumbnailState.items.forEach(thumb => URL.revokeObjectURL(thumb.url))
   thumbnailState.items = []
 }
-
-function getImageStyle() {
-  return {
-    backgroundImage: props.segment.url ? `url(${props.segment.url})` : '',
-    backgroundRepeat: 'repeat-x',
-    backgroundSize: '56px 56px',
-    backgroundPosition: 'left center',
-  }
-}
 </script>
 
 <template>
   <div class="frames-segment">
     <!-- Image Type: Tiled background -->
     <template v-if="segment.type === 'image'">
-      <slot name="image" :segment="segment" :style="getImageStyle()">
-        <div
-          class="frames-segment__image"
-          :style="getImageStyle()"
-        />
+      <slot name="image" :segment="segment" :style="{ backgroundImage: segment.url ? `url(${segment.url})` : '' }">
+        <div ref="containerRef" class="frames-segment__image">
+          <div
+            v-for="i in imageCount"
+            :key="i"
+            class="frames-segment__image-item"
+            :style="{ backgroundImage: segment.url ? `url(${segment.url})` : '' }"
+          />
+        </div>
       </slot>
     </template>
 
@@ -152,8 +165,12 @@ function getImageStyle() {
 }
 
 :where(.frames-segment .frames-segment__image) {
-  --at-apply: w-full h-full rounded-4px;
+  --at-apply: flex w-full h-full overflow-hidden rounded-4px;
   background-color: color-mix(in srgb, var(--ve-segment-accent, #222226) 15%, transparent);
+}
+
+:where(.frames-segment .frames-segment__image-item) {
+  --at-apply: flex-shrink-0 w-14 h-full bg-cover bg-left-center bg-no-repeat;
 }
 
 :where(.frames-segment .frames-segment__video) {
