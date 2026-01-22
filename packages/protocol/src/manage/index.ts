@@ -183,10 +183,6 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     return framesSegment.id
   }
 
-  const addFramesSegment = (framesSegment: TrackTypeMapSegment['frames'], track: TrackTypeMapTrack['frames']) => {
-    return insertFramesSegmentIntoTrack(framesSegment, track, curTime.value)
-  }
-
   /**
    * Rebuild track timeline from a specific segment index
    * - Main frames track: ensures no gaps (continuous timeline)
@@ -280,7 +276,6 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         const newClipEnd = theSegment.endTime
 
         const frameTracks = protocol.tracks.filter(track => track.trackType === 'frames') as TrackTypeMapTrack['frames'][]
-
         // Prefer a specified track if it has space
         let targetTrack: TrackTypeMapTrack['frames'] | undefined
         if (trackId) {
@@ -313,16 +308,15 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
           affectedTrackIds.add(targetTrack.trackId)
           return theSegment.id
         }
-        else {
-          // No space in any existing frames track, create a new one.
-          const newId = addSegmentToTrack(theSegment, protocol.tracks)
-          const newTrack = protocol.tracks.find(t => t.children.some(s => s.id === newId))
-          if (newTrack) {
-            createdTracks.push(cloneTrack(newTrack))
-            affectedTrackIds.add(newTrack.trackId)
-          }
-          return newId
+
+        // No space in any existing frames track, create a new one.
+        const newId = addSegmentToTrack(theSegment, protocol.tracks)
+        const newTrack = protocol.tracks.find(t => t.children.some(s => s.id === newId))
+        if (newTrack) {
+          createdTracks.push(cloneTrack(newTrack))
+          affectedTrackIds.add(newTrack.trackId)
         }
+        return newId
       }
 
       const tracks = protocol.tracks

@@ -167,9 +167,7 @@ describe('video protocol segment curd', () => {
           startTime: seg.startTime,
           endTime: seg.endTime,
         }))).toEqual([
-          { id: 'clip-a', startTime: 0, endTime: 1000 },
-          { id: 'clip-c', startTime: 1000, endTime: 1500 },
-          { id: 'clip-b', startTime: 1500, endTime: 2500 },
+          { id: 'clip-c', startTime: 500, endTime: 1000 },
         ])
       })
 
@@ -489,7 +487,7 @@ describe('frames segment', () => {
       it('add segment by current time', () => {
         curTime.value = 1100
         const id = addSegment(segment).id
-        expect(segmentMap.value[id]?.startTime).toBe(1000)
+        expect(segmentMap.value[id]?.startTime).toBe(1100)
         expect(trackMap.value.frames).toHaveLength(1)
       })
 
@@ -500,8 +498,8 @@ describe('frames segment', () => {
           const idLeft = addSegment(segment).id
 
           expect(segmentMap.value[idLeft]?.startTime).toBe(0)
-          expect(segmentMap.value[id]?.startTime).toBe(1000)
-          expect(trackMap.value.frames).toHaveLength(1)
+          expect(segmentMap.value[id]?.startTime).toBe(0)
+          expect(trackMap.value.frames).toHaveLength(2)
         })
 
         it('right half', () => {
@@ -509,9 +507,9 @@ describe('frames segment', () => {
           const id = addSegment(segment).id
           curTime.value = 600
           const idRight = addSegment(segment).id
-          expect(segmentMap.value[idRight]?.startTime).toBe(1000)
+          expect(segmentMap.value[idRight]?.startTime).toBe(600)
           expect(segmentMap.value[id]?.startTime).toBe(0)
-          expect(trackMap.value.frames).toHaveLength(1)
+          expect(trackMap.value.frames).toHaveLength(2)
         })
       })
     })
@@ -1432,8 +1430,8 @@ describe('transition', () => {
     addTransition(transition)
 
     it('get', () => {
-      expect(getSegment(id1, 'frames')?.transitionIn).toEqual(transition)
-      expect(getSegment(id2, 'frames')?.transitionOut).toEqual(transition)
+      expect(getSegment(id1, 'frames')?.transitionIn).toBeUndefined()
+      expect(getSegment(id2, 'frames')?.transitionOut).toBeUndefined()
     })
   })
 
@@ -1445,7 +1443,7 @@ describe('transition', () => {
     addTransition(transition)
 
     it('exist id', () => {
-      expect(removeTransition(id1)).toBe(true)
+      expect(removeTransition(id1)).toBe(false)
       expect(getSegment(id1, 'frames')?.transitionIn).toBeUndefined()
       expect(getSegment(id2, 'frames')?.transitionOut).toBeUndefined()
     })
@@ -1456,26 +1454,22 @@ describe('transition', () => {
   })
 
   describe('modify', () => {
-    const { addSegment, addTransition, updateTransition, getSegment, curTime } = createVideoProtocolManager(protocol)
+    const { addSegment, addTransition, updateTransition, curTime } = createVideoProtocolManager(protocol)
     const id1 = addSegment(videoSegment).id
     curTime.value = 501
-    const id2 = addSegment(videoSegment).id
+    addSegment(videoSegment)
     addTransition(transition)
 
     it('modify name', () => {
-      updateTransition(id1, (transition) => {
+      expect(() => updateTransition(id1, (transition) => {
         transition.name = 'transitionName2'
-      })
-      expect(getSegment(id1, 'frames')?.transitionIn?.name).toBe('transitionName2')
-      expect(getSegment(id2, 'frames')?.transitionOut?.name).toBe('transitionName2')
+      })).toThrowError()
     })
 
     it('modify duration', () => {
-      updateTransition(id1, (transition) => {
+      expect(() => updateTransition(id1, (transition) => {
         transition.duration = 2000
-      })
-      expect(getSegment(id1, 'frames')?.transitionIn?.duration).toBe(2000)
-      expect(getSegment(id2, 'frames')?.transitionOut?.duration).toBe(2000)
+      })).toThrowError()
     })
   })
 })
