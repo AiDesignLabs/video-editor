@@ -1,175 +1,127 @@
-# Repository Guidelines
+# VIDEO EDITOR KNOWLEDGE BASE
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+**Generated:** 2026-01-23
+**Commit:** d6d7791
+**Branch:** main
 
-## Project Overview
+## OVERVIEW
 
-This is a video editor project inspired by CapCut, built as a monorepo using pnpm workspaces. The architecture is modular with clear separation between protocol management, rendering, UI components, and shared utilities.
+CapCut-inspired video editor monorepo. Headless core architecture with reactive protocol state, Pixi.js rendering, Vue 3 UI. pnpm workspaces + Vite.
 
-## Development Commands
+## STRUCTURE
 
-### Setup
-```bash
-pnpm install  # Install dependencies (enforced via preinstall hook)
+```
+video-editor/
+├── packages/
+│   ├── shared/        # Types only (IVideoProtocol, segments, tracks)
+│   ├── protocol/      # State manager + OPFS resources + Ajv validation
+│   ├── editor-core/   # Headless commands/selectors/plugins API
+│   ├── renderer/      # Pixi.js rendering engine
+│   ├── ui/            # Vue timeline components + drag-drop hooks
+│   ├── editor/        # [placeholder] UI shell
+│   └── plugins/       # [placeholder] Built-in plugins
+├── playground/        # Demo app (root-level, not in /apps)
+├── scripts/           # Git hooks, reactivity check
+└── types/             # Global d.ts (mp4box)
 ```
 
-### Development
-```bash
-pnpm dev              # Start playground development server
-pnpm -F playground dev  # Alternative explicit command
+## WHERE TO LOOK
+
+| Task | Location | Notes |
+|------|----------|-------|
+| Protocol types | `packages/shared/src/protocol.ts` | All segment/track interfaces |
+| Add segment | `packages/protocol/src/manage/index.ts` | `addSegment()`, `removeSegment()` |
+| Undo/redo | `packages/protocol/src/manage/immer.ts` | Patch-based history |
+| Validation rules | `packages/protocol/src/verify/rules/` | Ajv JSON schemas |
+| Resource storage | `packages/protocol/src/resource/` | OPFS via opfs-tools |
+| Video thumbnails | `packages/protocol/src/resource/thumbnails.ts` | Frame extraction |
+| Headless editor API | `packages/editor-core/src/core.ts` | `createEditorCore()` |
+| Timeline drag-drop | `packages/ui/src/VideoTimeline/hooks/` | 3 specialized hooks |
+| Pixi rendering | `packages/renderer/src/renderer-core.ts` | ~860 lines, main hotspot |
+| Demo integration | `playground/src/App.vue` | Full stack example |
+
+## ARCHITECTURE
+
+```
+Protocol (shared + protocol)
+  ↑
+Editor Core (commands/selectors/plugins)
+  ↑                 ↑
+Renderer            UI Shell
+  ↑                 ↑
+Plugins
+  ↑
+Application (playground)
 ```
 
-### Build
-```bash
-pnpm build            # Build all packages recursively
-pnpm check            # Type check without emitting files
+**Data Flow:** UI → editor-core.commands → protocol manager → reactive protocol → renderer (read-only)
+
+**Critical Rule:** Never mutate protocol directly. Always use `editor-core.commands`.
+
+## CONVENTIONS
+
+### pnpm Catalogs
+Dependency versions centralized in `pnpm-workspace.yaml` using `catalog:` protocol. Add new deps there, not in package.json.
+
+### Reactivity Singleton
+`@vue/reactivity` must be single instance. Packages declare it as peerDependency. Verified by `scripts/check-reactivity.mjs`.
+
+### Commit Format
 ```
+<type>(<scope>): <subject>
+```
+Types: feat, fix, docs, dx, style, refactor, perf, test, workflow, build, ci, chore, types, wip, release
+
+### Code Style
+- English comments only
+- Vue 3 Composition API with `<script setup lang="ts">`
+- `defineOptions({ name: 'ComponentName' })`
+- Strict TypeScript (no `as any`, `@ts-ignore`)
 
 ### Testing
+- Vitest workspace across packages
+- `*.test.ts` = Node environment
+- `*.browser.test.ts` = Playwright/Chromium (OPFS, Canvas)
+- Protocol package has extensive coverage; others sparse
+
+## ANTI-PATTERNS
+
+| Forbidden | Reason |
+|-----------|--------|
+| Direct protocol mutation | Bypasses history, breaks reactivity |
+| Multiple `@vue/reactivity` instances | Dead reactive objects |
+| Mutations in selectors | Selectors are read-only queries |
+| `editor-core` depending on `plugins` | Cyclic dependency |
+| Gaps in main frames track | Must be continuous timeline |
+| Multiple `isMain` frames tracks | Only one allowed |
+| `npm` or `yarn` | pnpm-only (preinstall hook) |
+
+## COMMANDS
+
 ```bash
-pnpm test             # Run all tests across packages
-pnpm test:protocol    # Run protocol tests with UI (vitest UI)
-pnpm -C packages/protocol run test:ui  # Alternative protocol test command
+pnpm install              # Setup (pnpm enforced)
+pnpm dev                  # Playground dev server
+pnpm build                # Build all packages
+pnpm check                # TypeScript check
+pnpm test                 # All tests
+pnpm test:protocol        # Protocol tests with UI
+pnpm lint:fix             # ESLint auto-fix
+pnpm check:reactivity     # Verify single reactivity instance
 ```
 
-Individual package tests:
-```bash
-pnpm -C packages/protocol test        # Run protocol tests headless
-```
+## COMPLEXITY HOTSPOTS
 
-### Code Quality
-```bash
-pnpm lint             # Run ESLint with cache
-pnpm lint:fix         # Auto-fix linting issues
-```
+| File | Lines | Concern |
+|------|-------|---------|
+| `protocol/src/manage/index.ts` | ~980 | Timeline rebuild, undo/redo |
+| `renderer/src/renderer-core.ts` | ~860 | Pixi stage, video sync |
+| `ui/src/VideoTimeline/index.vue` | ~840 | Zoom, coordinate mapping |
 
-### Other Commands
-```bash
-pnpm sizecheck        # Analyze bundle size with vite-bundle-visualizer
-pnpm update:dependencies  # Update dependencies with taze
-```
+## NOTES
 
-## Architecture
-
-### Package Structure
-
-The monorepo contains 6 main packages under `/packages/`:
-
-- **@video-editor/protocol** - Core protocol management system
-  - `manage/` - Protocol state management with undo/redo using Immer
-  - `parse/` - Protocol parsing utilities
-  - `resource/` - Resource management using OPFS (Origin Private File System)
-  - `verify/` - JSON Schema validation using Ajv
-
-- **@video-editor/renderer** - Video rendering engine
-
-- **@video-editor/editor** - Main editor components (Vue-based)
-
-- **@video-editor/ui** - Reusable UI components
-  - Basic components: Button, Text
-
-- **@video-editor/shared** - Shared types and utilities
-  - `protocol.ts` - Core TypeScript interfaces for video protocol (IVideoProtocol, segments, tracks, etc.)
-
-- **@video-editor/plugins** - Plugin system
-
-### Core Concepts
-
-#### Video Protocol (`IVideoProtocol`)
-
-The protocol is the central data structure defined in `packages/shared/src/protocol.ts`:
-
-- **Basic properties**: width, height, fps, version
-- **Tracks**: Array of track objects containing segments
-- **Track types**: frames, text, image, audio, effect, filter
-- **Segments**: Time-based elements (startTime, endTime) within tracks
-
-Key segment types:
-- **Frames segments**: Video/image/3D frames with transforms, opacity, animations, transitions
-- **Text segments**: Text content with styling, transforms, animations
-- **Image segments**: Static images or GIFs
-- **Audio segments**: Audio with volume, fade in/out, playback rate
-- **Effect/Filter segments**: Visual effects and filters
-
-#### Protocol Manager (`createVideoProtocolManager`)
-
-Located in `packages/protocol/src/manage/index.ts`. Provides reactive state management:
-
-- **State management**: Vue reactivity system (@vue/reactivity)
-- **History**: Undo/redo functionality using Immer
-- **Validation**: Real-time schema validation
-- **Segment operations**: Add, remove, update segments with automatic track management
-- **Transition management**: Add, remove, update transitions between frame segments
-- **Time-based operations**: Segments are inserted based on current time (`curTime`)
-
-Main API:
-- `addSegment()` - Adds segment at current time, auto-creates tracks if needed
-- `removeSegment()` - Removes segment and cleans up empty tracks
-- `updateSegment()` - Updates segment with validation
-- `addTransition()` - Creates transition between adjacent frame segments
-- `undo()` / `redo()` - History navigation
-
-#### Resource Manager (`createResourceManager`)
-
-Located in `packages/protocol/src/resource/index.ts`. Manages media resources using OPFS:
-
-- Stores resources in browser's Origin Private File System
-- Default directory: `/video-editor-res`
-- Operations: add, get, remove, clear
-- Handles resource fetching and type detection
-
-#### Validation System
-
-Uses Ajv (JSON Schema validator) with plugins (ajv-errors, ajv-keywords, ajv-formats):
-
-- Schema rules in `packages/protocol/src/verify/rules/`
-- Validates protocol structure, segments, and tracks
-- Enforces unique segment and track IDs
-- Validates time ranges, numeric constraints, and required fields
-
-## Important Notes
-
-### Reactivity Dependency Hygiene
-
-Packages that rely on Vue reactivity (`@video-editor/protocol`, `@video-editor/editor-core`, `@video-editor/renderer`) declare `@vue/reactivity` as a peer dependency to avoid bundling multiple reactivity runtimes.
-
-Consumer guidance:
-- Ensure a single `@vue/reactivity` instance in the app (pnpm dedupe or overrides).
-- Externalize `@vue/reactivity` in library builds (Vite/Rollup `external`) to prevent bundling.
-- If integrating outside Vue, bridge reactive state via snapshots/subscriptions instead of passing raw reactive objects to UI.
-
-### Commit Message Convention
-
-This project enforces conventional commits via git hook (`scripts/verifyCommit.mjs`):
-
-Format: `<type>(<scope>): <subject>`
-
-Allowed types: feat, fix, docs, dx, style, refactor, perf, test, workflow, build, ci, chore, types, wip, release
-
-Examples:
-- `feat(protocol): add transition support`
-- `fix(renderer): handle edge cases in segment rendering`
-
-### Git Hooks
-
-- **pre-commit**: Runs lint-staged (ESLint auto-fix on all files)
-- **commit-msg**: Validates commit message format
-- **pre-push**: Runs all tests
-
-### TypeScript Configuration
-
-- Strict mode enabled
-- Path aliases configured: `@video-editor/*` maps to `packages/*/src/index.ts`
-- Custom types in `/types/` directory (e.g., mp4box.d.ts)
-
-### Testing
-
-- Uses Vitest with workspace configuration (`vitest.workspace.js`)
-- Protocol package has extensive test coverage (`index.test.ts`)
-- Browser testing available via @vitest/browser with Playwright
-
-### Package Manager
-
-- **pnpm only** - enforced via preinstall hook
-- Workspace protocol for internal dependencies (`workspace:*`)
-- Supports nested packages (up to 2 levels)
+- `packages/editor` and `packages/plugins` are placeholders (console.log only)
+- `editor-core` is fully implemented but omitted from some docs
+- `packages/devtools` contains only reactivity check binary
+- README files in packages have incorrect headers (copy-paste artifact)
+- Main frames track enforces "no gaps" via automatic segment shifting
+- OPFS used for browser-local resource caching (offline-first)
