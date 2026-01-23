@@ -1,5 +1,5 @@
 import { MP4Clip } from '@webav/av-cliper'
-import { file as opfsFile, write as opfsWrite } from 'opfs-tools'
+import { dir as opfsDir, file as opfsFile, write as opfsWrite } from 'opfs-tools'
 import { DEFAULT_RESOURCE_DIR } from './constants'
 import { inferResourceTypeFromUrl, getResourceKey, getResourceOpfsPath } from './key'
 
@@ -22,7 +22,29 @@ export interface Thumbnail {
 }
 
 const inflightCacheByPath = new Map<string, Promise<void>>()
+const inflightThumbnails = new Map<string, Promise<Thumbnail[]>>()
+const thumbnailCache = new Map<string, Thumbnail[]>()
 const mp4ClipUnsupportedKeys = new Set<string>()
+const maxThumbnailCacheEntries = 24
+const thumbnailManifestName = 'manifest.json'
+const thumbnailIndexName = 'index.json'
+const thumbnailCacheVersion = 1
+const thumbnailOpfsTtlMs = 1000 * 60 * 60 * 24 * 7
+const maxThumbnailOpfsEntriesPerResource = 6
+
+interface ThumbnailManifest {
+  version: number
+  createdAt: number
+  items: Array<{ ts: number, path: string }>
+}
+
+interface ThumbnailIndexEntry {
+  key: string
+  baseDir: string
+  createdAt: number
+  lastAccessAt: number
+  version: number
+}
 
 /** Generate thumbnails for a video, preferring OPFS resources with network fallback. */
 export async function generateThumbnails(url: string, options?: GenerateThumbnailsOptions): Promise<Thumbnail[]> {
@@ -41,6 +63,39 @@ export async function generateThumbnails(url: string, options?: GenerateThumbnai
     resourceDir = DEFAULT_RESOURCE_DIR,
   } = options || {}
 
+  const cacheKey = buildThumbnailCacheKey(url, { imgWidth, start, end, step, resourceDir })
+  const cached = getCachedThumbnails(cacheKey)
+  if (cached)
+    return cached
+
+  if (shouldUseThumbnailOpfs(url)) {
+    const opfsCached = await readThumbnailsFromOpfs(url, { imgWidth, start, end, step, resourceDir })
+    if (opfsCached) {
+      cacheThumbnails(cacheKey, opfsCached)
+      return opfsCached
+    }
+  }
+
+  const inflight = inflightThumbnails.get(cacheKey)
+  if (inflight)
+    return await inflight
+
+  const job = generateThumbnailsInner(url, { imgWidth, start, end, step, resourceDir })
+  inflightThumbnails.set(cacheKey, job)
+  try {
+    const result = await job
+    cacheThumbnails(cacheKey, result)
+    if (shouldUseThumbnailOpfs(url))
+      void writeThumbnailsToOpfs(url, { imgWidth, start, end, step, resourceDir }, result)
+    return result
+  }
+  finally {
+    inflightThumbnails.delete(cacheKey)
+  }
+}
+
+async function generateThumbnailsInner(url: string, opts: Required<Pick<GenerateThumbnailsOptions, 'imgWidth' | 'resourceDir'>> & Pick<GenerateThumbnailsOptions, 'start' | 'end' | 'step'>): Promise<Thumbnail[]> {
+  const { imgWidth, start, end, step, resourceDir } = opts
   const file = await getOpfsFile(url, resourceDir) ?? await ensureCached(url, resourceDir)
   const urlKey = `${resourceDir}::${getResourceKey(url)}`
   if (urlKey && mp4ClipUnsupportedKeys.has(urlKey))
@@ -135,7 +190,226 @@ function isMp4ClipUnsupported(err: unknown) {
   if (!(err instanceof Error))
     return false
   const msg = err.message || ''
-  return msg.includes('stream is done') || msg.includes('not emit ready')
+  return msg.includes('stream is done')
+    || msg.includes('not emit ready')
+    || msg.includes('tick video timeout')
+    || msg.toLowerCase().includes('call stack')
+}
+
+function shouldUseThumbnailOpfs(url: string) {
+  return !!url && !url.startsWith('blob:') && !url.startsWith('data:')
+}
+
+function buildThumbnailVariantKey(opts: { imgWidth: number, start?: number, end?: number, step?: number }) {
+  return [opts.imgWidth, opts.start ?? '', opts.end ?? '', opts.step ?? ''].join('-')
+}
+
+function buildThumbnailOpfsBaseDir(resourceDir: string, url: string, opts: { imgWidth: number, start?: number, end?: number, step?: number }) {
+  const key = getResourceKey(url)
+  if (!key)
+    return ''
+  const variantKey = buildThumbnailVariantKey(opts)
+  return `${resourceDir}/thumbnails/${key}/${variantKey}`
+}
+
+function getThumbnailIndexPath(resourceDir: string, resourceKey: string) {
+  return `${resourceDir}/thumbnails/${resourceKey}/${thumbnailIndexName}`
+}
+
+async function readThumbnailsFromOpfs(
+  url: string,
+  opts: { imgWidth: number, start?: number, end?: number, step?: number, resourceDir: string },
+): Promise<Thumbnail[] | undefined> {
+  const resourceKey = getResourceKey(url)
+  if (!resourceKey)
+    return undefined
+  const baseDir = buildThumbnailOpfsBaseDir(opts.resourceDir, url, opts)
+  if (!baseDir)
+    return undefined
+
+  try {
+    const manifestPath = `${baseDir}/${thumbnailManifestName}`
+    const manifestFile = opfsFile(manifestPath, 'r')
+    if (!(await manifestFile.exists()))
+      return undefined
+
+    const originFile = await manifestFile.getOriginFile()
+    if (!originFile)
+      return undefined
+
+    const text = await originFile.text()
+    const parsed = JSON.parse(text) as ThumbnailManifest | Array<{ ts: number, path: string }>
+    const manifest = Array.isArray(parsed)
+      ? { version: 0, createdAt: 0, items: parsed }
+      : parsed
+    if (!manifest || !Array.isArray(manifest.items) || manifest.items.length === 0)
+      return undefined
+
+    if (manifest.version !== thumbnailCacheVersion) {
+      await removeThumbnailEntry(baseDir)
+      await removeThumbnailIndexEntry(resourceKey, opts.resourceDir, buildThumbnailVariantKey(opts))
+      return undefined
+    }
+
+    const now = Date.now()
+    if (manifest.createdAt && now - manifest.createdAt > thumbnailOpfsTtlMs) {
+      await removeThumbnailEntry(baseDir)
+      await removeThumbnailIndexEntry(resourceKey, opts.resourceDir, buildThumbnailVariantKey(opts))
+      return undefined
+    }
+
+    const results: Thumbnail[] = []
+    for (const item of manifest.items) {
+      const file = opfsFile(item.path, 'r')
+      if (!(await file.exists()))
+        throw new Error('thumbnail file missing')
+      const origin = await file.getOriginFile()
+      if (!origin)
+        throw new Error('thumbnail origin missing')
+      results.push({ ts: item.ts, img: origin })
+    }
+
+    await updateThumbnailIndex(resourceKey, opts.resourceDir, {
+      key: buildThumbnailVariantKey(opts),
+      baseDir,
+      createdAt: manifest.createdAt || now,
+      lastAccessAt: now,
+      version: manifest.version,
+    })
+    return results
+  }
+  catch {
+    await removeThumbnailEntry(baseDir)
+    await removeThumbnailIndexEntry(resourceKey, opts.resourceDir, buildThumbnailVariantKey(opts))
+    return undefined
+  }
+}
+
+async function writeThumbnailsToOpfs(
+  url: string,
+  opts: { imgWidth: number, start?: number, end?: number, step?: number, resourceDir: string },
+  thumbnails: Thumbnail[],
+) {
+  if (!thumbnails.length)
+    return
+  const baseDir = buildThumbnailOpfsBaseDir(opts.resourceDir, url, opts)
+  if (!baseDir)
+    return
+
+  try {
+    const createdAt = Date.now()
+    const manifestItems: Array<{ ts: number, path: string }> = []
+    for (const thumb of thumbnails) {
+      const path = `${baseDir}/${thumb.ts}.png`
+      await opfsWrite(path, thumb.img.stream(), { overwrite: true })
+      manifestItems.push({ ts: thumb.ts, path })
+    }
+    const manifest: ThumbnailManifest = {
+      version: thumbnailCacheVersion,
+      createdAt,
+      items: manifestItems,
+    }
+    const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' })
+    await opfsWrite(`${baseDir}/${thumbnailManifestName}`, manifestBlob.stream(), { overwrite: true })
+
+    const resourceKey = getResourceKey(url)
+    if (resourceKey) {
+      await updateThumbnailIndex(resourceKey, opts.resourceDir, {
+        key: buildThumbnailVariantKey(opts),
+        baseDir,
+        createdAt,
+        lastAccessAt: createdAt,
+        version: thumbnailCacheVersion,
+      })
+    }
+  }
+  catch {
+    // ignore OPFS write failures
+  }
+}
+
+async function readThumbnailIndex(resourceKey: string, resourceDir: string): Promise<ThumbnailIndexEntry[]> {
+  const path = getThumbnailIndexPath(resourceDir, resourceKey)
+  try {
+    const file = opfsFile(path, 'r')
+    if (!(await file.exists()))
+      return []
+    const origin = await file.getOriginFile()
+    if (!origin)
+      return []
+    const text = await origin.text()
+    const parsed = JSON.parse(text) as ThumbnailIndexEntry[]
+    if (!Array.isArray(parsed))
+      return []
+    return parsed.filter(entry => entry && typeof entry.key === 'string' && typeof entry.baseDir === 'string')
+  }
+  catch {
+    return []
+  }
+}
+
+async function writeThumbnailIndex(resourceKey: string, resourceDir: string, entries: ThumbnailIndexEntry[]) {
+  const path = getThumbnailIndexPath(resourceDir, resourceKey)
+  const blob = new Blob([JSON.stringify(entries)], { type: 'application/json' })
+  await opfsWrite(path, blob.stream(), { overwrite: true })
+}
+
+async function updateThumbnailIndex(resourceKey: string, resourceDir: string, entry: ThumbnailIndexEntry) {
+  const entries = await readThumbnailIndex(resourceKey, resourceDir)
+  const now = Date.now()
+  const next = entries.filter(item => item.key !== entry.key)
+  next.unshift({ ...entry, lastAccessAt: entry.lastAccessAt || now })
+  next.sort((a, b) => b.lastAccessAt - a.lastAccessAt)
+  const keep = next.slice(0, maxThumbnailOpfsEntriesPerResource)
+  const evicted = next.slice(maxThumbnailOpfsEntriesPerResource)
+  for (const item of evicted)
+    await removeThumbnailEntry(item.baseDir)
+  await writeThumbnailIndex(resourceKey, resourceDir, keep)
+}
+
+async function removeThumbnailIndexEntry(resourceKey: string, resourceDir: string, entryKey: string) {
+  const entries = await readThumbnailIndex(resourceKey, resourceDir)
+  const next = entries.filter(entry => entry.key !== entryKey)
+  if (next.length === entries.length)
+    return
+  await writeThumbnailIndex(resourceKey, resourceDir, next)
+}
+
+async function removeThumbnailEntry(baseDir: string) {
+  if (!baseDir)
+    return
+  try {
+    const dir = opfsDir(baseDir)
+    if (await dir.exists())
+      await dir.remove()
+  }
+  catch {
+    // ignore OPFS cleanup failures
+  }
+}
+
+function buildThumbnailCacheKey(url: string, opts: { imgWidth: number, start?: number, end?: number, step?: number, resourceDir: string }) {
+  return [opts.resourceDir, url, opts.imgWidth, opts.start ?? '', opts.end ?? '', opts.step ?? ''].join('::')
+}
+
+function getCachedThumbnails(key: string) {
+  const value = thumbnailCache.get(key)
+  if (!value)
+    return undefined
+  thumbnailCache.delete(key)
+  thumbnailCache.set(key, value)
+  return value
+}
+
+function cacheThumbnails(key: string, value: Thumbnail[]) {
+  if (!value.length)
+    return
+  thumbnailCache.set(key, value)
+  if (thumbnailCache.size <= maxThumbnailCacheEntries)
+    return
+  const oldestKey = thumbnailCache.keys().next().value
+  if (oldestKey)
+    thumbnailCache.delete(oldestKey)
 }
 
 async function generateThumbnailsViaVideoElement(

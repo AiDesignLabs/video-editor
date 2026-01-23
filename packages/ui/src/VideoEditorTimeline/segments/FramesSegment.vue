@@ -37,13 +37,15 @@ interface ThumbnailState { items: ThumbnailPreview[], loading: boolean, error: s
 
 const thumbnailState = reactive<ThumbnailState>({ items: [], loading: false, error: null })
 let currentJobId = 0
+let refreshTimer: number | undefined
+let pendingSegment: IVideoFramesSegment | null = null
 
 watch(() => props.segment, (segment, prev) => {
   if (!isVideoFramesSegment(segment as IFramesSegmentUnion))
     return
   const shouldRefresh = !prev || hasVideoSegmentChanged(prev as IVideoFramesSegment, segment as IVideoFramesSegment)
   if (shouldRefresh)
-    loadVideoThumbnails(segment as IVideoFramesSegment)
+    scheduleThumbnailRefresh(segment as IVideoFramesSegment, prev as IVideoFramesSegment | undefined)
 }, { immediate: true, deep: true })
 
 function hasVideoSegmentChanged(prev: IVideoFramesSegment, next: IVideoFramesSegment) {
@@ -51,6 +53,26 @@ function hasVideoSegmentChanged(prev: IVideoFramesSegment, next: IVideoFramesSeg
     || prev.startTime !== next.startTime
     || prev.endTime !== next.endTime
     || prev.fromTime !== next.fromTime
+}
+
+function scheduleThumbnailRefresh(segment: IVideoFramesSegment, prev?: IVideoFramesSegment) {
+  const urlChanged = !prev || prev.url !== segment.url
+  const fromChanged = !prev || prev.fromTime !== segment.fromTime
+  const immediate = urlChanged || fromChanged
+  pendingSegment = segment
+  if (refreshTimer) {
+    window.clearTimeout(refreshTimer)
+    refreshTimer = undefined
+  }
+  if (immediate) {
+    void loadVideoThumbnails(segment)
+    return
+  }
+  refreshTimer = window.setTimeout(() => {
+    if (pendingSegment)
+      void loadVideoThumbnails(pendingSegment)
+    refreshTimer = undefined
+  }, 240)
 }
 
 async function loadVideoThumbnails(segment: IVideoFramesSegment) {

@@ -233,7 +233,11 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   function cleanupCache(protocol: IVideoProtocol) {
-    const ids = new Set(protocol.tracks.flatMap(track => track.children.map(seg => seg.id)))
+    const ids = new Set<string>()
+    for (const track of protocol.tracks) {
+      for (const child of track.children)
+        ids.add(child.id)
+    }
     for (const [id, display] of displayCache) {
       if (ids.has(id))
         continue
@@ -459,7 +463,9 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (!(err instanceof Error))
       return false
     const msg = err.message || ''
-    return msg.includes('stream is done') || msg.includes('not emit ready')
+    return msg.includes('stream is done')
+      || msg.includes('not emit ready')
+      || msg.includes('tick video timeout')
   }
 
   async function updateVideoFrame(segment: IVideoFramesSegment, at: number) {
@@ -482,16 +488,40 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         return await updateVideoFrame(segment, at)
       }
       if (entry.kind === 'mp4clip') {
-        const res = await entry.clip.tick(relativeUs)
-        if (res.video) {
-          const ctx = entry.canvas.getContext('2d')
-          if (ctx) {
-            ctx.drawImage(res.video, 0, 0, entry.canvas.width, entry.canvas.height)
-            refreshCanvasTexture(entry.texture)
+        try {
+          const res = await entry.clip.tick(relativeUs)
+          if (res.video) {
+            const ctx = entry.canvas.getContext('2d')
+            if (ctx) {
+              ctx.drawImage(res.video, 0, 0, entry.canvas.width, entry.canvas.height)
+              refreshCanvasTexture(entry.texture)
+            }
+            res.video.close()
           }
-          res.video.close()
+          return
         }
-        return
+        catch (err) {
+          const urlKey = getResourceKey(segment.url)
+          if (urlKey && isMp4ClipUnsupported(err)) {
+            mp4ClipUnsupportedKeys.add(urlKey)
+            entry.clip.destroy()
+            if (videoSourceMode !== 'mp4clip') {
+              const replacement = await loadVideoSpriteViaElement(segment.url, { sprite: entry.sprite, oldTexture: entry.texture }).catch((elementErr) => {
+                console.warn('[renderer] failed to fallback to <video> after MP4Clip error', segment.url, elementErr)
+                return undefined
+              })
+              if (replacement) {
+                videoEntries.set(segment.id, replacement)
+                return await updateVideoFrame(segment, at)
+              }
+            }
+          }
+          if (urlKey && !mp4ClipErrorLoggedKeys.has(urlKey)) {
+            mp4ClipErrorLoggedKeys.add(urlKey)
+            console.warn('[renderer] MP4Clip tick failed', segment.url, err)
+          }
+          return
+        }
       }
 
       const relativeSec = relativeMs / 1000
