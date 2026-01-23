@@ -58,6 +58,7 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     removeTransition: protocolManager.removeTransition,
     updateTransition: protocolManager.updateTransition,
     replaceTrackId: protocolManager.replaceTrackId,
+    replaceSegmentId: protocolManager.replaceSegmentId,
     undo: protocolManager.undo,
     redo: protocolManager.redo,
     exportProtocol: protocolManager.exportProtocol,

@@ -73,6 +73,8 @@ export interface EditorCoreCommands {
   updateTransition: ProtocolManager['updateTransition']
   /** Replace a track id (useful for migrations). */
   replaceTrackId: ProtocolManager['replaceTrackId']
+  /** Replace a segment id (useful for migrations). */
+  replaceSegmentId: ProtocolManager['replaceSegmentId']
   /** Undo the last mutation. */
   undo: ProtocolManager['undo']
   /** Redo the last undone mutation. */

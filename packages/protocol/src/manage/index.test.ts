@@ -295,7 +295,8 @@ describe('video protocol segment curd', () => {
     expect(removeSegment('1').success).toBe(true)
     expect(removeSegment('1').success).toBe(false)
     expect(segmentMap.value['1']).toBeUndefined()
-    expect(trackMap.value.frames).toBeUndefined()
+    expect(trackMap.value.frames).toHaveLength(1)
+    expect(trackMap.value.frames[0].children).toHaveLength(0)
   })
 
   it('returns affected segments when removing from main frames track', () => {
@@ -539,7 +540,8 @@ describe('frames segment', () => {
     it('exist id', () => {
       expect(removeSegment('1').success).toBe(true)
       expect(segmentMap.value['1']).toBeUndefined()
-      expect(trackMap.value.frames).toBeUndefined()
+      expect(trackMap.value.frames).toHaveLength(1)
+      expect(trackMap.value.frames[0].children).toHaveLength(0)
     })
 
     it('not exist id', () => {
@@ -1810,6 +1812,25 @@ describe('moveSegment', () => {
     expect(p2.tracks[0].trackId).toBe('server-track-id')
     expect(p2.tracks[0].children[0].id).toBe('text-1')
   })
+
+  it('supports replacing segment id', () => {
+    const { addSegment, exportProtocol, replaceSegmentId } = createVideoProtocolManager(protocol)
+
+    const text1: ITextSegment = {
+      id: 'text-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Text 1' }],
+    }
+
+    addSegment(text1)
+    expect(replaceSegmentId('text-1', 'server-segment-id')).toBe(true)
+
+    const p2 = exportProtocol()
+    expect(p2.tracks).toHaveLength(1)
+    expect(p2.tracks[0].children[0].id).toBe('server-segment-id')
+  })
 })
 
 describe('moveSegment - undo/redo', () => {
@@ -2523,7 +2544,8 @@ describe('removeSegment - undo/redo', () => {
     // Remove segment
     expect(removeSegment('frame-1').success).toBe(true)
     const p2 = exportProtocol()
-    expect(p2.tracks.length).toBe(0) // Track should be removed when empty
+    expect(p2.tracks.length).toBe(1)
+    expect(p2.tracks[0].children.length).toBe(0)
 
     // Undo - should restore segment and track
     undo()
@@ -2535,7 +2557,8 @@ describe('removeSegment - undo/redo', () => {
     // Redo - should remove segment and track again
     redo()
     const p4 = exportProtocol()
-    expect(p4.tracks.length).toBe(0)
+    expect(p4.tracks.length).toBe(1)
+    expect(p4.tracks[0].children.length).toBe(0)
   })
 
   it('should support undo/redo for removing one of multiple segments', () => {

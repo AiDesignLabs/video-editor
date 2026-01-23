@@ -396,10 +396,17 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
             }
           }
           else {
-            // Remove empty track
-            protocol.tracks.splice(i, 1)
-            removedTrackIds.push(track.trackId)
-            // No affected segments since track was deleted
+            const isMainFramesTrack = track.trackType === 'frames' && (track as TrackTypeMapTrack['frames']).isMain
+            if (isMainFramesTrack) {
+              // Keep main frames track even if empty
+              affectedTrackId = track.trackId
+            }
+            else {
+              // Remove empty track
+              protocol.tracks.splice(i, 1)
+              removedTrackIds.push(track.trackId)
+              // No affected segments since track was deleted
+            }
           }
 
           return true
@@ -786,6 +793,28 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     })
   }
 
+  const replaceSegmentId = (oldSegmentId: string, newSegmentId: string) => {
+    if (oldSegmentId === newSegmentId)
+      return true
+    const success = updateProtocol((protocol) => {
+      for (const track of protocol.tracks) {
+        if (track.children.some(segment => segment.id === newSegmentId))
+          return false
+      }
+      for (const track of protocol.tracks) {
+        const segment = track.children.find(item => item.id === oldSegmentId)
+        if (!segment)
+          continue
+        segment.id = newSegmentId
+        return true
+      }
+      return false
+    })
+    if (success && selectedSegmentId.value === oldSegmentId)
+      selectedSegmentId.value = newSegmentId
+    return success
+  }
+
   type HistoryMutationResult = {
     success: boolean
     affectedSegments: SegmentUnion[]
@@ -859,6 +888,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     removeTransition,
     updateTransition,
     replaceTrackId,
+    replaceSegmentId,
 
     undo,
     redo,
