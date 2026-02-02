@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { IImageFramesSegment, ITextSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
+import type { IAudioSegment, IImageFramesSegment, ITextSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
 import type { Ref } from 'vue'
 import { createEditorCore } from '@video-editor/editor-core'
 import { generateThumbnails } from '@video-editor/protocol'
@@ -10,7 +10,9 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref,
 const swatches = {
   primary: 'https://dummyimage.com/1280x720/6aa7ff/ffffff.png&text=Clip+A',
   alt: 'https://dummyimage.com/1280x720/f97316/ffffff.png&text=Clip+C',
-  video: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+  video: 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+  // Local music sample with clear frequency variations (~3min)
+  audio: `${window.location.origin}/test-music.mp3`,
   extra: 'https://dummyimage.com/1280x720/22c55e/ffffff.png&text=Clip+D',
 }
 
@@ -33,11 +35,12 @@ const initialProtocol: IVideoProtocol = {
           segmentType: 'frames',
           type: 'video',
           url: swatches.video,
-          fromTime: 1000,
+          fromTime: 15000,
           startTime: 3000,
-          endTime: 6000,
+          endTime: 13000,
           opacity: 1,
-          extra: { aiTag: 'video-segment', confidence: 0.88, label: 'Clip B' },
+          volume: 5,
+          extra: { aiTag: 'video-segment', confidence: 0.88, label: 'Big Buck Bunny (Sound)' },
         },
         {
           id: 'clip-c',
@@ -45,8 +48,8 @@ const initialProtocol: IVideoProtocol = {
           type: 'image',
           format: 'img',
           url: swatches.alt,
-          startTime: 6000,
-          endTime: 9000,
+          startTime: 13000,
+          endTime: 16000,
           opacity: 1,
           extra: { aiTag: 'ending', confidence: 0.91, label: 'Clip C' },
         },
@@ -71,7 +74,7 @@ const initialProtocol: IVideoProtocol = {
           id: 'caption-1',
           segmentType: 'text',
           startTime: 0,
-          endTime: 9000,
+          endTime: 16000,
           opacity: 0.9,
           texts: [{ content: '你好，随便拖动时间轴', fontSize: 24, fill: 'rgba(248,250,252,1)' }],
           transform: {
@@ -80,6 +83,23 @@ const initialProtocol: IVideoProtocol = {
             scale: [1, 1, 1],
           },
           extra: { author: 'demo-bot' },
+        },
+      ],
+    },
+    {
+      trackId: 'audio-track',
+      trackType: 'audio',
+      children: [
+        {
+          id: 'audio-1',
+          segmentType: 'audio',
+          url: swatches.audio,
+          startTime: 0,
+          endTime: 16000,
+          volume: 0.5,
+          fadeInDuration: 500,
+          fadeOutDuration: 500,
+          playRate: 1,
         },
       ],
     },
@@ -167,7 +187,7 @@ onMounted(async () => {
     const instance = await createRenderer({
       protocol,
       autoPlay: true,
-      videoSourceMode: 'mp4clip',
+      videoSourceMode: 'auto',
       appOptions: {
         resizeTo: host ?? window,
         background: '#0f172a',
@@ -411,6 +431,17 @@ function handleAddSegmentClick(data: {
       commands.addSegment(newSegment, track.trackId)
       break
     }
+    case 'audio': {
+      const newSegment: Omit<IAudioSegment, 'id'> = {
+        segmentType: 'audio',
+        url: swatches.audio,
+        startTime: 0,
+        endTime: duration,
+        volume: 1,
+      }
+      commands.addSegment(newSegment, track.trackId)
+      break
+    }
     default:
       console.warn(`Adding segments to track type "${track.trackType}" is not implemented.`)
       return
@@ -468,7 +499,7 @@ function handleAddSegmentClick(data: {
           class="flex-1"
           :protocol="protocol"
           :current-time="currentTimeMs"
-          :track-types="['frames', 'text']"
+          :track-types="['frames', 'text', 'audio']"
           @update:current-time="handleTimelineCurrentTime"
           @segment-click="handleTimelineSegmentClick"
           @segment-drag-end="handleSegmentDragEnd"

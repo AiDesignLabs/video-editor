@@ -16,7 +16,7 @@ import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
 import type { SegmentDragPayload, SegmentLayout, SegmentResizePayload, TimelineTrack } from '../VideoTimeline/types'
 import { computed, reactive, ref, watch, watchEffect } from 'vue'
 import VideoTimeline from '../VideoTimeline/index.vue'
-import { FramesSegment, SegmentBase } from './segments'
+import { AudioSegment, FramesSegment, SegmentBase } from './segments'
 
 defineOptions({ name: 'VideoEditorTimeline' })
 
@@ -274,7 +274,7 @@ function handleAddSegment({ track, startTime, endTime, event }: { track: Timelin
             </template>
             <template v-else-if="segment.segmentType === 'audio'">
               <slot name="segment-audio" :segment="segment as IAudioSegment" :layout="layout">
-                <SegmentBase :segment="segment" :track-type="layout.track.type || 'unknown'" :accent-color="layout.track.color" />
+                <AudioSegment :segment="segment as IAudioSegment" />
               </slot>
             </template>
             <template v-else-if="segment.segmentType === 'effect'">

@@ -6,7 +6,13 @@ export {
   generateThumbnails,
   getResourceKey,
   getMp4Meta,
+  extractWaveform,
+  extractWaveformFromBuffer,
+  clearWaveformCache,
+  peaksToSvgPath,
+  peaksToBars,
 } from './resource'
+export type { WaveformData, WaveformOptions } from './resource'
 export {
   fileTo,
   fileToMP4Samples,

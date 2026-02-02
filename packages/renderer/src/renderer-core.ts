@@ -16,6 +16,7 @@ import { MP4Clip } from '@webav/av-cliper'
 import { file as opfsFile } from 'opfs-tools'
 import { Container, Sprite, Texture } from 'pixi.js'
 import { createApp as create2dApp } from './2d'
+import { AudioManager } from './audio-manager'
 import {
   applyDisplayProps,
   clamp,
@@ -52,6 +53,12 @@ export interface Renderer {
   tick: (deltaMs?: number) => void
   seek: (time: number) => void
   renderAt: (time: number) => Promise<void>
+  destroy: () => void
+}
+
+interface AudioManagerApi {
+  sync: (currentTime: number, isPlaying: boolean) => void | Promise<void>
+  ensureMp4Audio: (id: string, clip: MP4Clip, startUs: number, fps: number) => void
   destroy: () => void
 }
 
@@ -106,10 +113,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     }
   )
   const videoEntries = new Map<string, VideoEntry>()
+  const videoObjectUrls = new Map<HTMLVideoElement, string>()
 
   const currentTime = ref(0)
   const isPlaying = ref(false)
   const duration = computed(() => computeDuration(validatedProtocol.value))
+  const audioManager: AudioManagerApi = new AudioManager(validatedProtocol.value) as unknown as AudioManagerApi
 
   let rafId: number | undefined
   let lastTickAt = 0
@@ -130,6 +139,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     const active = collectActiveSegments(protocol, renderAt)
     const stageWidth = task.app.renderer.width
     const stageHeight = task.app.renderer.height
+
+    audioManager.sync(at, isPlaying.value)
 
     const renders: (PixiDisplayObject | undefined)[] = []
     for (const { segment } of active) {
@@ -440,6 +451,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         return undefined
       })
       if (spriteFromClip) {
+        console.info('[renderer] video source: mp4clip', segment.url)
         videoEntries.set(segment.id, spriteFromClip)
         return spriteFromClip.sprite
       }
@@ -451,6 +463,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         return undefined
       })
       if (spriteFromElement) {
+        console.info('[renderer] video source: element', segment.url)
         videoEntries.set(segment.id, spriteFromElement)
         return spriteFromElement.sprite
       }
@@ -498,6 +511,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
             }
             res.video.close()
           }
+          // Play audio directly from tick result (avoid calling tick twice)
+          if (isPlaying.value && res.audio && res.audio.length > 0) {
+            const sampleRate = (entry.clip as { meta?: { audioSampleRate?: number } }).meta?.audioSampleRate ?? 48000;
+            (audioManager as unknown as { playMp4AudioFrames: (id: string, audio: Float32Array[], sampleRate: number) => void })
+              .playMp4AudioFrames(segment.id, res.audio as Float32Array[], sampleRate)
+          }
           return
         }
         catch (err) {
@@ -532,6 +551,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       await updateVideoElementFrame(entry, {
         targetSec: relativeSec,
         playbackRate: segment.playRate ?? 1,
+        volume: segment.volume ?? 1,
       })
     }
     catch (err) {
@@ -572,6 +592,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       && typeof segment.url === 'string'
       && isRenderableVideoUrl(segment.url)
   }
+
 
   function normalizeRenderTime(protocol: IVideoProtocol, at: number) {
     const total = computeDuration(protocol)
@@ -637,6 +658,11 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       return
 
     entry.video.pause()
+    const objectUrl = videoObjectUrls.get(entry.video)
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl)
+      videoObjectUrls.delete(entry.video)
+    }
     entry.video.removeAttribute('src')
     entry.video.load()
   }
@@ -670,8 +696,13 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   async function loadVideoSpriteViaMP4Clip(url: string, reuse?: { sprite: Sprite, oldTexture?: Texture }): Promise<VideoEntry | undefined> {
     let file: ReturnType<typeof opfsFile> | undefined
-    if (shouldUseResourceManager(url))
+    if (shouldUseResourceManager(url)) {
       file = await getOpfsFile(url)
+      if (!file) {
+        await resourceManager.add(url).catch(() => {})
+        file = await getOpfsFile(url)
+      }
+    }
 
     let clip: MP4Clip | undefined
     try {
@@ -680,12 +711,15 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       }
       else {
         const res = await fetch(url)
-        if (!res.body)
-          return undefined
-        if (shouldUseResourceManager(url)) {
-          const [clipStream, cacheStream] = res.body.tee()
-          resourceManager.add(url, { body: cacheStream }).catch(() => {})
-          clip = new MP4Clip(clipStream)
+        if (!res.body) {
+          const buffer = await res.arrayBuffer()
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array(buffer))
+              controller.close()
+            },
+          })
+          clip = new MP4Clip(stream)
         }
         else {
           clip = new MP4Clip(res.body)
@@ -736,16 +770,22 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   async function loadVideoSpriteViaElement(url: string, reuse?: { sprite: Sprite, oldTexture?: Texture }): Promise<VideoEntry | undefined> {
     const video = document.createElement('video')
     video.crossOrigin = 'anonymous'
-    video.muted = true
+    video.muted = false
     video.playsInline = true
-    video.preload = 'auto'
+    video.preload = 'metadata'
     video.src = url
+    video.load()
 
     try {
-      await waitForMediaEvent(video, 'loadedmetadata', 4000)
+      await waitForMediaEvent(video, 'loadedmetadata', 15000)
     }
     catch (err) {
       video.pause()
+      const objectUrl = videoObjectUrls.get(video)
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+        videoObjectUrls.delete(video)
+      }
       video.removeAttribute('src')
       video.load()
       throw err
@@ -767,27 +807,32 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     return { kind: 'element', video, canvas, texture, sprite, meta: { width, height } }
   }
 
-  async function updateVideoElementFrame(entry: Extract<VideoEntry, { kind: 'element' }>, opts: { targetSec: number, playbackRate: number }) {
+
+  async function updateVideoElementFrame(entry: Extract<VideoEntry, { kind: 'element' }>, opts: { targetSec: number, playbackRate: number, volume?: number }) {
     const { video, canvas, texture } = entry
 
     video.playbackRate = Number.isFinite(opts.playbackRate) && opts.playbackRate > 0 ? opts.playbackRate : 1
+    video.volume = Math.max(0, Math.min(1, opts.volume ?? 1))
+
     if (isPlaying.value)
       video.play().catch(() => {})
     else
       video.pause()
 
+    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null
+    const targetSec = duration ? Math.min(opts.targetSec, Math.max(duration - 0.03, 0)) : opts.targetSec
+
     const current = video.currentTime
-    const drift = Math.abs(current - opts.targetSec)
+    const drift = Math.abs(current - targetSec)
     const driftThreshold = isPlaying.value ? 0.25 : 0.03
     if (Number.isFinite(current) && drift > driftThreshold) {
       try {
-        video.currentTime = opts.targetSec
+        video.currentTime = targetSec
       }
       catch {
         // ignore seek errors for not-yet-ready media
       }
-      if (!isPlaying.value)
-        await waitForMediaEvent(video, 'seeked', 250).catch(() => {})
+      await waitForMediaEvent(video, 'seeked', 250).catch(() => {})
     }
 
     if (video.readyState < 2) {
@@ -839,6 +884,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     resourceWarmUp.clear()
     if (!opts.app)
       app.destroy()
+    
+    audioManager.destroy()
   }
 
   if (opts.autoPlay)
