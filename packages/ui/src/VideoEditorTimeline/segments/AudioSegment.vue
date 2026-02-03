@@ -130,47 +130,57 @@ const waveformDisplay = computed(() => {
 
 <template>
   <div ref="containerRef" class="audio-segment">
-    <div
-      class="audio-segment__waveform"
-      :style="{ width: `${waveformDisplay.coveragePercent}%` }"
-    >
-      <template v-if="waveformState.data && waveformDisplay.peaks.length">
+    <!-- Waveform with data -->
+    <template v-if="waveformState.data && waveformDisplay.peaks.length">
+      <slot
+        name="waveform"
+        :segment="segment"
+        :waveform="waveformState.data"
+        :peaks="waveformDisplay.peaks"
+        :coverage-percent="waveformDisplay.coveragePercent"
+      >
         <div
-          v-for="(peak, index) in waveformDisplay.peaks"
-          :key="index"
-          class="waveform-bar"
-          :style="{
-            height: `${Math.max(4, peak * 80)}%`,
-          }"
-        />
-      </template>
-      <template v-else-if="waveformState.loading">
-        <div class="waveform-placeholder">
-          <span>加载波形…</span>
+          class="audio-segment__waveform"
+          :style="{ width: `${waveformDisplay.coveragePercent}%` }"
+        >
+          <div
+            v-for="(peak, index) in waveformDisplay.peaks"
+            :key="index"
+            class="waveform-bar"
+            :style="{
+              height: `${Math.max(4, peak * 80)}%`,
+            }"
+          />
         </div>
-      </template>
-      <template v-else-if="waveformState.error">
-        <div class="waveform-placeholder">
-          <span>波形加载失败</span>
-        </div>
-      </template>
-      <template v-else>
+      </slot>
+    </template>
+
+    <!-- Placeholder states -->
+    <div v-else class="audio-segment__placeholder">
+      <slot v-if="waveformState.loading" name="loading" :segment="segment">
+        <span>加载波形…</span>
+      </slot>
+      <slot v-else-if="waveformState.error" name="error" :segment="segment" :error="waveformState.error">
+        <span>波形加载失败</span>
+      </slot>
+      <slot v-else name="empty" :segment="segment">
         <div class="waveform-pattern" />
-      </template>
+      </slot>
     </div>
-    <div class="audio-segment__info">
-      <span class="audio-segment__label">
-        {{ segment.extra?.label || 'Audio' }}
+
+    <!-- Overlay (badge, labels, etc.) -->
+    <slot name="overlay" :segment="segment">
+      <span v-if="segment.extra?.label" class="audio-segment__badge">
+        {{ segment.extra?.label }}
       </span>
-    </div>
+    </slot>
   </div>
 </template>
 
 <style scoped>
 :where(.audio-segment) {
   --at-apply: relative flex items-center w-full h-full overflow-hidden rounded-4px;
-  background-color: color-mix(in srgb, var(--ve-segment-accent, #0ea5e9) 15%, transparent);
-  border: 1px solid color-mix(in srgb, var(--ve-segment-accent, #0ea5e9) 30%, transparent);
+  background-color: #EFEFEF;
 }
 
 :where(.audio-segment .audio-segment__waveform) {
@@ -183,14 +193,13 @@ const waveformDisplay = computed(() => {
   min-width: 1px;
   max-width: 4px;
   min-height: 4px;
-  background-color: var(--ve-segment-accent, #0ea5e9);
+  background-color: #2B2B2B;
   border-radius: 1px;
-  opacity: 0.6;
 }
 
-:where(.audio-segment .waveform-placeholder) {
+:where(.audio-segment .audio-segment__placeholder) {
   --at-apply: flex items-center justify-center w-full h-full text-xs;
-  color: var(--ve-segment-accent, #0ea5e9);
+  color: #2B2B2B;
   opacity: 0.6;
 }
 
@@ -200,8 +209,8 @@ const waveformDisplay = computed(() => {
   background-image: linear-gradient(
     90deg,
     transparent 45%,
-    var(--ve-segment-accent, #0ea5e9) 45%,
-    var(--ve-segment-accent, #0ea5e9) 55%,
+    #2B2B2B 45%,
+    #2B2B2B 55%,
     transparent 55%
   );
   background-size: 4px 100%;
@@ -216,9 +225,11 @@ const waveformDisplay = computed(() => {
   opacity: 0.4;
 }
 
-:where(.audio-segment .audio-segment__info) {
-  --at-apply: relative z-10 px-2 py-1 text-xs font-medium truncate;
-  color: var(--ve-segment-accent, #0ea5e9);
-  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+:where(.audio-segment .audio-segment__badge) {
+  --at-apply: absolute top-1.5 left-2 px-1.5 py-0.5 text-[11px] rounded-4px pointer-events-none;
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
+  transform-origin: left top;
+  transform: scale(0.9);
 }
 </style>

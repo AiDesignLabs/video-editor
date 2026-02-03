@@ -99,6 +99,7 @@ const initialProtocol: IVideoProtocol = {
           fadeInDuration: 100,
           fadeOutDuration: 100,
           playRate: 1,
+          extra: { label: 'Audio' },
         },
       ],
     },
