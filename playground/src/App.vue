@@ -11,8 +11,7 @@ const swatches = {
   primary: 'https://dummyimage.com/1280x720/6aa7ff/ffffff.png&text=Clip+A',
   alt: 'https://dummyimage.com/1280x720/f97316/ffffff.png&text=Clip+C',
   video: 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-  // Local music sample with clear frequency variations (~3min)
-  audio: `${window.location.origin}/test-music.mp3`,
+  audio: `${window.location.origin}/test-music-3s.mp3`,
   extra: 'https://dummyimage.com/1280x720/22c55e/ffffff.png&text=Clip+D',
 }
 
@@ -96,9 +95,9 @@ const initialProtocol: IVideoProtocol = {
           url: swatches.audio,
           startTime: 0,
           endTime: 16000,
-          volume: 0.5,
-          fadeInDuration: 500,
-          fadeOutDuration: 500,
+          volume: 1,
+          fadeInDuration: 100,
+          fadeOutDuration: 100,
           playRate: 1,
         },
       ],
@@ -186,7 +185,7 @@ onMounted(async () => {
     const host = canvasHost.value
     const instance = await createRenderer({
       protocol,
-      autoPlay: true,
+      autoPlay: false,
       videoSourceMode: 'auto',
       appOptions: {
         resizeTo: host ?? window,
@@ -198,7 +197,6 @@ onMounted(async () => {
 
     if (host)
       host.replaceChildren(instance.app.canvas)
-    instance.play()
   }
   catch (err) {
     error.value = err instanceof Error ? err.message : String(err)

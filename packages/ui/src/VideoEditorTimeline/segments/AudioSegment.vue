@@ -65,8 +65,11 @@ async function loadWaveform(url: string) {
   waveformState.error = null
 
   try {
-    // Use fixed sample count (200) for consistent caching
-    const data = await extractWaveform(url, { samples: 200 })
+    // Use 1000 samples as a good balance:
+    // - Provides enough detail for long audio files (up to ~5min)
+    // - Not too heavy for processing/memory (~4KB of data)
+    // - Cached per URL so only computed once
+    const data = await extractWaveform(url, { samples: 1000 })
     if (currentJobId !== jobId)
       return
 

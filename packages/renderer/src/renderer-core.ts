@@ -288,6 +288,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (rafId !== undefined)
       cancelAnimationFrame(rafId)
     rafId = undefined
+    // Stop audio immediately when pausing
+    audioManager.sync(currentTime.value, false)
     if (opts.freezeOnPause !== false)
       freezeVideoEntries()
   }

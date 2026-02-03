@@ -10,6 +10,8 @@ interface ClipEntry {
 
 interface LoopState {
   stop: () => void
+  sources: AudioBufferSourceNode[]
+  isStopped: () => boolean
 }
 
 interface AudioLoopContext {
@@ -29,6 +31,7 @@ interface Mp4State {
 export class AudioManager {
   private protocol: IVideoProtocol
   private clips = new Map<string, ClipEntry>()
+  private loadingClips = new Map<string, Promise<ClipEntry | undefined>>()
   private audioLoops = new Map<string, LoopState>()
   private audioLoopContexts = new Map<string, AudioLoopContext>()
   private mp4Loops = new Map<string, LoopState>()
@@ -45,8 +48,8 @@ export class AudioManager {
 
   public async sync(currentTime: number, isPlaying: boolean) {
     if (!isPlaying) {
-      if (this.lastTime !== currentTime)
-        this.stopAll()
+      // Always stop all audio when paused
+      this.stopAll()
       this.lastTime = currentTime
       return
     }
@@ -77,6 +80,16 @@ export class AudioManager {
     for (const [key, loop] of this.audioLoops) {
       if (!activeAudioKeys.has(key)) {
         loop.stop()
+        // Stop all audio buffer sources
+        for (const source of loop.sources) {
+          try {
+            source.stop()
+            source.disconnect()
+          }
+          catch (e) {
+            // Source may already be stopped or disconnected
+          }
+        }
         this.audioLoops.delete(key)
         this.audioLoopContexts.delete(key)
         this.audioGains.delete(key)
@@ -86,6 +99,16 @@ export class AudioManager {
     for (const [key, loop] of this.mp4Loops) {
       if (!activeVideoKeys.has(key)) {
         loop.stop()
+        // Stop all audio buffer sources
+        for (const source of loop.sources) {
+          try {
+            source.stop()
+            source.disconnect()
+          }
+          catch (e) {
+            // Source may already be stopped or disconnected
+          }
+        }
         this.mp4Loops.delete(key)
         this.mp4States.delete(key)
         this.mp4Gains.delete(key)
@@ -120,7 +143,7 @@ export class AudioManager {
     let state = this.mp4States.get(key)
     if (!state) {
       state = {
-        loop: { stop: () => {} },
+        loop: { stop: () => {}, sources: [], isStopped: () => false },
         startUs: 0,
         startCtxTime: this.ctx.currentTime,
         fps: 30,
@@ -130,7 +153,7 @@ export class AudioManager {
     }
 
     // Play the audio frames
-    state.nextStartAt = this.playFrames(audio, sampleRate, state.nextStartAt ?? 0, gainNode)
+    state.nextStartAt = this.playFrames(audio, sampleRate, state.nextStartAt ?? 0, gainNode, state.loop.sources)
   }
 
   /**
@@ -152,6 +175,16 @@ export class AudioManager {
     const state = this.mp4States.get(key)
     if (state) {
       state.loop.stop()
+      // Stop all audio buffer sources
+      for (const source of state.loop.sources) {
+        try {
+          source.stop()
+          source.disconnect()
+        }
+        catch (e) {
+          // Source may already be stopped or disconnected
+        }
+      }
       this.mp4Loops.delete(key)
       this.mp4States.delete(key)
       this.mp4Gains.delete(key)
@@ -175,6 +208,16 @@ export class AudioManager {
       if (Math.abs(expectedUs - startUs) < 150000 && existing.fps === fps)
         return
       existing.loop.stop()
+      // Stop all audio buffer sources
+      for (const source of existing.loop.sources) {
+        try {
+          source.stop()
+          source.disconnect()
+        }
+        catch (e) {
+          // Source may already be stopped or disconnected
+        }
+      }
       this.mp4Loops.delete(key)
       this.mp4States.delete(key)
     }
@@ -198,14 +241,57 @@ export class AudioManager {
   }
 
   private stopAll() {
-    for (const loop of this.audioLoops.values())
+    for (const loop of this.audioLoops.values()) {
       loop.stop()
-    for (const loop of this.mp4Loops.values())
+      // Stop all audio buffer sources immediately
+      for (const source of loop.sources) {
+        try {
+          source.stop(0)
+          source.disconnect()
+        }
+        catch (e) {
+          // Source may already be stopped or disconnected
+        }
+      }
+      loop.sources.length = 0
+    }
+    for (const loop of this.mp4Loops.values()) {
       loop.stop()
+      // Stop all audio buffer sources immediately
+      for (const source of loop.sources) {
+        try {
+          source.stop(0)
+          source.disconnect()
+        }
+        catch (e) {
+          // Source may already be stopped or disconnected
+        }
+      }
+      loop.sources.length = 0
+    }
+    // Disconnect all gain nodes to completely silence audio
+    for (const gain of this.audioGains.values()) {
+      try {
+        gain.disconnect()
+      }
+      catch (e) {
+        // Gain may already be disconnected
+      }
+    }
+    for (const gain of this.mp4Gains.values()) {
+      try {
+        gain.disconnect()
+      }
+      catch (e) {
+        // Gain may already be disconnected
+      }
+    }
     this.audioLoops.clear()
     this.audioLoopContexts.clear()
+    this.audioGains.clear()
     this.mp4Loops.clear()
     this.mp4States.clear()
+    this.mp4Gains.clear()
   }
 
   private async ensureAudioLoop(segment: IAudioSegment, currentTime: number) {
@@ -224,11 +310,22 @@ export class AudioManager {
     // Apply fade in/out to gain
     this.applyFadeToGain(segment, relativeMs, gainNode)
 
-    if (this.audioLoops.has(key)) {
-      // Update volume with fade
+    const existingLoop = this.audioLoops.get(key)
+    if (existingLoop && !existingLoop.isStopped()) {
+      // Loop is still running, just update volume with fade
       return
     }
-    const loop = this.startAudioLoop(entry.clip, Math.max(0, sourceOffsetMs) * 1000, gainNode, playRate)
+    // Clean up stopped loop if exists
+    if (existingLoop) {
+      this.audioLoops.delete(key)
+      this.audioLoopContexts.delete(key)
+    }
+    // Calculate segment duration in microseconds
+    const segmentDurationMs = segment.endTime - segment.startTime
+    const sourceDurationMs = segmentDurationMs * playRate
+    const maxSourceOffsetMs = offset + sourceDurationMs
+
+    const loop = this.startAudioLoop(entry.clip, Math.max(0, sourceOffsetMs) * 1000, gainNode, playRate, maxSourceOffsetMs * 1000)
     this.audioLoops.set(key, loop)
     this.audioLoopContexts.set(key, {
       segment,
@@ -266,6 +363,7 @@ export class AudioManager {
     let first = true
     const stepUs = Math.round((1000 / Math.max(fps || 30, 1)) * 1000)
     const sampleRate = this.getClipSampleRate(clip)
+    const sources: AudioBufferSourceNode[] = []
 
     const timer = window.setInterval(async () => {
       if (stopped)
@@ -281,23 +379,26 @@ export class AudioManager {
       const len = audio?.[0]?.length ?? 0
       if (len === 0)
         return
-      startAt = this.playFrames(audio as Float32Array[], sampleRate, startAt, gainNode)
+      startAt = this.playFrames(audio as Float32Array[], sampleRate, startAt, gainNode, sources)
     }, Math.round(1000 / Math.max(fps || 30, 1)))
 
     return {
+      sources,
       stop: () => {
         stopped = true
         window.clearInterval(timer)
       },
+      isStopped: () => stopped,
     }
   }
 
-  private startAudioLoop(clip: AudioClip, startUs: number, gainNode: GainNode, playRate: number = 1): LoopState {
+  private startAudioLoop(clip: AudioClip, startUs: number, gainNode: GainNode, playRate: number = 1, maxSourceOffsetUs?: number): LoopState {
     let stopped = false
     let timeUs = startUs
     let startAt = 0
     let initialized = false
     const sampleRate = this.getClipSampleRate(clip)
+    const sources: AudioBufferSourceNode[] = []
     // Each iteration fetches 100ms of real-time audio
     // For playRate != 1, we need to fetch more/less source audio
     const realTimeStepUs = 100000
@@ -316,25 +417,51 @@ export class AudioManager {
       }
 
       timeUs += sourceStepUs
-      const { audio, state } = await clip.tick(timeUs)
-      if (state === 'done')
+
+      // Check if we've reached the maximum duration for this segment
+      if (maxSourceOffsetUs !== undefined && timeUs > maxSourceOffsetUs) {
+        stopped = true
         return
+      }
+
+      const { audio, state } = await clip.tick(timeUs)
+
+      // Check stopped flag immediately after async operation
+      if (stopped)
+        return
+
+      // Stop when audio file ends (don't loop)
+      if (state === 'done') {
+        stopped = true
+        return
+      }
       const len = audio?.[0]?.length ?? 0
-      if (len === 0)
-        return play()
+      if (len === 0) {
+        // No audio data - either at silence or past end of file
+        // Stop playing to avoid infinite loop
+        stopped = true
+        return
+      }
       // Adjust playback rate by resampling if playRate !== 1
       const processedAudio = playRate !== 1
         ? this.resampleForPlayRate(audio as Float32Array[], playRate)
         : audio as Float32Array[]
-      startAt = this.playFrames(processedAudio, sampleRate, startAt, gainNode)
-      return play()
+      startAt = this.playFrames(processedAudio, sampleRate, startAt, gainNode, sources)
+
+      // Check stopped before recursing
+      if (!stopped) {
+        // Use setTimeout to avoid deep call stack and allow stop to interrupt
+        setTimeout(() => play(), 0)
+      }
     }
 
     play()
     return {
+      sources,
       stop: () => {
         stopped = true
       },
+      isStopped: () => stopped,
     }
   }
 
@@ -360,7 +487,7 @@ export class AudioManager {
     })
   }
 
-  private playFrames(audio: Float32Array[], sampleRate: number, startAt: number, gainNode: GainNode) {
+  private playFrames(audio: Float32Array[], sampleRate: number, startAt: number, gainNode: GainNode, sources?: AudioBufferSourceNode[]) {
     const channels = Math.max(audio.length, 1)
     const len = audio[0]?.length ?? 0
     if (len === 0)
@@ -375,6 +502,20 @@ export class AudioManager {
     source.connect(gainNode)
     const nextStart = Math.max(this.ctx.currentTime, startAt)
     source.start(nextStart)
+
+    // Track the source so it can be stopped later
+    if (sources) {
+      sources.push(source)
+      // Clean up finished sources after they complete
+      const duration = buffer.duration * 1000
+      setTimeout(() => {
+        const index = sources.indexOf(source)
+        if (index > -1) {
+          sources.splice(index, 1)
+        }
+      }, duration + 100)
+    }
+
     return nextStart + buffer.duration
   }
 
@@ -401,28 +542,46 @@ export class AudioManager {
   }
 
   private async loadClip(segment: IAudioSegment): Promise<ClipEntry | undefined> {
+    // Check if already loaded
     const cached = this.clips.get(segment.id)
     if (cached)
       return cached
-    try {
-      const response = await fetch(segment.url)
-      if (!response.body)
-        return
-      const clip = new WebAVAudioClip(response.body)
-      const entry: ClipEntry = { clip, ready: clip.ready }
-      this.clips.set(segment.id, entry)
-      await clip.ready
-      if (!this.findSegmentInProtocol(segment.id)) {
-        clip.destroy()
-        this.clips.delete(segment.id)
-        return
+
+    // Check if currently loading
+    const loading = this.loadingClips.get(segment.id)
+    if (loading)
+      return loading
+
+    // Start loading and cache the promise immediately
+    const loadingPromise = (async () => {
+      try {
+        const response = await fetch(segment.url)
+        if (!response.body) {
+          this.loadingClips.delete(segment.id)
+          return undefined
+        }
+        const clip = new WebAVAudioClip(response.body)
+        const entry: ClipEntry = { clip, ready: clip.ready }
+        await clip.ready
+        if (!this.findSegmentInProtocol(segment.id)) {
+          clip.destroy()
+          this.loadingClips.delete(segment.id)
+          return undefined
+        }
+        // Move from loading to loaded
+        this.clips.set(segment.id, entry)
+        this.loadingClips.delete(segment.id)
+        return entry
       }
-      return entry
-    }
-    catch (e) {
-      console.error(`[AudioManager] Failed to load audio ${segment.url}`, e)
-      return
-    }
+      catch (e) {
+        console.error(`[AudioManager] Failed to load audio ${segment.url}`, e)
+        this.loadingClips.delete(segment.id)
+        return undefined
+      }
+    })()
+
+    this.loadingClips.set(segment.id, loadingPromise)
+    return loadingPromise
   }
 
   private findSegmentInProtocol(id: string): boolean {
