@@ -9,6 +9,9 @@ declare module '@video-editor/shared' {
     }
     text: {
       author?: string
+    },
+    audio: {
+      label?: string
     }
   }
 
