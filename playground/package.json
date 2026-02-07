@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "starry dev",
-    "build": "vue-tsc --noEmit --project ./tsconfig.app.json && starry build",
+    "build": "pnpm -C .. exec vue-tsc --noEmit --project ./playground/tsconfig.app.json && starry build",
     "preview": "starry preview"
   },
   "dependencies": {
