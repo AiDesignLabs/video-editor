@@ -1,6 +1,6 @@
 {
   "name": "video-editor-monorepo",
-  "version": "0.0.1-beta.27",
+  "version": "0.0.1-beta.28",
   "private": true,
   "engines": {
     "node": ">=16.14"
@@ -12,7 +12,8 @@
     "lint:fix": "pnpm run lint --fix",
     "check": "tsc --incremental --noEmit",
     "check:reactivity": "node scripts/check-reactivity.mjs",
-    "publish": "bumpp package.json packages/*/package.json --commit --push --tag && pnpm run build && pnpm publish -r --access public --no-git-checks",
+    "publish:ensure-login": "node scripts/ensure-npm-login.mjs",
+    "publish": "pnpm run publish:ensure-login && bumpp package.json packages/*/package.json --commit --push --tag && pnpm run build && pnpm publish -r --access public --no-git-checks",
     "test": "pnpm -r run test",
     "test:protocol": "pnpm -C packages/protocol run test:ui",
     "preinstall": "npx only-allow pnpm",
