@@ -3,6 +3,7 @@ import type { IAudioSegment } from '@video-editor/shared'
 import type { WaveformData } from '@video-editor/protocol'
 import { extractWaveform } from '@video-editor/protocol'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import WaveformCanvasStrip from './WaveformCanvasStrip.vue'
 
 defineOptions({ name: 'AudioSegment' })
 
@@ -16,6 +17,7 @@ let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
   if (containerRef.value) {
+    containerWidth.value = containerRef.value.clientWidth
     resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         containerWidth.value = entry.contentRect.width
@@ -85,10 +87,36 @@ async function loadWaveform(url: string) {
   }
 }
 
+const WAVEFORM_BAR_MIN_WIDTH = 1
+const WAVEFORM_BAR_GAP = 1
+const MAX_WAVEFORM_BARS = 4096
+
+function downsamplePeaks(peaks: number[], targetCount: number) {
+  if (targetCount >= peaks.length)
+    return peaks
+
+  const nextPeaks: number[] = []
+  const windowSize = peaks.length / targetCount
+
+  for (let i = 0; i < targetCount; i++) {
+    const start = Math.floor(i * windowSize)
+    const end = Math.max(start + 1, Math.ceil((i + 1) * windowSize))
+    let maxPeak = 0
+    for (let j = start; j < end; j++) {
+      const peak = peaks[j] ?? 0
+      if (peak > maxPeak)
+        maxPeak = peak
+    }
+    nextPeaks.push(maxPeak)
+  }
+
+  return nextPeaks
+}
+
 // Compute visible peaks and coverage based on segment trim settings
 const waveformDisplay = computed(() => {
   if (!waveformState.data)
-    return { peaks: [], coveragePercent: 100 }
+    return { peaks: [], renderPeaks: [], coveragePercent: 100 }
 
   const segment = props.segment
   const fullDurationMs = waveformState.data.duration * 1000
@@ -124,32 +152,48 @@ const waveformDisplay = computed(() => {
     Math.min(peaks.length, endIdx),
   )
 
-  return { peaks: visiblePeaks, coveragePercent }
+  if (!visiblePeaks.length)
+    return { peaks: [], renderPeaks: [], coveragePercent }
+
+  const renderWidth = containerWidth.value * (coveragePercent / 100)
+  const barsByWidth = renderWidth > 0
+    ? Math.min(
+        MAX_WAVEFORM_BARS,
+        Math.max(1, Math.floor(renderWidth / (WAVEFORM_BAR_MIN_WIDTH + WAVEFORM_BAR_GAP))),
+      )
+    : visiblePeaks.length
+
+  return {
+    peaks: visiblePeaks,
+    renderPeaks: downsamplePeaks(visiblePeaks, barsByWidth),
+    coveragePercent,
+  }
 })
 </script>
 
 <template>
   <div ref="containerRef" class="audio-segment">
     <!-- Waveform with data -->
-    <template v-if="waveformState.data && waveformDisplay.peaks.length">
+    <template v-if="waveformState.data && waveformDisplay.renderPeaks.length">
       <slot
         name="waveform"
         :segment="segment"
         :waveform="waveformState.data"
-        :peaks="waveformDisplay.peaks"
+        :peaks="waveformDisplay.renderPeaks"
+        :raw-peaks="waveformDisplay.peaks"
         :coverage-percent="waveformDisplay.coveragePercent"
       >
         <div
           class="audio-segment__waveform"
           :style="{ width: `${waveformDisplay.coveragePercent}%` }"
         >
-          <div
-            v-for="(peak, index) in waveformDisplay.peaks"
-            :key="index"
-            class="waveform-bar"
-            :style="{
-              height: `${Math.max(4, peak * 80)}%`,
-            }"
+          <WaveformCanvasStrip
+            class="audio-segment__waveform-canvas"
+            :peaks="waveformDisplay.renderPeaks"
+            bar-color="#2B2B2B"
+            :min-bar-height="4"
+            :max-bar-width="4"
+            :bar-gap="1"
           />
         </div>
       </slot>
@@ -184,17 +228,12 @@ const waveformDisplay = computed(() => {
 }
 
 :where(.audio-segment .audio-segment__waveform) {
-  --at-apply: absolute top-0 bottom-0 left-0 flex items-center justify-start gap-[1px] px-1;
+  --at-apply: absolute top-0 bottom-0 left-0 flex items-center justify-start gap-[1px];
   overflow: hidden;
 }
 
-:where(.audio-segment .waveform-bar) {
-  --at-apply: flex-1;
-  min-width: 1px;
-  max-width: 4px;
-  min-height: 4px;
-  background-color: #2B2B2B;
-  border-radius: 1px;
+:where(.audio-segment .audio-segment__waveform-canvas) {
+  --at-apply: w-full h-full;
 }
 
 :where(.audio-segment .audio-segment__placeholder) {
