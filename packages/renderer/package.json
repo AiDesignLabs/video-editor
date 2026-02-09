@@ -17,7 +17,8 @@
   "scripts": {
     "build": "vite build",
     "build:types": "vue-tsc --declaration --emitDeclarationOnly",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run --config ./vitest.config.ts"
   },
   "peerDependencies": {
     "@vue/reactivity": "catalog:"

@@ -46,6 +46,10 @@ export class AudioManager {
     this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
   }
 
+  public setProtocol(protocol: IVideoProtocol) {
+    this.protocol = protocol
+  }
+
   public async sync(currentTime: number, isPlaying: boolean) {
     if (!isPlaying) {
       // Always stop all audio when paused

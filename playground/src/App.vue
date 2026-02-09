@@ -182,6 +182,7 @@ const composeSourcePreview = computed(() => {
 })
 
 onMounted(async () => {
+  window.addEventListener('keydown', handleGlobalKeydown)
   try {
     const host = canvasHost.value
     const instance = await createRenderer({
@@ -208,6 +209,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
   renderer.value?.destroy()
   clearThumbnails()
   clearComposeOutput()
@@ -241,6 +243,36 @@ function togglePlay() {
     inst.pause()
   else
     inst.play()
+}
+
+function removeSelectedSegment() {
+  const id = selectedSegmentId.value
+  if (!id)
+    return
+
+  const result = commands.removeSegment(id)
+  if (result.success)
+    commands.setSelectedSegment(undefined)
+}
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (event.defaultPrevented || event.isComposing)
+    return
+
+  const target = event.target as HTMLElement | null
+  const tagName = target?.tagName
+  const isEditable = target?.isContentEditable
+    || tagName === 'INPUT'
+    || tagName === 'TEXTAREA'
+    || tagName === 'SELECT'
+
+  if (isEditable)
+    return
+
+  if ((event.key === 'Delete' || event.key === 'Backspace') && selectedSegmentId.value) {
+    event.preventDefault()
+    removeSelectedSegment()
+  }
 }
 
 function seekTo(time: number | Ref<number>) {
@@ -522,6 +554,9 @@ function handleAddSegmentClick(data: {
         </button>
         <button class="btn ghost" :disabled="!renderer" @click="seekTo(durationMs)">
           跳到末尾
+        </button>
+        <button class="btn ghost" :disabled="!selectedSegmentId" @click="removeSelectedSegment">
+          删除选中片段
         </button>
       </div>
     </section>

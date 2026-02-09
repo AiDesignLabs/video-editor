@@ -57,6 +57,7 @@ export interface Renderer {
 }
 
 interface AudioManagerApi {
+  setProtocol: (protocol: IVideoProtocol) => void
   sync: (currentTime: number, isPlaying: boolean) => void | Promise<void>
   ensureMp4Audio: (id: string, clip: MP4Clip, startUs: number, fps: number) => void
   destroy: () => void
@@ -193,6 +194,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
           console.error('[renderer] invalid protocol update', err)
           return
         }
+        audioManager.setProtocol(validatedProtocol.value)
         renderGeneration += 1
         clearDisplays()
         if (opts.warmUpResources !== false)
