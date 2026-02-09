@@ -70,12 +70,15 @@ const filteredTracks = computed(() => {
     ? props.protocol.tracks
     : props.protocol.tracks.filter((track: TrackUnion) => props.trackTypes?.includes(track.trackType))
   const ordered = tracks.slice()
-  const mainIndex = ordered.findIndex(track => track.trackType === 'frames' && track.isMain === true)
-  if (mainIndex !== -1) {
-    const [mainTrack] = ordered.splice(mainIndex, 1)
-    ordered.push(mainTrack)
-  }
-  return ordered
+  const mainTrack = ordered.find(track => track.trackType === 'frames' && track.isMain === true)
+  const nonAudioNonMainTracks = ordered.filter(track => !(track.trackType === 'audio' || track === mainTrack))
+  const audioTracks = ordered.filter(track => track.trackType === 'audio')
+
+  return [
+    ...nonAudioNonMainTracks,
+    ...(mainTrack ? [mainTrack] : []),
+    ...audioTracks,
+  ]
 })
 
 const videoDurationMsByUrl = reactive(new Map<string, number>())
