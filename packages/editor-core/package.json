@@ -1,7 +1,7 @@
 {
   "name": "@video-editor/editor-core",
   "type": "module",
-  "version": "0.0.1-beta.28",
+  "version": "0.0.1-beta.29",
   "exports": {
     ".": {
       "import": "./dist/index.js"
