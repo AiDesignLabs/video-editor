@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import vue from '@vitejs/plugin-vue'
+import UnoCSS from 'unocss/vite'
 import { defineConfig } from 'vite'
 import dts from 'vite-plugin-dts'
 
@@ -16,6 +17,9 @@ fs.readdirSync(path.resolve(__dirname, 'src')).forEach((name) => {
 
 export default defineConfig({
   plugins: [
+    UnoCSS({
+      configFile: fileURLToPath(new URL('./unocss.config.ts', import.meta.url)),
+    }),
     vue(),
     dts({
       tsconfigPath: './tsconfig.build.json',

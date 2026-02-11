@@ -1,4 +1,5 @@
 import type { App } from 'vue'
+import 'uno.css'
 import VideoEditorTimeline from './VideoEditorTimeline/index.vue'
 import VideoTimeline from './VideoTimeline/index.vue'
 
