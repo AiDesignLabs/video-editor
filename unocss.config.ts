@@ -27,6 +27,9 @@ export default defineConfig({
     presetIcons({
       scale: 1.2,
       warn: true,
+      collections: {
+        creatly: () => import('@creatly/figma-icons/json/icons.json').then(i => i.default),
+      },
     }),
     presetWebFonts({
       fonts: {

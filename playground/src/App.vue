@@ -310,6 +310,16 @@ function handleSegmentResizeEnd(payload: any) {
   })
 }
 
+function handleVideoSegmentMuteToggle(payload: { segment: SegmentUnion, muted: boolean }) {
+  const segment = payload.segment
+  if (segment.segmentType !== 'frames' || segment.type !== 'video')
+    return
+  commands.updateSegment((draft) => {
+    if (draft.type === 'video')
+      draft.volume = payload.muted ? 0 : 1
+  }, segment.id, 'frames')
+}
+
 function swapMainClip() {
   const segmentId = firstFrameSegment.value?.id
   if (!segmentId)
@@ -535,6 +545,7 @@ function handleAddSegmentClick(data: {
           @segment-click="handleTimelineSegmentClick"
           @segment-drag-end="handleSegmentDragEnd"
           @segment-resize-end="handleSegmentResizeEnd"
+          @video-segment-mute-toggle="handleVideoSegmentMuteToggle"
           @add-segment="handleAddSegmentClick"
         />
         <div class="timeline-meta">

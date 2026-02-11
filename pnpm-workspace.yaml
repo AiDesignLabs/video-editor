@@ -3,10 +3,10 @@ packages:
   - packages/*/*
   - playground
   - '!**/test/**'
-catalogMode: prefer
-cleanupUnusedCatalogs: true
+
 catalog:
   '@antfu/eslint-config': ^6.7.3
+  '@creatly/figma-icons': 0.0.2-beta.5
   '@iconify-json/ri': ^1.2.6
   '@types/node': ^25.0.3
   '@unocss/reset': ^66.5.10
@@ -37,3 +37,7 @@ catalog:
   vitest: ^4.0.16
   vue: ^3.5.26
   vue-tsc: ^3.2.1
+
+catalogMode: prefer
+
+cleanupUnusedCatalogs: true

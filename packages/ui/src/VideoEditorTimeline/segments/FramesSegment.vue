@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { IFramesSegmentUnion, IVideoFramesSegment } from '@video-editor/shared'
 import type { WaveformData } from '@video-editor/protocol'
-import { extractWaveform, generateThumbnails } from '@video-editor/protocol'
+import { extractWaveform, generateThumbnails, getMp4Meta } from '@video-editor/protocol'
 import { isVideoFramesSegment } from '@video-editor/shared'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import WaveformCanvasStrip from './WaveformCanvasStrip.vue'
@@ -10,6 +10,9 @@ defineOptions({ name: 'FramesSegment' })
 
 const props = defineProps<{
   segment: IFramesSegmentUnion
+}>()
+const emit = defineEmits<{
+  (e: 'toggle-video-mute', payload: { segmentId: string, muted: boolean }): void
 }>()
 
 const containerRef = ref<HTMLElement | null>(null)
@@ -59,6 +62,7 @@ interface ThumbnailPreview { tsMs: number, url: string }
 interface ThumbnailState { items: ThumbnailPreview[], loading: boolean, error: string | null }
 interface WaveformState {
   data: WaveformData | null
+  hasAudio: boolean | null
   loading: boolean
   error: string | null
   loadedUrl: string | null
@@ -67,6 +71,7 @@ interface WaveformState {
 const thumbnailState = reactive<ThumbnailState>({ items: [], loading: false, error: null })
 const waveformState = reactive<WaveformState>({
   data: null,
+  hasAudio: null,
   loading: false,
   error: null,
   loadedUrl: null,
@@ -154,18 +159,36 @@ async function loadVideoWaveform(url: string) {
   if (!url)
     return
 
-  if (waveformState.loadedUrl === url && waveformState.data)
+  if (waveformState.loadedUrl === url && (waveformState.data || waveformState.hasAudio === false))
     return
 
   const jobId = ++currentWaveformJobId
+  if (waveformState.loadedUrl !== url) {
+    waveformState.data = null
+    waveformState.hasAudio = null
+  }
   waveformState.loading = true
   waveformState.error = null
 
   try {
+    const meta = await getMp4Meta(url)
+    if (currentWaveformJobId !== jobId)
+      return
+
+    const hasAudio = (meta.audioChanCount ?? 0) > 0
+    waveformState.hasAudio = hasAudio
+    if (!hasAudio) {
+      waveformState.data = null
+      waveformState.loadedUrl = url
+      waveformState.loading = false
+      return
+    }
+
     const data = await extractWaveform(url, { samples: 1000 })
     if (currentWaveformJobId !== jobId)
       return
     waveformState.data = data
+    waveformState.hasAudio = true
     waveformState.loadedUrl = url
     waveformState.loading = false
   }
@@ -249,6 +272,44 @@ const videoWaveformDisplay = computed(() => {
 
   return { peaks: sampledPeaks, coveragePercent: 100 }
 })
+
+const shouldShowWaveformStrip = computed(() => waveformState.hasAudio !== false)
+const hasOverlayLabel = computed(() => Boolean(props.segment.extra?.label))
+const shouldShowMuteButton = computed(() => {
+  return isVideoFramesSegment(props.segment) && waveformState.hasAudio !== false
+})
+const mutedOverride = ref<boolean | null>(null)
+const isMutedFromSegment = computed(() => {
+  if (!isVideoFramesSegment(props.segment))
+    return false
+  return (props.segment.volume ?? 1) <= 0
+})
+const isMuted = computed(() => mutedOverride.value ?? isMutedFromSegment.value)
+
+watch(() => props.segment.id, () => {
+  mutedOverride.value = null
+})
+
+watch(() => {
+  if (!isVideoFramesSegment(props.segment))
+    return undefined
+  return props.segment.volume
+}, () => {
+  mutedOverride.value = null
+})
+
+function handleMuteToggle(event: MouseEvent) {
+  event.preventDefault()
+  event.stopPropagation()
+  if (!isVideoFramesSegment(props.segment))
+    return
+  const nextMuted = !isMuted.value
+  mutedOverride.value = nextMuted
+  emit('toggle-video-mute', {
+    segmentId: props.segment.id,
+    muted: nextMuted,
+  })
+}
 </script>
 
 <template>
@@ -298,7 +359,12 @@ const videoWaveformDisplay = computed(() => {
               </slot>
             </div>
           </div>
-          <div ref="waveformRef" class="frames-segment__waveform-strip">
+          <div
+            v-if="shouldShowWaveformStrip"
+            ref="waveformRef"
+            class="frames-segment__waveform-strip"
+            :class="{ 'frames-segment__waveform-strip--muted': isMuted }"
+          >
             <template v-if="videoWaveformDisplay.peaks.length">
               <div
                 class="frames-segment__waveform"
@@ -330,10 +396,31 @@ const videoWaveformDisplay = computed(() => {
     </template>
 
     <!-- Overlay (badge, labels, etc.) -->
-    <slot name="overlay" :segment="segment">
-      <span v-if="segment.extra?.label" class="frames-segment__badge">
-        {{ segment.extra?.label }}
-      </span>
+    <slot
+      name="overlay"
+      :segment="segment"
+      :is-muted="isMuted"
+      :toggle-mute="handleMuteToggle"
+      :show-mute-button="shouldShowMuteButton"
+    >
+      <div v-if="hasOverlayLabel || shouldShowMuteButton" class="frames-segment__overlay">
+        <span v-if="segment.extra?.label" class="frames-segment__badge">
+          {{ segment.extra?.label }}
+        </span>
+        <button
+          v-if="shouldShowMuteButton"
+          type="button"
+          class="frames-segment__mute-btn"
+          :aria-label="isMuted ? '取消静音视频片段' : '静音视频片段'"
+          :title="isMuted ? '取消静音' : '静音'"
+          @click.stop="handleMuteToggle"
+          @pointerdown.stop
+          @dblclick.stop
+        >
+          <span v-if="isMuted" class="frames-segment__mute-icon i-creatly-mute" aria-hidden="true" />
+          <span v-else class="frames-segment__mute-icon i-creatly-sound" aria-hidden="true" />
+        </button>
+      </div>
     </slot>
   </div>
 </template>
@@ -403,7 +490,14 @@ const videoWaveformDisplay = computed(() => {
     black 65%,
     transparent 90%
   );
-  opacity: 0.4;
+}
+
+:where(.frames-segment .frames-segment__waveform-strip--muted .frames-segment__waveform) {
+  opacity: 0.25;
+}
+
+:where(.frames-segment .frames-segment__waveform-strip--muted .frames-segment__waveform-pattern) {
+  opacity: 0.25;
 }
 
 :where(.frames-segment .frames-segment__placeholder) {
@@ -416,11 +510,23 @@ const videoWaveformDisplay = computed(() => {
   border-radius: 0;
 }
 
+:where(.frames-segment .frames-segment__overlay) {
+  --at-apply: absolute top-1.5 left-2 flex items-center gap-2 z-3;
+}
+
 :where(.frames-segment .frames-segment__badge) {
-  --at-apply: absolute top-1.5 left-2 px-1.5 py-0.5 text-[11px] rounded-4px pointer-events-none;
+  --at-apply: px-1.5 py-0.5 text-[11px] rounded-4px pointer-events-none;
   background: rgba(0, 0, 0, 0.25);
   color: #fff;
   transform-origin: left top;
   transform: scale(0.9);
+}
+
+:where(.frames-segment) .frames-segment__mute-btn {
+  --at-apply: flex items-center justify-center rounded-4px border-none p-0 cursor-pointer text-white w-5 h-5 bg-[rgba(0,0,0,0.25)] hover:bg-[rgba(0,0,0,0.35)] focus-visible:outline-[2px] focus-visible:outline-[rgba(255,255,255,0.85)] focus-visible:outline-offset-[1px];
+}
+
+:where(.frames-segment) .frames-segment__mute-icon {
+  --at-apply: block text-white w-3 h-3;
 }
 </style>

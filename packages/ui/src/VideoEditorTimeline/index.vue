@@ -7,6 +7,7 @@ import type {
   IStickerSegment,
   ITextSegment,
   ITrackType,
+  IVideoFramesSegment,
   IVideoProtocol,
   SegmentUnion,
   TrackUnion,
@@ -43,6 +44,7 @@ const emit = defineEmits<{
   (e: 'segmentClick', payload: { segment: SegmentUnion, track: TrackUnion }): void
   (e: 'segmentDragEnd', payload: SegmentDragPayload): void
   (e: 'segmentResizeEnd', payload: SegmentResizePayload): void
+  (e: 'videoSegmentMuteToggle', payload: { segment: IVideoFramesSegment, track: TrackUnion, muted: boolean }): void
   (e: 'add-segment', { track, startTime, endTime, event }: { track: TrackUnion, startTime: number, endTime?: number, event?: MouseEvent }): void
 }>()
 
@@ -214,6 +216,12 @@ function handleAddSegment({ track, startTime, endTime, event }: { track: Timelin
   if (trackPayload)
     emit('add-segment', { track: trackPayload, startTime, endTime, event })
 }
+
+function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: TrackUnion, payload: { segmentId: string, muted: boolean }) {
+  if (segment.id !== payload.segmentId)
+    return
+  emit('videoSegmentMuteToggle', { segment, track, muted: payload.muted })
+}
 </script>
 
 <template>
@@ -262,7 +270,10 @@ function handleAddSegment({ track, startTime, endTime, event }: { track: Timelin
             <!-- Separate slots by segment type for automatic type narrowing -->
             <template v-if="segment.segmentType === 'frames'">
               <slot name="segment-frames" :segment="segment as IFramesSegmentUnion" :layout="layout">
-                <FramesSegment :segment="segment" />
+                <FramesSegment
+                  :segment="segment"
+                  @toggle-video-mute="handleVideoSegmentMuteToggle(segment as IVideoFramesSegment, layout.track.payload as TrackUnion, $event)"
+                />
               </slot>
             </template>
             <template v-else-if="segment.segmentType === 'text'">
