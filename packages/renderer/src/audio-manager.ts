@@ -28,6 +28,16 @@ interface Mp4State {
   nextStartAt?: number
 }
 
+interface AudioElementState {
+  segmentId: string
+  url: string
+  el: HTMLAudioElement
+  pendingPlay?: Promise<void>
+  lastTimelineMs?: number
+  lastSourceSec?: number
+  lastSeekTimelineMs?: number
+}
+
 export class AudioManager {
   private protocol: IVideoProtocol
   private clips = new Map<string, ClipEntry>()
@@ -38,6 +48,8 @@ export class AudioManager {
   private mp4States = new Map<string, Mp4State>()
   private audioGains = new Map<string, GainNode>()
   private mp4Gains = new Map<string, GainNode>()
+  private audioElements = new Map<string, AudioElementState>()
+  private readonly useMediaElementForAudio = true
   private ctx: AudioContext
   private lastTime = 0
 
@@ -73,7 +85,10 @@ export class AudioManager {
       if (segment.segmentType === 'audio') {
         const key = this.audioKey(segment.id)
         activeAudioKeys.add(key)
-        this.ensureAudioLoop(segment as IAudioSegment, currentTime)
+        if (this.useMediaElementForAudio)
+          this.syncAudioElement(segment as IAudioSegment, currentTime)
+        else
+          this.ensureAudioLoop(segment as IAudioSegment, currentTime)
       }
       else if (segment.segmentType === 'frames' && 'type' in segment && segment.type === 'video') {
         const key = this.videoKey(segment.id)
@@ -97,6 +112,25 @@ export class AudioManager {
         this.audioLoops.delete(key)
         this.audioLoopContexts.delete(key)
         this.audioGains.delete(key)
+      }
+    }
+
+    for (const [key, state] of this.audioElements) {
+      if (activeAudioKeys.has(key))
+        continue
+      try {
+        state.el.pause()
+        state.pendingPlay = undefined
+        state.lastTimelineMs = undefined
+        state.lastSourceSec = undefined
+        state.lastSeekTimelineMs = undefined
+      }
+      catch (e) {
+        // Ignore media element pause failures.
+      }
+      if (!this.findSegmentInProtocol(state.segmentId)) {
+        this.destroyAudioElement(state.el)
+        this.audioElements.delete(key)
       }
     }
 
@@ -242,9 +276,25 @@ export class AudioManager {
     for (const entry of this.clips.values())
       entry.clip.destroy()
     this.clips.clear()
+    for (const state of this.audioElements.values())
+      this.destroyAudioElement(state.el)
+    this.audioElements.clear()
   }
 
   private stopAll() {
+    for (const state of this.audioElements.values()) {
+      try {
+        state.el.pause()
+        state.pendingPlay = undefined
+        state.lastTimelineMs = undefined
+        state.lastSourceSec = undefined
+        state.lastSeekTimelineMs = undefined
+      }
+      catch (e) {
+        // Ignore media element pause failures.
+      }
+    }
+
     for (const loop of this.audioLoops.values()) {
       loop.stop()
       // Stop all audio buffer sources immediately
@@ -304,7 +354,7 @@ export class AudioManager {
     if (!entry)
       return
     const offset = segment.fromTime ?? 0
-    const playRate = Math.max(0.1, Math.min(100, segment.playRate ?? 1))
+    const playRate = this.normalizePlayRate(segment.playRate)
     // relativeMs is position within segment timeline (not source audio)
     const relativeMs = currentTime - segment.startTime
     // sourceOffsetMs is where we are in the source audio (accounting for fromTime and playRate)
@@ -338,26 +388,96 @@ export class AudioManager {
     })
   }
 
+  private syncAudioElement(segment: IAudioSegment, currentTime: number) {
+    const key = this.audioKey(segment.id)
+    const state = this.getOrCreateAudioElementState(key, segment)
+    const relativeMs = currentTime - segment.startTime
+    const playRate = this.normalizePlayRate(segment.playRate)
+    const offset = segment.fromTime ?? 0
+    const sourceOffsetMs = offset + relativeMs * playRate
+    const segmentDurationMs = Math.max(0, segment.endTime - segment.startTime)
+    const sourceDurationMs = segmentDurationMs * playRate
+    const maxSourceOffsetMs = offset + sourceDurationMs
+    const segmentMaxSourceSec = Math.max(0, maxSourceOffsetMs) / 1000
+    const mediaDurationSec = Number.isFinite(state.el.duration) ? Math.max(0, state.el.duration) : undefined
+    const effectiveMaxSourceSec = mediaDurationSec === undefined
+      ? segmentMaxSourceSec
+      : Math.min(segmentMaxSourceSec, mediaDurationSec)
+    const targetSourceSec = Math.max(0, Math.min(sourceOffsetMs / 1000, effectiveMaxSourceSec))
+    const isSourceExhausted = sourceOffsetMs / 1000 >= (effectiveMaxSourceSec - 0.01)
+
+    if (Math.abs(state.el.playbackRate - playRate) > 0.001)
+      state.el.playbackRate = playRate
+
+    const targetVolume = this.computeSegmentVolume(segment, relativeMs)
+    if (Math.abs(state.el.volume - targetVolume) > 0.001)
+      state.el.volume = targetVolume
+
+    // Avoid per-frame seeking (causes pops/crackles). Only resync on
+    // activation, large timeline jumps, or accumulated drift.
+    const seekDriftThresholdSec = 0.24
+    const seekCooldownMs = 500
+    const largeJumpMs = 300
+    const rewindMs = -40
+    const lastTimelineMs = state.lastTimelineMs
+    const lastSourceSec = state.lastSourceSec
+    const deltaTimelineMs = lastTimelineMs === undefined ? 0 : (currentTime - lastTimelineMs)
+
+    let shouldSeek = false
+    if (lastTimelineMs === undefined) {
+      shouldSeek = true
+    }
+    else if (deltaTimelineMs < rewindMs || deltaTimelineMs > largeJumpMs) {
+      shouldSeek = true
+    }
+    else if (lastSourceSec !== undefined) {
+      const predictedSourceSec = lastSourceSec + (deltaTimelineMs * playRate / 1000)
+      const driftSec = Math.abs(predictedSourceSec - targetSourceSec)
+      const cooldownPassed = state.lastSeekTimelineMs === undefined || (currentTime - state.lastSeekTimelineMs) >= seekCooldownMs
+      if (driftSec > seekDriftThresholdSec && cooldownPassed)
+        shouldSeek = true
+    }
+
+    if (shouldSeek && Math.abs(state.el.currentTime - targetSourceSec) > 0.06) {
+      try {
+        state.el.currentTime = targetSourceSec
+        state.lastSeekTimelineMs = currentTime
+      }
+      catch (e) {
+        // Ignore seek failures while metadata is not ready.
+      }
+    }
+
+    state.lastTimelineMs = currentTime
+    state.lastSourceSec = targetSourceSec
+
+    if (isSourceExhausted) {
+      if (!state.el.paused) {
+        try {
+          state.el.pause()
+        }
+        catch (e) {
+          // Ignore media element pause failures.
+        }
+      }
+      state.pendingPlay = undefined
+      return
+    }
+
+    if (state.el.paused && !state.pendingPlay) {
+      const maybePromise = state.el.play()
+      if (maybePromise && typeof maybePromise.then === 'function') {
+        state.pendingPlay = maybePromise
+          .catch(() => {})
+          .finally(() => {
+            state.pendingPlay = undefined
+          })
+      }
+    }
+  }
+
   private applyFadeToGain(segment: IAudioSegment, relativeMs: number, gainNode: GainNode) {
-    const baseVolume = Math.max(0, typeof segment.volume === 'number' ? segment.volume : 1)
-    const segmentDuration = segment.endTime - segment.startTime
-    const fadeInDuration = segment.fadeInDuration ?? 0
-    const fadeOutDuration = segment.fadeOutDuration ?? 0
-
-    let volumeMultiplier = 1
-
-    // Apply fade in
-    if (fadeInDuration > 0 && relativeMs < fadeInDuration) {
-      volumeMultiplier = Math.max(0, relativeMs / fadeInDuration)
-    }
-
-    // Apply fade out
-    const timeUntilEnd = segmentDuration - relativeMs
-    if (fadeOutDuration > 0 && timeUntilEnd < fadeOutDuration) {
-      volumeMultiplier = Math.min(volumeMultiplier, Math.max(0, timeUntilEnd / fadeOutDuration))
-    }
-
-    gainNode.gain.value = baseVolume * volumeMultiplier
+    gainNode.gain.value = this.computeSegmentVolume(segment, relativeMs)
   }
 
   private startMp4Loop(clip: MP4Clip, startUs: number, fps: number, gainNode: GainNode): LoopState {
@@ -446,11 +566,8 @@ export class AudioManager {
         stopped = true
         return
       }
-      // Adjust playback rate by resampling if playRate !== 1
-      const processedAudio = playRate !== 1
-        ? this.resampleForPlayRate(audio as Float32Array[], playRate)
-        : audio as Float32Array[]
-      startAt = this.playFrames(processedAudio, sampleRate, startAt, gainNode, sources)
+      // Let the browser handle playback-rate resampling for better audio quality.
+      startAt = this.playFrames(audio as Float32Array[], sampleRate, startAt, gainNode, sources, playRate)
 
       // Check stopped before recursing
       if (!stopped) {
@@ -465,33 +582,19 @@ export class AudioManager {
       stop: () => {
         stopped = true
       },
-      isStopped: () => stopped,
+      // Treat loop as active while there are still scheduled sources playing.
+      isStopped: () => stopped && sources.length === 0,
     }
   }
 
-  private resampleForPlayRate(audio: Float32Array[], playRate: number): Float32Array[] {
-    // For playRate > 1, we have more source samples than needed (speed up)
-    // For playRate < 1, we have fewer source samples than needed (slow down)
-    // We need to stretch/compress the audio to match real-time playback
-    const outputLength = Math.round(audio[0].length / playRate)
-    if (outputLength <= 0)
-      return audio
-
-    return audio.map((channel) => {
-      const output = new Float32Array(outputLength)
-      for (let i = 0; i < outputLength; i++) {
-        const srcIndex = i * playRate
-        const srcIndexFloor = Math.floor(srcIndex)
-        const srcIndexCeil = Math.min(srcIndexFloor + 1, channel.length - 1)
-        const t = srcIndex - srcIndexFloor
-        // Linear interpolation between samples
-        output[i] = channel[srcIndexFloor] * (1 - t) + channel[srcIndexCeil] * t
-      }
-      return output
-    })
-  }
-
-  private playFrames(audio: Float32Array[], sampleRate: number, startAt: number, gainNode: GainNode, sources?: AudioBufferSourceNode[]) {
+  private playFrames(
+    audio: Float32Array[],
+    sampleRate: number,
+    startAt: number,
+    gainNode: GainNode,
+    sources?: AudioBufferSourceNode[],
+    playbackRate: number = 1,
+  ) {
     const channels = Math.max(audio.length, 1)
     const len = audio[0]?.length ?? 0
     if (len === 0)
@@ -503,6 +606,8 @@ export class AudioManager {
     }
     const source = this.ctx.createBufferSource()
     source.buffer = buffer
+    const safePlaybackRate = Math.max(0.1, playbackRate)
+    source.playbackRate.value = safePlaybackRate
     source.connect(gainNode)
     const nextStart = Math.max(this.ctx.currentTime, startAt)
     source.start(nextStart)
@@ -511,7 +616,7 @@ export class AudioManager {
     if (sources) {
       sources.push(source)
       // Clean up finished sources after they complete
-      const duration = buffer.duration * 1000
+      const duration = (buffer.duration / safePlaybackRate) * 1000
       setTimeout(() => {
         const index = sources.indexOf(source)
         if (index > -1) {
@@ -520,21 +625,101 @@ export class AudioManager {
       }, duration + 100)
     }
 
-    return nextStart + buffer.duration
+    return nextStart + (buffer.duration / safePlaybackRate)
   }
 
   private getOrCreateGain(map: Map<string, GainNode>, id: string, volume?: number) {
     const existing = map.get(id)
     if (existing) {
       if (typeof volume === 'number')
-        existing.gain.value = Math.max(0, volume)
+        existing.gain.value = this.normalizeVolume(volume)
       return existing
     }
     const gainNode = this.ctx.createGain()
-    gainNode.gain.value = Math.max(0, typeof volume === 'number' ? volume : 1)
+    gainNode.gain.value = this.normalizeVolume(volume)
     gainNode.connect(this.ctx.destination)
     map.set(id, gainNode)
     return gainNode
+  }
+
+  private getOrCreateAudioElementState(key: string, segment: IAudioSegment): AudioElementState {
+    const existing = this.audioElements.get(key)
+    if (existing) {
+      if (existing.url !== segment.url) {
+        existing.el.pause()
+        existing.el.src = segment.url
+        existing.el.currentTime = 0
+        existing.url = segment.url
+        existing.pendingPlay = undefined
+        existing.lastTimelineMs = undefined
+        existing.lastSourceSec = undefined
+        existing.lastSeekTimelineMs = undefined
+      }
+      return existing
+    }
+
+    const el = new Audio(segment.url)
+    el.preload = 'auto'
+    el.loop = false
+    el.volume = this.normalizeVolume(segment.volume)
+    el.playbackRate = this.normalizePlayRate(segment.playRate)
+    const state: AudioElementState = {
+      segmentId: segment.id,
+      url: segment.url,
+      el,
+    }
+    this.audioElements.set(key, state)
+    return state
+  }
+
+  private destroyAudioElement(el: HTMLAudioElement) {
+    try {
+      el.pause()
+    }
+    catch (e) {
+      // Ignore media element pause failures.
+    }
+    el.removeAttribute('src')
+    try {
+      el.load()
+    }
+    catch (e) {
+      // Ignore load failures during teardown.
+    }
+  }
+
+  private normalizePlayRate(playRate?: number): number {
+    if (typeof playRate !== 'number' || !Number.isFinite(playRate))
+      return 1
+    return Math.max(0.1, Math.min(100, playRate))
+  }
+
+  private normalizeVolume(volume?: number): number {
+    if (typeof volume !== 'number' || !Number.isFinite(volume))
+      return 1
+    return Math.max(0, Math.min(1, volume))
+  }
+
+  private computeSegmentVolume(segment: IAudioSegment, relativeMs: number): number {
+    const baseVolume = this.normalizeVolume(segment.volume)
+    const segmentDuration = Math.max(0, segment.endTime - segment.startTime)
+    const fadeInDuration = Math.max(0, segment.fadeInDuration ?? 0)
+    const fadeOutDuration = Math.max(0, segment.fadeOutDuration ?? 0)
+
+    let volumeMultiplier = 1
+
+    // Apply fade in
+    if (fadeInDuration > 0 && relativeMs < fadeInDuration) {
+      volumeMultiplier = Math.max(0, relativeMs / fadeInDuration)
+    }
+
+    // Apply fade out
+    const timeUntilEnd = segmentDuration - relativeMs
+    if (fadeOutDuration > 0 && timeUntilEnd < fadeOutDuration) {
+      volumeMultiplier = Math.min(volumeMultiplier, Math.max(0, timeUntilEnd / fadeOutDuration))
+    }
+
+    return baseVolume * volumeMultiplier
   }
 
   private audioKey(id: string) {
@@ -603,7 +788,7 @@ export class AudioManager {
         if (segment.id !== id)
           continue
         const volume = (segment as { volume?: number }).volume
-        return typeof volume === 'number' ? volume : 1
+        return this.normalizeVolume(volume)
       }
     }
     return 1
