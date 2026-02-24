@@ -2,7 +2,7 @@ import {
   defineConfig,
   presetAttributify,
   presetIcons,
-  presetUno,
+  presetWind4,
   presetWebFonts,
   transformerDirectives,
   transformerVariantGroup,
@@ -22,7 +22,7 @@ export default defineConfig({
     },
   },
   presets: [
-    presetUno(),
+    presetWind4(),
     presetAttributify({}),
     presetIcons({
       scale: 1.2,

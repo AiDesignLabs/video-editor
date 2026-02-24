@@ -782,7 +782,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 }
 
 :where(.ve-timeline .ve-timeline__content) {
-  --at-apply: min-h-full min-w-full;
+  --at-apply: relative min-h-full min-w-full;
 }
 
 /* Dragging segment (VideoTimeline specific) */

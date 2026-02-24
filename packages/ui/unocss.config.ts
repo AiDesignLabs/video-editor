@@ -2,14 +2,14 @@ import {
   defineConfig,
   presetAttributify,
   presetIcons,
-  presetUno,
   transformerDirectives,
   transformerVariantGroup,
+  presetWind4,
 } from 'unocss'
 
 export default defineConfig({
   presets: [
-    presetUno(),
+    presetWind4(),
     presetAttributify({}),
     presetIcons({
       warn: true,
