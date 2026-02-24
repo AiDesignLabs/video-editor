@@ -1,7 +1,7 @@
 {
   "name": "@video-editor/plugins",
   "type": "module",
-  "version": "0.0.1-beta.32",
+  "version": "0.0.1-beta.33",
   "private": true,
   "exports": {
     ".": {
