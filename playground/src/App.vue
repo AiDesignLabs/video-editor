@@ -3,7 +3,7 @@ import type { IAudioSegment, IImageFramesSegment, ITextSegment, IVideoProtocol, 
 import type { Ref } from 'vue'
 import { createEditorCore } from '@video-editor/editor-core'
 import { generateThumbnails } from '@video-editor/protocol'
-import { composeProtocol, createRenderer } from '@video-editor/renderer'
+import { composeProtocol, createRenderer, type Renderer } from '@video-editor/renderer'
 import { VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 
@@ -11,7 +11,7 @@ const swatches = {
   primary: 'https://dummyimage.com/1280x720/6aa7ff/ffffff.png&text=Clip+A',
   alt: 'https://dummyimage.com/1280x720/f97316/ffffff.png&text=Clip+C',
   video: 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-  audio: `${window.location.origin}/test-music-3s.mp3`,
+  audio: `https://creatly-public.oss-cn-shanghai.aliyuncs.com/test/audio-test.mp3`,
   extra: 'https://dummyimage.com/1280x720/22c55e/ffffff.png&text=Clip+D',
 }
 
@@ -38,7 +38,7 @@ const initialProtocol: IVideoProtocol = {
           startTime: 3000,
           endTime: 13000,
           opacity: 1,
-          volume: 5,
+          volume: 1,
           extra: { aiTag: 'video-segment', confidence: 0.88, label: 'Big Buck Bunny (Sound)' },
         },
         {
@@ -181,24 +181,37 @@ const composeSourcePreview = computed(() => {
   return summary || '无片段'
 })
 
+async function mountRendererInstance(options: {
+  seekToMs?: number
+  resumePlayback?: boolean
+}) {
+  const host = canvasHost.value
+  const rendererOptions = {
+    protocol,
+    autoPlay: false,
+    videoSourceMode: 'auto' as const,
+    appOptions: {
+      resizeTo: host ?? window,
+      background: '#0f172a',
+    },
+  }
+  const instance = await createRenderer(rendererOptions)
+  renderer.value = instance
+  if (host)
+    host.replaceChildren(instance.app.canvas)
+
+  if (typeof options.seekToMs === 'number')
+    instance.seek(options.seekToMs)
+
+  scrub.value = instance.currentTime.value
+  if (options.resumePlayback)
+    instance.play()
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown)
   try {
-    const host = canvasHost.value
-    const instance = await createRenderer({
-      protocol,
-      autoPlay: false,
-      videoSourceMode: 'auto',
-      appOptions: {
-        resizeTo: host ?? window,
-        background: '#0f172a',
-      },
-    })
-    renderer.value = instance
-    scrub.value = instance.currentTime.value
-
-    if (host)
-      host.replaceChildren(instance.app.canvas)
+    await mountRendererInstance({})
   }
   catch (err) {
     error.value = err instanceof Error ? err.message : String(err)

@@ -16,7 +16,6 @@
     "dist"
   ],
   "scripts": {
-    "build:types": "vue-tsc --declaration --emitDeclarationOnly",
     "build": "vite build --config vite.config.ts",
     "preview": "vite preview"
   },
