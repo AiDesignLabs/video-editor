@@ -219,19 +219,6 @@ describe('verify segment of video protocol', () => {
             expect(() => verifyFramesSegment(o3)).toThrowError(generateTypeErrorPrefixReg('/animation/duration', '>= 0'))
           })
 
-          it('invalid type transition', () => {
-            const o = { ...videoFramesSegment, type: 'video', transitionIn: 'invalid' }
-            expect(() => verifyFramesSegment(o)).toThrowError(generateTypeErrorPrefixReg('/transitionIn'))
-            const o1 = { ...videoFramesSegment, type: 'video', transitionIn: {} }
-            expect(() => verifyFramesSegment(o1)).toThrowError(generateMissingRequiredReg(['id', 'name', 'duration'], { path: '/transitionIn' }))
-            const o2 = { ...videoFramesSegment, type: 'video', transitionIn: { id: 123, name: 'test', duration: 1000 } }
-            expect(() => verifyFramesSegment(o2)).toThrowError(generateTypeErrorPrefixReg('/transitionIn/id', 'string'))
-            const o3 = { ...videoFramesSegment, type: 'video', transitionIn: { id: '123', name: 345, duration: 1000 } }
-            expect(() => verifyFramesSegment(o3)).toThrowError(generateTypeErrorPrefixReg('/transitionIn/name', 'string'))
-            const o4 = { ...videoFramesSegment, type: 'video', transitionIn: { id: '123', name: 'test', duration: -1 } }
-            expect(() => verifyFramesSegment(o4)).toThrowError(generateTypeErrorPrefixReg('/transitionIn/duration', '>= 0'))
-          })
-
           it('invalid type palette', () => {
             const o = { ...videoFramesSegment, type: 'video', palette: 'invalid' }
             expect(() => verifyFramesSegment(o)).toThrowError(generateTypeErrorPrefixReg('/palette'))
@@ -964,6 +951,21 @@ describe('verify video protocol', () => {
 
     it('with filter segment', () => {
       const o: IVideoProtocol = { ...videoProtocol, tracks: [{ trackId: '1', trackType: 'filter', children: [filterSegment] }] }
+      expect(verify(o)).toEqual(o)
+    })
+
+    it('with explicit transition edges', () => {
+      const o: IVideoProtocol = {
+        ...videoProtocol,
+        tracks: [{ trackId: '1', trackType: 'frames', children: [framesSegment, { ...framesSegment, id: '2', startTime: 500, endTime: 1000 }] }],
+        transitions: [{
+          id: 'transition-edge-1',
+          name: 'crossfade',
+          duration: 200,
+          fromSegmentId: '1',
+          toSegmentId: '2',
+        }],
+      }
       expect(verify(o)).toEqual(o)
     })
   })

@@ -1,7 +1,7 @@
 import type { IFramesSegmentUnion } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
 import { INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FROM_TIME, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_URL, TYPE_ERROR_PREFIX } from './common'
-import { commonAnimationDefs, commonPaletteDefs, commonTransformDefs, commonTransitionDefs } from './commonDefs'
+import { commonAnimationDefs, commonPaletteDefs, commonTransformDefs } from './commonDefs'
 
 export const TYPE_ERROR_FRAMES_SEGMENT = `${TYPE_ERROR_PREFIX} object`
 export const INVALID_FRAMES_TYPE = 'type must be a string and one of ["image", "video", "3D"]'
@@ -10,7 +10,6 @@ export const INVALID_FRAMES_SEGMENT_TYPE = 'type segmentType must be a string an
 const CommonDefinitions = {
   ITransform: commonTransformDefs,
   IAnimation: commonAnimationDefs,
-  ITransition: commonTransitionDefs,
   IPalette: commonPaletteDefs,
 } as JSONSchemaType<IFramesSegmentUnion>['definitions']
 
@@ -32,8 +31,6 @@ export const framesSegmentRule: JSONSchemaType<IFramesSegmentUnion> = {
     opacity: { type: 'number', minimum: 0, maximum: 1, nullable: true },
     fillMode: { type: 'string', enum: ['none', 'contain', 'cover', 'stretch'], nullable: true },
     animation: { $ref: '#/definitions/IAnimation' },
-    transitionIn: { $ref: '#/definitions/ITransition' },
-    transitionOut: { $ref: '#/definitions/ITransition' },
     palette: { $ref: '#/definitions/IPalette' },
     background: { type: 'string', pattern: '^rgba\\([0-9]+,[0-9]+,[0-9]+,[0-9]+\\)$', nullable: true },
     extra: {

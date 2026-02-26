@@ -11,6 +11,7 @@ export interface IVideoProtocol {
   height: number
   fps: number
   tracks: TrackUnion[]
+  transitions?: ITransitionEdge[]
   extra?: ProtocolExtra | null
 }
 
@@ -75,8 +76,6 @@ interface IFramesSegment extends ISegment<'frames'> {
   opacity?: number // 0-1
   fillMode?: IFillMode
   animation?: IAnimation
-  transitionIn?: ITransition
-  transitionOut?: ITransition
   palette?: IPalette
   background?: `rgba(${number},${number},${number},${number})`
 }
@@ -167,6 +166,11 @@ export interface ITransition {
   id: string
   name: string
   duration: number // in ms
+}
+
+export interface ITransitionEdge extends ITransition {
+  fromSegmentId: string
+  toSegmentId: string
 }
 
 export interface IPalette {

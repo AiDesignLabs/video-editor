@@ -1,4 +1,4 @@
-import type { IAudioSegment, ITrack, ITrackType, ITransition, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
+import type { IAudioSegment, ITrack, ITrackType, ITransition, ITransitionEdge, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
 import type { DeepReadonly } from '@vue/reactivity'
 import type { PartialByKeys } from './utils'
 import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
@@ -95,6 +95,86 @@ function isSegmentWithFromTime(segment: SegmentUnion): segment is IVideoFramesSe
   return isVideoFramesSegment(segment) || isAudioSegment(segment)
 }
 
+function getMainFramesTrack(protocol: IVideoProtocol): TrackTypeMapTrack['frames'] | undefined {
+  return protocol.tracks.find(track => track.trackType === 'frames' && (track as TrackTypeMapTrack['frames']).isMain) as TrackTypeMapTrack['frames'] | undefined
+}
+
+function isValidTransitionData(transition: ITransition | undefined): transition is ITransition {
+  if (!transition || typeof transition !== 'object')
+    return false
+  if (typeof transition.id !== 'string' || typeof transition.name !== 'string')
+    return false
+  return typeof transition.duration === 'number' && Number.isFinite(transition.duration) && transition.duration >= 0
+}
+
+function isValidTransitionEdgeData(edge: ITransitionEdge | undefined): edge is ITransitionEdge {
+  if (!edge || typeof edge !== 'object')
+    return false
+  if (typeof edge.fromSegmentId !== 'string' || typeof edge.toSegmentId !== 'string')
+    return false
+  return isValidTransitionData(edge)
+}
+
+function collectExplicitTransitionEdges(mainTrack: TrackTypeMapTrack['frames'], protocol: IVideoProtocol): Map<string, ITransitionEdge> {
+  const adjacentToByFrom = new Map<string, string>()
+  for (let i = 0; i < mainTrack.children.length - 1; i++) {
+    const fromSegment = mainTrack.children[i]
+    const toSegment = mainTrack.children[i + 1]
+    adjacentToByFrom.set(fromSegment.id, toSegment.id)
+  }
+
+  const edgeByFrom = new Map<string, ITransitionEdge>()
+  for (const edge of protocol.transitions ?? []) {
+    if (!isValidTransitionEdgeData(edge))
+      continue
+    if (adjacentToByFrom.get(edge.fromSegmentId) !== edge.toSegmentId)
+      continue
+    edgeByFrom.set(edge.fromSegmentId, {
+      id: edge.id,
+      name: edge.name,
+      duration: edge.duration,
+      fromSegmentId: edge.fromSegmentId,
+      toSegmentId: edge.toSegmentId,
+    })
+  }
+
+  return edgeByFrom
+}
+
+function syncProtocolTransitionEdges(protocol: IVideoProtocol) {
+  const mainTrack = getMainFramesTrack(protocol)
+  if (!mainTrack || mainTrack.children.length < 2) {
+    protocol.transitions = []
+    return
+  }
+  const edgeByFrom = collectExplicitTransitionEdges(mainTrack, protocol)
+  const transitions: ITransitionEdge[] = []
+  for (let i = 0; i < mainTrack.children.length - 1; i++) {
+    const fromSegment = mainTrack.children[i]
+    const toSegment = mainTrack.children[i + 1]
+    const edge = edgeByFrom.get(fromSegment.id)
+    if (!edge || edge.toSegmentId !== toSegment.id)
+      continue
+    transitions.push({
+      id: edge.id,
+      name: edge.name,
+      duration: edge.duration,
+      fromSegmentId: fromSegment.id,
+      toSegmentId: toSegment.id,
+    })
+  }
+  protocol.transitions = transitions
+}
+
+function normalizeProtocolTransitions(protocol: IVideoProtocol) {
+  const mainTrack = getMainFramesTrack(protocol)
+  if (!mainTrack || mainTrack.children.length < 2) {
+    protocol.transitions = []
+    return
+  }
+  syncProtocolTransitionEdges(protocol)
+}
+
 export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
   idFactory?: {
     segment?: () => string
@@ -125,6 +205,14 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
   })
   const setSelectedSegment = (id?: SegmentUnion['id']) => {
     selectedSegmentId.value = id
+  }
+
+  const updateProtocolWithTransitionSync = <T>(updater: (protocol: IVideoProtocol) => T) => {
+    return updateProtocol((protocol) => {
+      const result = updater(protocol)
+      syncProtocolTransitionEdges(protocol)
+      return result
+    })
   }
 
   const addSegmentToTrack = <T extends SegmentUnion>(segment: T, tracks: IVideoProtocol['tracks']) => {
@@ -278,7 +366,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       throw new Error('invalid segment data')
     }
 
-    const id = updateProtocol((protocol) => {
+    const id = updateProtocolWithTransitionSync((protocol) => {
       if (theSegment.segmentType === 'frames') {
         const newClipStart = theSegment.startTime
         const newClipEnd = theSegment.endTime
@@ -379,7 +467,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     const createdTracks: TrackUnion[] = []
     const removedTrackIds: string[] = []
 
-    const success = updateProtocol((protocol) => {
+    const success = updateProtocolWithTransitionSync((protocol) => {
       for (let i = 0; i < protocol.tracks.length; i++) {
         const track = protocol.tracks[i]
         const index = track.children.findIndex(segment => segment.id === id)
@@ -451,7 +539,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     const createdTracks: TrackUnion[] = []
     const removedTrackIds: string[] = []
 
-    const success = updateProtocol((protocol) => {
+    const success = updateProtocolWithTransitionSync((protocol) => {
       // Find source track and segment
       const sourceTrack = protocol.tracks.find(t => t.trackId === moveOptions.sourceTrackId)
       if (!sourceTrack)
@@ -504,7 +592,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         if (moveOptions.isNewTrack && moveOptions.newTrackInsertIndex !== undefined) {
           // Create new track
           const isFirstFramesTrack = segment.segmentType === 'frames'
-            && !protocol.tracks.some(t => t.trackType === 'frames' && (t as any).isMain)
+            && !protocol.tracks.some(t => t.trackType === 'frames' && (t as TrackTypeMapTrack['frames']).isMain)
 
           const newTrack: TrackUnion = {
             trackId: moveOptions.newTrackId ?? options?.idFactory?.track?.() ?? genRandomId(),
@@ -589,7 +677,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     const createdTracks: TrackUnion[] = []
     const removedTrackIds: string[] = []
 
-    const success = updateProtocol((protocol) => {
+    const success = updateProtocolWithTransitionSync((protocol) => {
       const track = protocol.tracks.find(t => t.trackId === options.trackId)
       if (!track)
         return false
@@ -680,8 +768,8 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
   }
 
   const addTransition = (transition: ITransition, addTime?: number) => {
-    return updateProtocol((protocol) => {
-      const mainTrack = protocol.tracks.find(track => track.trackType === 'frames' && (track as any).isMain) as TrackTypeMapTrack['frames'] | undefined
+    return updateProtocolWithTransitionSync((protocol) => {
+      const mainTrack = getMainFramesTrack(protocol)
       if (!mainTrack || mainTrack.children.length < 2)
         return false
 
@@ -707,84 +795,91 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       const segment1 = mainTrack.children[startSegmentIdx] as TrackTypeMapSegment['frames']
       const segment2 = mainTrack.children[startSegmentIdx + 1] as TrackTypeMapSegment['frames']
 
-      const clonedTransition = clone(transition)
+      const transitions = Array.isArray(protocol.transitions)
+        ? protocol.transitions
+        : []
+      if (!Array.isArray(protocol.transitions))
+        protocol.transitions = transitions
 
-      // Apply the transition to both segments
-      segment1.transitionIn = clonedTransition
-      segment2.transitionOut = clonedTransition
+      const edge: ITransitionEdge = {
+        id: transition.id,
+        name: transition.name,
+        duration: transition.duration,
+        fromSegmentId: segment1.id,
+        toSegmentId: segment2.id,
+      }
+      const edgeIdx = transitions.findIndex(item =>
+        item.fromSegmentId === edge.fromSegmentId
+        && item.toSegmentId === edge.toSegmentId,
+      )
+      if (edgeIdx >= 0)
+        transitions[edgeIdx] = edge
+      else
+        transitions.push(edge)
 
       return true
     })
   }
 
   const removeTransition = (segmentId: string) => {
-    return updateProtocol((protocol) => {
-      const mainTrack = protocol.tracks.find(track => track.trackType === 'frames' && (track as any).isMain) as TrackTypeMapTrack['frames'] | undefined
+    return updateProtocolWithTransitionSync((protocol) => {
+      const mainTrack = getMainFramesTrack(protocol)
       if (!mainTrack)
         return false
 
-      const idx = mainTrack.children.findIndex(segment => segment.id === segmentId)
-      if (idx === -1)
+      const hasSegment = mainTrack.children.some(segment => segment.id === segmentId)
+      if (!hasSegment)
         return false
 
-      // Remove transition: can be called with either segment of the transition pair
-      // If segment has transitionIn, it's the start - clear transitionIn and next segment's transitionOut
-      // If segment has transitionOut, it's the end - clear transitionOut and previous segment's transitionIn
-      const currentSegment = mainTrack.children[idx] as TrackTypeMapSegment['frames']
-      const prevSegment = idx > 0 ? mainTrack.children[idx - 1] as TrackTypeMapSegment['frames'] : undefined
-      const nextSegment = idx < mainTrack.children.length - 1 ? mainTrack.children[idx + 1] as TrackTypeMapSegment['frames'] : undefined
-
-      let removed = false
-
-      // If current has transitionIn, it's the first segment of the pair
-      if (currentSegment.transitionIn) {
-        currentSegment.transitionIn = undefined
-        if (nextSegment) {
-          nextSegment.transitionOut = undefined
-        }
-        removed = true
-      }
-
-      // If current has transitionOut, it's the second segment of the pair
-      if (currentSegment.transitionOut) {
-        currentSegment.transitionOut = undefined
-        if (prevSegment) {
-          prevSegment.transitionIn = undefined
-        }
-        removed = true
-      }
-
-      return removed
+      const transitions = Array.isArray(protocol.transitions)
+        ? protocol.transitions
+        : []
+      const filtered = transitions.filter(edge =>
+        edge.fromSegmentId !== segmentId
+        && edge.toSegmentId !== segmentId,
+      )
+      if (filtered.length === transitions.length)
+        return false
+      protocol.transitions = filtered
+      return true
     })
   }
 
   const updateTransition = (segmentId: string, updater: (transition: ITransition) => void) => {
-    const mainTrack = tracks.value.frames?.find(track => track.trackType === 'frames' && track.isMain) as TrackTypeMapTrack['frames'] | undefined
-    if (!mainTrack)
+    return updateProtocolWithTransitionSync((protocol) => {
+      const mainTrack = getMainFramesTrack(protocol)
+      if (!mainTrack)
+        return false
+      const hasSegment = mainTrack.children.some(segment => segment.id === segmentId)
+      if (!hasSegment)
+        return false
+
+      const transitions = Array.isArray(protocol.transitions)
+        ? protocol.transitions
+        : []
+      const edge = transitions.find(item => item.fromSegmentId === segmentId)
+        ?? transitions.find(item => item.toSegmentId === segmentId)
+      if (edge) {
+        const nextTransition: ITransition = {
+          id: edge.id,
+          name: edge.name,
+          duration: edge.duration,
+        }
+        updater(nextTransition)
+        if (!isValidTransitionData(nextTransition))
+          throw new Error('invalid transition data')
+        edge.id = nextTransition.id
+        edge.name = nextTransition.name
+        edge.duration = nextTransition.duration
+        return true
+      }
+
       return false
-    const idx = mainTrack.children.findIndex(segment => segment.id === segmentId)
-
-    if (idx === -1)
-      return false
-
-    // update transition
-    // slice handle error transition data
-    updateSegment((segment) => {
-      if (!segment.transitionIn)
-        return
-      updater(segment.transitionIn)
-    }, mainTrack.children[idx].id, 'frames')
-    updateSegment((segment) => {
-      if (!segment.transitionOut)
-        return
-      updater(segment.transitionOut)
-    }, mainTrack.children[idx + 1].id, 'frames')
-
-    return true
+    })
   }
 
   const replaceTrackId = (oldTrackId: string, newTrackId: string) => {
-    return updateProtocol((protocol) => {
+    return updateProtocolWithTransitionSync((protocol) => {
       const track = protocol.tracks.find(t => t.trackId === oldTrackId)
       if (!track)
         return false
@@ -796,7 +891,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
   const replaceSegmentId = (oldSegmentId: string, newSegmentId: string) => {
     if (oldSegmentId === newSegmentId)
       return true
-    const success = updateProtocol((protocol) => {
+    const success = updateProtocolWithTransitionSync((protocol) => {
       for (const track of protocol.tracks) {
         if (track.children.some(segment => segment.id === newSegmentId))
           return false
@@ -806,6 +901,12 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         if (!segment)
           continue
         segment.id = newSegmentId
+        for (const edge of protocol.transitions ?? []) {
+          if (edge.fromSegmentId === oldSegmentId)
+            edge.fromSegmentId = newSegmentId
+          if (edge.toSegmentId === oldSegmentId)
+            edge.toSegmentId = newSegmentId
+        }
         return true
       }
       return false
@@ -899,6 +1000,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
 
 function normalizedProtocol(protocol: IVideoProtocol) {
   const normalized = normalizeProtocolTracks(clone(protocol))
+  normalizeProtocolTransitions(normalized)
   const { state: protocolState, update: updateProtocol, enable, redo, undo, undoCount, redoCount } = useHistory(normalized)
   enable()
 
