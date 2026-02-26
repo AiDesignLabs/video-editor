@@ -1,0 +1,226 @@
+import type { IVideoProtocol } from '@video-editor/shared'
+import type { AudioVoiceAction, TimelinePlan } from './timeline'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AudioManager } from './audio-manager'
+
+interface MockAudioOptions {
+  duration: number
+  rejectNonZeroSeek: boolean
+}
+
+class MockAudioElement {
+  static instances: MockAudioElement[] = []
+  static options: MockAudioOptions = {
+    duration: Number.NaN,
+    rejectNonZeroSeek: false,
+  }
+
+  static reset(options?: Partial<MockAudioOptions>) {
+    MockAudioElement.instances.length = 0
+    MockAudioElement.options = {
+      duration: Number.NaN,
+      rejectNonZeroSeek: false,
+      ...options,
+    }
+  }
+
+  readonly url: string
+  readonly duration: number
+  preload = 'auto'
+  loop = false
+  volume = 1
+  playbackRate = 1
+  private pausedFlag = true
+  private currentTimeValue = 0
+  private readonly rejectNonZeroSeek: boolean
+  playCalls = 0
+  pauseCalls = 0
+
+  constructor(url: string) {
+    this.url = url
+    this.duration = MockAudioElement.options.duration
+    this.rejectNonZeroSeek = MockAudioElement.options.rejectNonZeroSeek
+    MockAudioElement.instances.push(this)
+  }
+
+  get paused() {
+    return this.pausedFlag
+  }
+
+  get currentTime() {
+    return this.currentTimeValue
+  }
+
+  set currentTime(value: number) {
+    if (this.rejectNonZeroSeek && value > 0.05)
+      throw new Error('seek rejected by media element')
+    this.currentTimeValue = Math.max(0, value)
+  }
+
+  play() {
+    this.pausedFlag = false
+    this.playCalls += 1
+    return Promise.resolve()
+  }
+
+  pause() {
+    this.pausedFlag = true
+    this.pauseCalls += 1
+  }
+
+  removeAttribute(_name: string) {}
+
+  load() {}
+}
+
+class MockGainNode {
+  gain = { value: 1 }
+  connect() {}
+  disconnect() {}
+}
+
+class MockAudioBuffer {
+  readonly duration: number
+
+  constructor(
+    readonly channels: number,
+    readonly length: number,
+    readonly sampleRate: number,
+  ) {
+    this.duration = sampleRate > 0 ? length / sampleRate : 0
+  }
+
+  copyToChannel() {}
+}
+
+class MockBufferSource {
+  playbackRate = { value: 1 }
+  buffer?: MockAudioBuffer
+  connect() {}
+  disconnect() {}
+  start() {}
+  stop() {}
+}
+
+class MockAudioContext {
+  state: 'running' | 'suspended' = 'running'
+  currentTime = 0
+  destination = {}
+
+  resume() {
+    this.state = 'running'
+    return Promise.resolve()
+  }
+
+  createGain() {
+    return new MockGainNode()
+  }
+
+  createBuffer(channels: number, length: number, sampleRate: number) {
+    return new MockAudioBuffer(channels, length, sampleRate)
+  }
+
+  createBufferSource() {
+    return new MockBufferSource()
+  }
+}
+
+function createProtocol(): IVideoProtocol {
+  return {
+    id: 'audio-manager-test',
+    version: '1.0.0',
+    width: 1280,
+    height: 720,
+    fps: 30,
+    tracks: [
+      {
+        trackId: 'audio-track',
+        trackType: 'audio',
+        children: [
+          {
+            id: 'audio-1',
+            segmentType: 'audio',
+            url: 'https://example.com/audio.mp3',
+            startTime: 0,
+            endTime: 10000,
+            volume: 1,
+            playRate: 1,
+          },
+        ],
+      },
+    ],
+  }
+}
+
+function createPlan(action: AudioVoiceAction, sourceTimeMs: number): TimelinePlan {
+  return {
+    atMs: sourceTimeMs,
+    windowStartMs: Math.max(0, sourceTimeMs - 20),
+    windowEndMs: sourceTimeMs + 100,
+    visuals: [],
+    audioEvents: [
+      {
+        voiceId: 'audio:audio-1',
+        segmentId: 'audio-1',
+        trackId: 'audio-track',
+        segmentKind: 'audio',
+        action,
+        atTimelineMs: sourceTimeMs,
+        sourceTimeMs,
+        gain: 1,
+        rate: 1,
+      },
+    ],
+  }
+}
+
+describe('AudioManager audio-element seek guards', () => {
+  beforeEach(() => {
+    MockAudioElement.reset()
+    vi.stubGlobal('Audio', MockAudioElement as unknown as typeof Audio)
+    vi.stubGlobal('window', {
+      AudioContext: MockAudioContext,
+      webkitAudioContext: MockAudioContext,
+      setInterval: globalThis.setInterval.bind(globalThis),
+      clearInterval: globalThis.clearInterval.bind(globalThis),
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('does not play when source offset is beyond actual media duration', () => {
+    MockAudioElement.reset({
+      duration: 2,
+    })
+    const manager = new AudioManager(createProtocol())
+
+    manager.applyTimelinePlan(createPlan('start', 3000), true)
+
+    const element = MockAudioElement.instances[0]
+    expect(element).toBeDefined()
+    expect(element?.playCalls).toBe(0)
+    expect(element?.pauseCalls).toBeGreaterThan(0)
+
+    manager.destroy()
+  })
+
+  it('does not fallback to head playback when seek to non-zero source is rejected', () => {
+    MockAudioElement.reset({
+      duration: Number.NaN,
+      rejectNonZeroSeek: true,
+    })
+    const manager = new AudioManager(createProtocol())
+
+    manager.applyTimelinePlan(createPlan('start', 0), true)
+    manager.applyTimelinePlan(createPlan('seek', 3000), true)
+
+    const element = MockAudioElement.instances[0]
+    expect(element).toBeDefined()
+    expect(element?.playCalls).toBe(1)
+    expect(element?.pauseCalls).toBeGreaterThan(0)
+
+    manager.destroy()
+  })
+})

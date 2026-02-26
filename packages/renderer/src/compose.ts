@@ -1,8 +1,10 @@
-import type { IAudioSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { IVideoProtocol } from '@video-editor/shared'
 import type { IClip, ICombinatorOpts } from '@webav/av-cliper'
 import { AudioClip, Combinator, MP4Clip, OffscreenSprite } from '@webav/av-cliper'
 import { ProtocolVideoClip } from './protocol-clip'
 import type { ProtocolVideoClipOptions } from './protocol-clip'
+import { createComposeAudioInputs } from './timeline'
+import type { ComposeAudioInput } from './timeline'
 
 export interface ComposeProtocolOptions extends Omit<ICombinatorOpts, 'width' | 'height' | 'fps'> {
   width?: number
@@ -194,14 +196,6 @@ function createSegmentAudioConfig(segment: SegmentAudioInput): SegmentAudioConfi
   }
 }
 
-function isAudioSegment(segment: SegmentUnion): segment is IAudioSegment {
-  return segment.segmentType === 'audio'
-}
-
-function isVideoSegmentWithAudio(segment: SegmentUnion): segment is IVideoFramesSegment {
-  return segment.segmentType === 'frames' && segment.type === 'video'
-}
-
 async function fetchReadable(url: string, timeoutMs: number = RESOURCE_TIMEOUT_MS): Promise<ReadableStream<Uint8Array>> {
   const controller = new AbortController()
   const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs)
@@ -239,39 +233,17 @@ async function createSegmentAudioSprite(sourceClip: IClip, segment: SegmentAudio
   return sprite
 }
 
-async function createAudioSpriteFromAudioSegment(segment: IAudioSegment): Promise<OffscreenSprite> {
-  const stream = await fetchReadable(segment.url)
-  const sourceClip = new AudioClip(stream)
-  return await createSegmentAudioSprite(sourceClip, segment)
-}
-
-async function createAudioSpriteFromVideoSegment(segment: IVideoFramesSegment): Promise<OffscreenSprite> {
-  const stream = await fetchReadable(segment.url)
-  const sourceClip = new MP4Clip(stream, { audio: true })
-  return await createSegmentAudioSprite(sourceClip, segment)
+async function createAudioSpriteFromInput(input: ComposeAudioInput): Promise<OffscreenSprite> {
+  const stream = await fetchReadable(input.url)
+  const sourceClip: IClip = input.segmentKind === 'audio'
+    ? new AudioClip(stream)
+    : new MP4Clip(stream, { audio: true })
+  return await createSegmentAudioSprite(sourceClip, input)
 }
 
 async function createProtocolAudioSprites(protocol: IVideoProtocol): Promise<OffscreenSprite[]> {
-  const tasks: Array<Promise<OffscreenSprite>> = []
-  for (const track of protocol.tracks) {
-    for (const child of track.children) {
-      if (child.endTime <= child.startTime)
-        continue
-
-      if (isAudioSegment(child)) {
-        if (normalizeVolume(child.volume) <= 0)
-          continue
-        tasks.push(createAudioSpriteFromAudioSegment(child))
-        continue
-      }
-
-      if (isVideoSegmentWithAudio(child)) {
-        if (normalizeVolume(child.volume) <= 0)
-          continue
-        tasks.push(createAudioSpriteFromVideoSegment(child))
-      }
-    }
-  }
+  const inputs = createComposeAudioInputs(protocol)
+  const tasks = inputs.map(input => createAudioSpriteFromInput(input))
 
   if (!tasks.length)
     return []

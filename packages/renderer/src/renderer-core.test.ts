@@ -17,8 +17,8 @@ const { audioManagerInstances } = vi.hoisted(() => ({
   audioManagerInstances: [] as Array<{
     protocol: IVideoProtocol
     setProtocol: ReturnType<typeof vi.fn>
-    sync: ReturnType<typeof vi.fn>
-    ensureMp4Audio: ReturnType<typeof vi.fn>
+    applyTimelinePlan: ReturnType<typeof vi.fn>
+    resetTimelineState: ReturnType<typeof vi.fn>
     destroy: ReturnType<typeof vi.fn>
   }>,
 }))
@@ -45,6 +45,29 @@ vi.mock('opfs-tools', () => ({
 }))
 
 vi.mock('pixi.js', () => {
+  class Filter {}
+
+  class BlurFilter extends Filter {
+    public strength = 8
+
+    constructor(options?: { strength?: number }) {
+      super()
+      if (typeof options?.strength === 'number')
+        this.strength = options.strength
+    }
+  }
+
+  class ColorMatrixFilter extends Filter {
+    grayscale() {}
+    sepia() {}
+    negative() {}
+    vintage() {}
+    contrast() {}
+    brightness() {}
+    saturate() {}
+    hue() {}
+  }
+
   class Container {
     public children: unknown[] = []
 
@@ -89,7 +112,7 @@ vi.mock('pixi.js', () => {
     destroy() {}
   }
 
-  return { Container, Sprite, Texture }
+  return { BlurFilter, ColorMatrixFilter, Container, Filter, Sprite, Texture }
 })
 
 vi.mock('./audio-manager', () => {
@@ -98,8 +121,8 @@ vi.mock('./audio-manager', () => {
     public setProtocol = vi.fn((protocol: IVideoProtocol) => {
       this.protocol = protocol
     })
-    public sync = vi.fn()
-    public ensureMp4Audio = vi.fn()
+    public applyTimelinePlan = vi.fn()
+    public resetTimelineState = vi.fn()
     public destroy = vi.fn()
 
     constructor(protocol: IVideoProtocol) {
@@ -204,6 +227,19 @@ function createMockApp() {
   }
 }
 
+function stubAnimationFrame() {
+  const originalRaf = globalThis.requestAnimationFrame
+  const originalCancel = globalThis.cancelAnimationFrame
+  const requestAnimationFrame = vi.fn(() => 1)
+  const cancelAnimationFrame = vi.fn()
+  ;(globalThis as unknown as { requestAnimationFrame: typeof requestAnimationFrame }).requestAnimationFrame = requestAnimationFrame
+  ;(globalThis as unknown as { cancelAnimationFrame: typeof cancelAnimationFrame }).cancelAnimationFrame = cancelAnimationFrame
+  return () => {
+    ;(globalThis as unknown as { requestAnimationFrame: typeof originalRaf }).requestAnimationFrame = originalRaf
+    ;(globalThis as unknown as { cancelAnimationFrame: typeof originalCancel }).cancelAnimationFrame = originalCancel
+  }
+}
+
 function getTrack<T extends TrackUnion['trackType']>(
   protocol: IVideoProtocol,
   trackId: string,
@@ -295,6 +331,109 @@ describe('createRenderer protocol sync', () => {
       expect(latestIds).toEqual(['audio-2'])
     }
     finally {
+      renderer.destroy()
+    }
+  })
+})
+
+describe('createRenderer audio scheduler', () => {
+  it('uses plan path when rendering at a paused timeline', async () => {
+    audioManagerInstances.length = 0
+    const protocol = ref(createProtocol([createAudioSegment('audio-1', 0, 1000)]))
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as any,
+      manualRender: true,
+      warmUpResources: false,
+    })
+
+    try {
+      await renderer.renderAt(100)
+      const audioManager = getAudioManagerInstance()
+      expect(audioManager.applyTimelinePlan).toHaveBeenCalledTimes(1)
+      const [plan, isPlaying] = audioManager.applyTimelinePlan.mock.calls[0] ?? []
+      expect(typeof plan).toBe('object')
+      expect(isPlaying).toBe(false)
+    }
+    finally {
+      renderer.destroy()
+    }
+  })
+
+  it('resets timeline state with hard stop on seek', async () => {
+    audioManagerInstances.length = 0
+    const protocol = ref(createProtocol([createAudioSegment('audio-1', 0, 1000)]))
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as any,
+      manualRender: true,
+      warmUpResources: false,
+    })
+
+    try {
+      const audioManager = getAudioManagerInstance()
+      audioManager.resetTimelineState.mockClear()
+      renderer.seek(500)
+      expect(audioManager.resetTimelineState).toHaveBeenCalledTimes(1)
+      expect(audioManager.resetTimelineState).toHaveBeenCalledWith({ stop: true })
+    }
+    finally {
+      renderer.destroy()
+    }
+  })
+
+  it('starts ticker on play and emits non-dry-run plan', async () => {
+    audioManagerInstances.length = 0
+    const restoreAnimationFrame = stubAnimationFrame()
+    const protocol = ref(createProtocol([createAudioSegment('audio-1', 0, 1000)]))
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as any,
+      manualRender: true,
+      warmUpResources: false,
+    })
+
+    try {
+      const audioManager = getAudioManagerInstance()
+      audioManager.applyTimelinePlan.mockClear()
+      renderer.play()
+      expect(audioManager.applyTimelinePlan).toHaveBeenCalledTimes(1)
+      const [plan, isPlaying] = audioManager.applyTimelinePlan.mock.calls[0] ?? []
+      expect(typeof plan).toBe('object')
+      expect(isPlaying).toBe(true)
+      renderer.pause()
+    }
+    finally {
+      restoreAnimationFrame()
+      renderer.destroy()
+    }
+  })
+
+  it('resets timeline state on pause', async () => {
+    audioManagerInstances.length = 0
+    const restoreAnimationFrame = stubAnimationFrame()
+    const protocol = ref(createProtocol([createAudioSegment('audio-1', 0, 1000)]))
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as any,
+      manualRender: true,
+      warmUpResources: false,
+    })
+
+    try {
+      const audioManager = getAudioManagerInstance()
+      renderer.play()
+      audioManager.resetTimelineState.mockClear()
+      renderer.pause()
+      expect(audioManager.resetTimelineState).toHaveBeenCalledTimes(1)
+      expect(audioManager.resetTimelineState).toHaveBeenCalledWith({ stop: true })
+    }
+    finally {
+      restoreAnimationFrame()
       renderer.destroy()
     }
   })

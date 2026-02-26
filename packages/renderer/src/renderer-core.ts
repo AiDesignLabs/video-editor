@@ -1,6 +1,8 @@
 import type { ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { ComputedRef, Ref, ShallowRef } from '@vue/reactivity'
+import type { Filter as PixiFilter } from 'pixi.js'
 import type { Application, ApplicationOptions } from 'pixi.js'
+import type { TimelinePlan } from './timeline'
 import type { MaybeRef, PixiDisplayObject } from './types'
 import { createResourceManager, createValidator, getResourceKey } from '@video-editor/protocol'
 import {
@@ -21,11 +23,19 @@ import {
   applyDisplayProps,
   clamp,
   cloneProtocol,
-  collectActiveSegments,
   collectResourceUrls,
   computeDuration,
   placeholder,
 } from './helpers'
+import {
+  createEmptyEvaluatorState,
+  createPixiFiltersFromVisualEffects,
+  createPreviewAudioTicker,
+  createPreviewRunner,
+  createVisualRenderItems,
+  createTimelineTransport,
+  evaluateTimelinePlan,
+} from './timeline'
 import { buildTextContent, buildTextCss, renderTextBitmap } from './text'
 
 const DEFAULT_RES_DIR = '/video-editor-res'
@@ -58,8 +68,13 @@ export interface Renderer {
 
 interface AudioManagerApi {
   setProtocol: (protocol: IVideoProtocol) => void
-  sync: (currentTime: number, isPlaying: boolean) => void | Promise<void>
-  ensureMp4Audio: (id: string, clip: MP4Clip, startUs: number, fps: number) => void
+  applyTimelinePlan: (plan: TimelinePlan, isPlaying: boolean) => void
+  resetTimelineState: (options?: { stop?: boolean }) => void
+  playMp4AudioFrames?: (
+    id: string,
+    audio: Float32Array[] | Float32Array | undefined,
+    sampleRate: number,
+  ) => void
   destroy: () => void
 }
 
@@ -120,6 +135,22 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const isPlaying = ref(false)
   const duration = computed(() => computeDuration(validatedProtocol.value))
   const audioManager: AudioManagerApi = new AudioManager(validatedProtocol.value) as unknown as AudioManagerApi
+  const transport = createTimelineTransport({
+    initialTimelineMs: currentTime.value,
+    initialRate: 1,
+    playing: false,
+  })
+  const previewRunner = createPreviewRunner({
+    transport,
+  })
+  const previewAudioTicker = createPreviewAudioTicker({
+    transport,
+    runner: previewRunner,
+    getProtocol: () => validatedProtocol.value,
+    onPlan: (plan) => {
+      applyAudioPlan(plan)
+    },
+  })
 
   let rafId: number | undefined
   let lastTickAt = 0
@@ -133,18 +164,44 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     getDisplay: (segment: SegmentUnion) => Promise<PixiDisplayObject | undefined>
   }
 
+  function resetSchedulerState() {
+    previewRunner.reset()
+    audioManager.resetTimelineState({ stop: true })
+  }
+
+  function applyAudioPlan(plan: TimelinePlan) {
+    audioManager.applyTimelinePlan(plan, isPlaying.value)
+  }
+
+  function syncAudioWithScheduler(protocol: IVideoProtocol, at: number) {
+    if (isPlaying.value)
+      return
+
+    const plan = previewRunner.evaluate(protocol, at)
+    applyAudioPlan(plan)
+  }
+
   async function renderScene(task: RenderTask) {
     const generation = renderGeneration
     const { protocol, at, layer } = task
-    const renderAt = normalizeRenderTime(protocol, at)
-    const active = collectActiveSegments(protocol, renderAt)
+    const renderTimelineMs = normalizeRenderTime(protocol, at)
     const stageWidth = task.app.renderer.width
     const stageHeight = task.app.renderer.height
 
-    audioManager.sync(at, isPlaying.value)
+    syncAudioWithScheduler(protocol, at)
+
+    const visualPlan = evaluateTimelinePlan(protocol, {
+      atMs: renderTimelineMs,
+      windowStartMs: renderTimelineMs,
+      windowEndMs: renderTimelineMs,
+      fps: Math.max(protocol.fps || 30, 1),
+    }, createEmptyEvaluatorState()).plan.visuals
+    const visualItems = createVisualRenderItems(protocol, visualPlan)
+    const filterCache = new Map<string, PixiFilter[] | null>()
 
     const renders: (PixiDisplayObject | undefined)[] = []
-    for (const { segment } of active) {
+    for (const visual of visualItems) {
+      const { segment } = visual
       if (generation !== renderGeneration)
         return
       const display = await task.getDisplay(segment)
@@ -154,9 +211,14 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         continue
       if ((display as { destroyed?: boolean }).destroyed)
         continue
-      applyDisplayProps(display, segment, stageWidth, stageHeight)
+      applyVisualEffects(display, visual.effects, filterCache)
+      applyDisplayProps(display, segment, stageWidth, stageHeight, {
+        opacity: visual.opacity,
+      })
       if (isVideoSegment(segment))
-        await updateVideoFrame(segment, renderAt)
+        await updateVideoFrame(segment, visual.sourceTimeMs, {
+          includeAudio: visual.includeAudio,
+        })
       if (generation !== renderGeneration)
         return
       renders.push(display)
@@ -171,6 +233,22 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (generation !== renderGeneration)
       return
     task.app.render()
+  }
+
+  function applyVisualEffects(
+    display: PixiDisplayObject,
+    effects: TimelinePlan['visuals'][number]['effects'],
+    cache: Map<string, PixiFilter[] | null>,
+  ) {
+    const key = effects?.length ? JSON.stringify(effects) : ''
+    let resolved = cache.get(key)
+    if (resolved === undefined) {
+      resolved = effects?.length
+        ? createPixiFiltersFromVisualEffects(effects)
+        : null
+      cache.set(key, resolved)
+    }
+    ;(display as PixiDisplayObject & { filters?: PixiFilter[] | null }).filters = resolved
   }
 
   const queueRender = createRenderQueue(() => renderScene({
@@ -195,6 +273,9 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
           return
         }
         audioManager.setProtocol(validatedProtocol.value)
+        resetSchedulerState()
+        if (isPlaying.value)
+          previewAudioTicker.tick()
         renderGeneration += 1
         clearDisplays()
         if (opts.warmUpResources !== false)
@@ -281,17 +362,23 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (isPlaying.value)
       return
     isPlaying.value = true
-    lastTickAt = performance.now()
+    const now = performance.now()
+    transport.seek(currentTime.value, now)
+    transport.play(now)
+    previewAudioTicker.start()
+    lastTickAt = now
     rafId = requestAnimationFrame(loop)
   }
 
   function pause() {
     isPlaying.value = false
+    const now = performance.now()
+    transport.pause(now)
+    previewAudioTicker.stop()
+    resetSchedulerState()
     if (rafId !== undefined)
       cancelAnimationFrame(rafId)
     rafId = undefined
-    // Stop audio immediately when pausing
-    audioManager.sync(currentTime.value, false)
     if (opts.freezeOnPause !== false)
       freezeVideoEntries()
   }
@@ -327,10 +414,18 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   function seek(time: number) {
     currentTime.value = clamp(time, 0, duration.value || Number.POSITIVE_INFINITY)
+    transport.seek(currentTime.value, performance.now())
+    resetSchedulerState()
+    if (isPlaying.value)
+      previewAudioTicker.tick()
   }
 
   async function renderAt(time: number) {
     currentTime.value = clamp(time, 0, duration.value || Number.POSITIVE_INFINITY)
+    transport.seek(currentTime.value, performance.now())
+    resetSchedulerState()
+    if (isPlaying.value)
+      previewAudioTicker.tick()
     await queueRender()
   }
 
@@ -485,14 +580,18 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       || msg.includes('tick video timeout')
   }
 
-  async function updateVideoFrame(segment: IVideoFramesSegment, at: number) {
+  async function updateVideoFrame(
+    segment: IVideoFramesSegment,
+    sourceTimeMs: number,
+    options: { includeAudio?: boolean } = {},
+  ) {
     const entry = videoEntries.get(segment.id)
     if (!entry)
       return
 
     try {
-      const offsetMs = segment.fromTime ?? 0
-      const relativeMs = Math.max(0, at - segment.startTime + offsetMs)
+      const includeAudio = options.includeAudio !== false
+      const relativeMs = Math.max(0, sourceTimeMs)
       const relativeUs = Math.floor(relativeMs * 1000)
       if (entry.kind === 'frozen') {
         const urlKey = getResourceKey(segment.url)
@@ -502,7 +601,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         if (!revived)
           return
         videoEntries.set(segment.id, revived)
-        return await updateVideoFrame(segment, at)
+        return await updateVideoFrame(segment, sourceTimeMs, options)
       }
       if (entry.kind === 'mp4clip') {
         try {
@@ -516,10 +615,9 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
             res.video.close()
           }
           // Play audio directly from tick result (avoid calling tick twice)
-          if (isPlaying.value && res.audio && res.audio.length > 0) {
-            const sampleRate = (entry.clip as { meta?: { audioSampleRate?: number } }).meta?.audioSampleRate ?? 48000;
-            (audioManager as unknown as { playMp4AudioFrames: (id: string, audio: Float32Array[], sampleRate: number) => void })
-              .playMp4AudioFrames(segment.id, res.audio as Float32Array[], sampleRate)
+          if (includeAudio && isPlaying.value && res.audio && res.audio.length > 0) {
+            const sampleRate = readVideoAudioSampleRate(entry.clip)
+            audioManager.playMp4AudioFrames?.(segment.id, res.audio, sampleRate)
           }
           return
         }
@@ -535,7 +633,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
               })
               if (replacement) {
                 videoEntries.set(segment.id, replacement)
-                return await updateVideoFrame(segment, at)
+                return await updateVideoFrame(segment, sourceTimeMs, options)
               }
             }
           }
@@ -555,7 +653,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       await updateVideoElementFrame(entry, {
         targetSec: relativeSec,
         playbackRate: segment.playRate ?? 1,
-        volume: segment.volume ?? 1,
+        volume: includeAudio ? (segment.volume ?? 1) : 0,
       })
     }
     catch (err) {
@@ -711,7 +809,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     let clip: MP4Clip | undefined
     try {
       if (file) {
-        clip = new MP4Clip(file)
+        clip = new MP4Clip(file, { audio: true })
       }
       else {
         const res = await fetch(url)
@@ -723,10 +821,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
               controller.close()
             },
           })
-          clip = new MP4Clip(stream)
+          clip = new MP4Clip(stream, { audio: true })
         }
         else {
-          clip = new MP4Clip(res.body)
+          clip = new MP4Clip(res.body, { audio: true })
         }
       }
 
@@ -888,7 +986,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     resourceWarmUp.clear()
     if (!opts.app)
       app.destroy()
-    
+
     audioManager.destroy()
   }
 
@@ -940,4 +1038,11 @@ function createRenderQueue(job: () => Promise<void> | void) {
   }
 
   return run
+}
+
+function readVideoAudioSampleRate(clip: MP4Clip): number {
+  const sampleRate = (clip as { meta?: { audioSampleRate?: number } }).meta?.audioSampleRate
+  if (typeof sampleRate === 'number' && Number.isFinite(sampleRate) && sampleRate > 0)
+    return sampleRate
+  return 48000
 }

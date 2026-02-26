@@ -1,5 +1,4 @@
 import type { IVideoProtocol, SegmentUnion } from '@video-editor/shared'
-import type { TrackTypeMapTrack } from '@video-editor/shared'
 import type { PixiDisplayObject } from './types'
 import { toRaw } from '@vue/reactivity'
 import { Graphics, Sprite, Texture } from 'pixi.js'
@@ -16,33 +15,18 @@ export function collectResourceUrls(protocol: IVideoProtocol) {
   return urls
 }
 
-export function collectActiveSegments(protocol: IVideoProtocol, at: number) {
-  const active: { segment: SegmentUnion, trackIndex: number, childIndex: number }[] = []
-  protocol.tracks.forEach((track, trackIndex) => {
-    track.children.forEach((segment, childIndex) => {
-      if (segment.startTime <= at && at < segment.endTime)
-        active.push({ segment, trackIndex, childIndex })
-    })
-  })
-
-  return active.sort((a, b) => {
-    const aTrack = protocol.tracks[a.trackIndex]
-    const bTrack = protocol.tracks[b.trackIndex]
-    const aIsMain = aTrack?.trackType === 'frames' && (aTrack as TrackTypeMapTrack['frames']).isMain
-    const bIsMain = bTrack?.trackType === 'frames' && (bTrack as TrackTypeMapTrack['frames']).isMain
-    const total = protocol.tracks.length
-    const aOrder = aIsMain ? 0 : total - a.trackIndex
-    const bOrder = bIsMain ? 0 : total - b.trackIndex
-    if (aOrder !== bOrder)
-      return aOrder - bOrder
-    if (a.trackIndex === b.trackIndex)
-      return a.childIndex - b.childIndex
-    return a.trackIndex - b.trackIndex
-  })
+export interface ApplyDisplayPropsOptions {
+  opacity?: number
 }
 
-export function applyDisplayProps(display: PixiDisplayObject, segment: SegmentUnion, width: number, height: number) {
-  const opacity = readOpacity(segment)
+export function applyDisplayProps(
+  display: PixiDisplayObject,
+  segment: SegmentUnion,
+  width: number,
+  height: number,
+  options: ApplyDisplayPropsOptions = {},
+) {
+  const opacity = normalizeOpacity(options.opacity ?? readOpacity(segment))
   const sourceWidth = display instanceof Sprite ? display.texture.width || width : width
   const sourceHeight = display instanceof Sprite ? display.texture.height || height : height
   const layout = computeSegmentLayout(segment, width, height, sourceWidth, sourceHeight)
@@ -113,4 +97,10 @@ function readOpacity(segment: SegmentUnion) {
   if (hasOpacity(segment) && typeof segment.opacity === 'number')
     return segment.opacity
   return 1
+}
+
+function normalizeOpacity(opacity: number) {
+  if (!Number.isFinite(opacity))
+    return 1
+  return Math.min(Math.max(opacity, 0), 1)
 }
