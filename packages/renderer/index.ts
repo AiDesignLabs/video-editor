@@ -16,3 +16,34 @@ export { ProtocolVideoClip } from './src/index'
 export type {
   ProtocolVideoClipOptions,
 } from './src/index'
+export {
+  createComposeAudioInputs,
+  createComposeRunner,
+  collectTransitionByFromSegmentId,
+  createEmptyEvaluatorState,
+  createPixiFiltersFromVisualEffects,
+  createVisualRenderItems,
+  createTimelineTransport,
+  evaluateTimelinePlan,
+} from './src/index'
+export type {
+  ActiveVoiceRef,
+  AudioPlanEvent,
+  AudioVoiceAction,
+  ComposeRunner,
+  ComposeRunnerEvaluateOptions,
+  CreateTimelineTransportOptions,
+  EvalContext,
+  ComposeAudioInput,
+  EvaluatorOutput,
+  EvaluatorState,
+  ResolvedTransitionEdge,
+  TimelinePlan,
+  TimelineTransport,
+  TransportSnapshot,
+  VisualEffectParam,
+  VisualRenderItem,
+  VisualPlanItem,
+  VisualTrackEffectParam,
+  VisualTrackFilterParam,
+} from './src/index'
