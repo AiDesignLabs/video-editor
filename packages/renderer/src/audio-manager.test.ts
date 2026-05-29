@@ -1,4 +1,4 @@
-import type { IVideoProtocol } from '@video-editor/shared'
+import type { IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import type { AudioVoiceAction, TimelinePlan } from './timeline'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AudioManager } from './audio-manager'
@@ -152,6 +152,36 @@ function createProtocol(): IVideoProtocol {
   }
 }
 
+function createVideoAudioProtocol(): IVideoProtocol {
+  const videoSegment: IVideoFramesSegment = {
+    id: 'video-1',
+    segmentType: 'frames',
+    type: 'video',
+    url: 'https://example.com/video.mp4',
+    startTime: 0,
+    endTime: 10000,
+    fromTime: 500,
+    volume: 0.7,
+    playRate: 1.25,
+  }
+
+  return {
+    id: 'video-audio-manager-test',
+    version: '1.0.0',
+    width: 1280,
+    height: 720,
+    fps: 30,
+    tracks: [
+      {
+        trackId: 'frames-track',
+        trackType: 'frames',
+        isMain: true,
+        children: [videoSegment],
+      },
+    ],
+  }
+}
+
 function createPlan(action: AudioVoiceAction, sourceTimeMs: number): TimelinePlan {
   return {
     atMs: sourceTimeMs,
@@ -169,6 +199,28 @@ function createPlan(action: AudioVoiceAction, sourceTimeMs: number): TimelinePla
         sourceTimeMs,
         gain: 1,
         rate: 1,
+      },
+    ],
+  }
+}
+
+function createVideoPlan(action: AudioVoiceAction, sourceTimeMs: number): TimelinePlan {
+  return {
+    atMs: sourceTimeMs,
+    windowStartMs: Math.max(0, sourceTimeMs - 20),
+    windowEndMs: sourceTimeMs + 100,
+    visuals: [],
+    audioEvents: [
+      {
+        voiceId: 'video:video-1',
+        segmentId: 'video-1',
+        trackId: 'frames-track',
+        segmentKind: 'video',
+        action,
+        atTimelineMs: sourceTimeMs,
+        sourceTimeMs,
+        gain: 0.7,
+        rate: 1.25,
       },
     ],
   }
@@ -220,6 +272,43 @@ describe('AudioManager audio-element seek guards', () => {
     expect(element).toBeDefined()
     expect(element?.playCalls).toBe(1)
     expect(element?.pauseCalls).toBeGreaterThan(0)
+
+    manager.destroy()
+  })
+
+  it('plays video segment audio through a media element at the planned source time', () => {
+    MockAudioElement.reset({
+      duration: 8,
+    })
+    const manager = new AudioManager(createVideoAudioProtocol())
+
+    manager.applyTimelinePlan(createVideoPlan('start', 1500), true)
+
+    const element = MockAudioElement.instances[0]
+    expect(element).toBeDefined()
+    expect(element?.url).toBe('https://example.com/video.mp4')
+    expect(element?.currentTime).toBeCloseTo(1.5, 6)
+    expect(element?.volume).toBeCloseTo(0.7, 6)
+    expect(element?.playbackRate).toBeCloseTo(1.25, 6)
+    expect(element?.playCalls).toBe(1)
+
+    manager.destroy()
+  })
+
+  it('uses the resolved media element URL for video segment audio', () => {
+    MockAudioElement.reset({
+      duration: 8,
+    })
+    const manager = new AudioManager(createVideoAudioProtocol(), {
+      resolveMediaElementUrl: segment => segment.id === 'video-1' ? 'blob:opfs-video' : undefined,
+    })
+
+    manager.applyTimelinePlan(createVideoPlan('start', 1500), true)
+
+    const element = MockAudioElement.instances[0]
+    expect(element).toBeDefined()
+    expect(element?.url).toBe('blob:opfs-video')
+    expect(element?.playCalls).toBe(1)
 
     manager.destroy()
   })

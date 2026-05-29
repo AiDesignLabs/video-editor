@@ -39,6 +39,8 @@ import {
 import { buildTextContent, buildTextCss, renderTextBitmap } from './text'
 
 const DEFAULT_RES_DIR = '/video-editor-res'
+const VIDEO_PRELOAD_LOOKAHEAD_MS = 1500
+const VIDEO_PRELOAD_LIMIT = 2
 
 export interface RendererOptions {
   protocol: MaybeRef<IVideoProtocol>
@@ -70,11 +72,6 @@ interface AudioManagerApi {
   setProtocol: (protocol: IVideoProtocol) => void
   applyTimelinePlan: (plan: TimelinePlan, isPlaying: boolean) => void
   resetTimelineState: (options?: { stop?: boolean }) => void
-  playMp4AudioFrames?: (
-    id: string,
-    audio: Float32Array[] | Float32Array | undefined,
-    sampleRate: number,
-  ) => void
   destroy: () => void
 }
 
@@ -130,11 +127,16 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   )
   const videoEntries = new Map<string, VideoEntry>()
   const videoObjectUrls = new Map<HTMLVideoElement, string>()
+  const videoDisplayPreloading = new Set<string>()
 
   const currentTime = ref(0)
   const isPlaying = ref(false)
   const duration = computed(() => computeDuration(validatedProtocol.value))
-  const audioManager: AudioManagerApi = new AudioManager(validatedProtocol.value) as unknown as AudioManagerApi
+  const mediaElementObjectUrls = new Map<string, string>()
+  const mediaElementObjectUrlLoading = new Map<string, Promise<string | undefined>>()
+  const audioManager: AudioManagerApi = new AudioManager(validatedProtocol.value, {
+    resolveMediaElementUrl,
+  }) as unknown as AudioManagerApi
   const transport = createTimelineTransport({
     initialTimelineMs: currentTime.value,
     initialRate: 1,
@@ -189,6 +191,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     const stageHeight = task.app.renderer.height
 
     syncAudioWithScheduler(protocol, at)
+    preloadUpcomingVideoDisplays(protocol, renderTimelineMs)
 
     const visualPlan = evaluateTimelinePlan(protocol, {
       atMs: renderTimelineMs,
@@ -216,9 +219,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         opacity: visual.opacity,
       })
       if (isVideoSegment(segment))
-        await updateVideoFrame(segment, visual.sourceTimeMs, {
-          includeAudio: visual.includeAudio,
-        })
+        await updateVideoFrame(segment, visual.sourceTimeMs)
       if (generation !== renderGeneration)
         return
       renders.push(display)
@@ -278,9 +279,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
           previewAudioTicker.tick()
         renderGeneration += 1
         clearDisplays()
-        if (opts.warmUpResources !== false)
+        if (opts.warmUpResources !== false) {
           warmUpResources(validatedProtocol.value)
+          warmUpMediaElementSources(validatedProtocol.value)
+        }
         cleanupCache(validatedProtocol.value)
+        cleanupMediaElementObjectUrls(validatedProtocol.value)
         clampCurrentTime()
         if (!opts.manualRender)
           queueRender()
@@ -326,6 +330,18 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     }
   }
 
+  function warmUpMediaElementSources(protocol: IVideoProtocol) {
+    for (const track of protocol.tracks) {
+      for (const segment of track.children) {
+        if (!isVideoSegment(segment))
+          continue
+        if ((segment.volume ?? 1) <= 0)
+          continue
+        void ensureMediaElementObjectUrl(segment.url)
+      }
+    }
+  }
+
   function cleanupCache(protocol: IVideoProtocol) {
     const ids = new Set<string>()
     for (const track of protocol.tracks) {
@@ -343,6 +359,26 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         continue
       destroyVideoEntry(entry)
       videoEntries.delete(id)
+    }
+  }
+
+  function cleanupMediaElementObjectUrls(protocol: IVideoProtocol) {
+    const activeKeys = new Set<string>()
+    for (const track of protocol.tracks) {
+      for (const segment of track.children) {
+        if (!isVideoSegment(segment))
+          continue
+        const key = getResourceKey(segment.url)
+        if (key)
+          activeKeys.add(key)
+      }
+    }
+
+    for (const [key, objectUrl] of mediaElementObjectUrls) {
+      if (activeKeys.has(key))
+        continue
+      URL.revokeObjectURL(objectUrl)
+      mediaElementObjectUrls.delete(key)
     }
   }
 
@@ -449,6 +485,47 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     return display
   }
 
+  function preloadUpcomingVideoDisplays(protocol: IVideoProtocol, atMs: number) {
+    const availableSlots = VIDEO_PRELOAD_LIMIT - videoDisplayPreloading.size
+    if (availableSlots <= 0)
+      return
+
+    const windowEndMs = atMs + VIDEO_PRELOAD_LOOKAHEAD_MS
+    const candidates: IVideoFramesSegment[] = []
+
+    for (const track of protocol.tracks) {
+      for (const segment of track.children) {
+        if (!isVideoSegment(segment))
+          continue
+        if (segment.startTime <= atMs || segment.startTime > windowEndMs)
+          continue
+        if (displayCache.has(segment.id) || displayLoading.has(segment.id) || videoDisplayPreloading.has(segment.id))
+          continue
+        candidates.push(segment)
+      }
+    }
+
+    candidates.sort((left, right) => left.startTime - right.startTime)
+    for (const segment of candidates.slice(0, availableSlots))
+      void preloadVideoDisplay(segment)
+  }
+
+  async function preloadVideoDisplay(segment: IVideoFramesSegment) {
+    videoDisplayPreloading.add(segment.id)
+    try {
+      const display = await loadDisplay(segment)
+      if (display && !displayCache.has(segment.id))
+        displayCache.set(segment.id, display)
+      await updateVideoFrame(segment, Math.max(segment.fromTime ?? 0, 0))
+    }
+    catch (err) {
+      console.error('[renderer] failed to preload upcoming video segment', segment.url, err)
+    }
+    finally {
+      videoDisplayPreloading.delete(segment.id)
+    }
+  }
+
   async function loadDisplay(segment: SegmentUnion): Promise<PixiDisplayObject | undefined> {
     // prioritize static resources via protocol resource manager
     if (segment.segmentType === 'frames' || segment.segmentType === 'sticker') {
@@ -519,6 +596,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (existing)
       return existing.sprite
 
+    void ensureMediaElementObjectUrl(segment.url)
     const urlKey = getResourceKey(segment.url)
     const allowMp4Clip = videoSourceMode !== 'element'
     const allowVideoElement = videoSourceMode !== 'mp4clip'
@@ -583,14 +661,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   async function updateVideoFrame(
     segment: IVideoFramesSegment,
     sourceTimeMs: number,
-    options: { includeAudio?: boolean } = {},
   ) {
     const entry = videoEntries.get(segment.id)
     if (!entry)
       return
 
     try {
-      const includeAudio = options.includeAudio !== false
       const relativeMs = Math.max(0, sourceTimeMs)
       const relativeUs = Math.floor(relativeMs * 1000)
       if (entry.kind === 'frozen') {
@@ -601,7 +677,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         if (!revived)
           return
         videoEntries.set(segment.id, revived)
-        return await updateVideoFrame(segment, sourceTimeMs, options)
+        return await updateVideoFrame(segment, sourceTimeMs)
       }
       if (entry.kind === 'mp4clip') {
         try {
@@ -613,11 +689,6 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
               refreshCanvasTexture(entry.texture)
             }
             res.video.close()
-          }
-          // Play audio directly from tick result (avoid calling tick twice)
-          if (includeAudio && isPlaying.value && res.audio && res.audio.length > 0) {
-            const sampleRate = readVideoAudioSampleRate(entry.clip)
-            audioManager.playMp4AudioFrames?.(segment.id, res.audio, sampleRate)
           }
           return
         }
@@ -633,7 +704,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
               })
               if (replacement) {
                 videoEntries.set(segment.id, replacement)
-                return await updateVideoFrame(segment, sourceTimeMs, options)
+                return await updateVideoFrame(segment, sourceTimeMs)
               }
             }
           }
@@ -653,7 +724,6 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       await updateVideoElementFrame(entry, {
         targetSec: relativeSec,
         playbackRate: segment.playRate ?? 1,
-        volume: includeAudio ? (segment.volume ?? 1) : 0,
       })
     }
     catch (err) {
@@ -721,6 +791,61 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       return undefined
     }
     return undefined
+  }
+
+  function resolveMediaElementUrl(segment: { url: string, segmentType?: string, type?: string }) {
+    if (segment.segmentType !== 'frames' || segment.type !== 'video')
+      return undefined
+
+    const key = getResourceKey(segment.url)
+    if (!key)
+      return undefined
+
+    void ensureMediaElementObjectUrl(segment.url)
+    return mediaElementObjectUrls.get(key)
+  }
+
+  async function ensureMediaElementObjectUrl(url: string): Promise<string | undefined> {
+    if (!shouldUseResourceManager(url))
+      return undefined
+
+    const key = getResourceKey(url)
+    if (!key)
+      return undefined
+
+    const existing = mediaElementObjectUrls.get(key)
+    if (existing)
+      return existing
+
+    const loading = mediaElementObjectUrlLoading.get(key)
+    if (loading)
+      return await loading
+
+    const job = (async () => {
+      let file = await getOpfsFile(url)
+      if (!file) {
+        await resourceManager.add(url).catch(() => {})
+        file = await getOpfsFile(url)
+      }
+      if (!file)
+        return undefined
+
+      const originFile = await file.getOriginFile()
+      if (!originFile)
+        return undefined
+
+      const objectUrl = URL.createObjectURL(originFile)
+      mediaElementObjectUrls.set(key, objectUrl)
+      return objectUrl
+    })()
+
+    mediaElementObjectUrlLoading.set(key, job)
+    try {
+      return await job
+    }
+    finally {
+      mediaElementObjectUrlLoading.delete(key)
+    }
   }
 
   function shouldUseResourceManager(url: string) {
@@ -809,7 +934,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     let clip: MP4Clip | undefined
     try {
       if (file) {
-        clip = new MP4Clip(file, { audio: true })
+        clip = new MP4Clip(file, { audio: false })
       }
       else {
         const res = await fetch(url)
@@ -821,10 +946,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
               controller.close()
             },
           })
-          clip = new MP4Clip(stream, { audio: true })
+          clip = new MP4Clip(stream, { audio: false })
         }
         else {
-          clip = new MP4Clip(res.body, { audio: true })
+          clip = new MP4Clip(res.body, { audio: false })
         }
       }
 
@@ -872,7 +997,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   async function loadVideoSpriteViaElement(url: string, reuse?: { sprite: Sprite, oldTexture?: Texture }): Promise<VideoEntry | undefined> {
     const video = document.createElement('video')
     video.crossOrigin = 'anonymous'
-    video.muted = false
+    video.muted = true
     video.playsInline = true
     video.preload = 'metadata'
     video.src = url
@@ -910,11 +1035,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
 
-  async function updateVideoElementFrame(entry: Extract<VideoEntry, { kind: 'element' }>, opts: { targetSec: number, playbackRate: number, volume?: number }) {
+  async function updateVideoElementFrame(entry: Extract<VideoEntry, { kind: 'element' }>, opts: { targetSec: number, playbackRate: number }) {
     const { video, canvas, texture } = entry
 
     video.playbackRate = Number.isFinite(opts.playbackRate) && opts.playbackRate > 0 ? opts.playbackRate : 1
-    video.volume = Math.max(0, Math.min(1, opts.volume ?? 1))
+    video.muted = true
+    video.volume = 0
 
     if (isPlaying.value)
       video.play().catch(() => {})
@@ -984,6 +1110,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     displayCache.clear()
     displayLoading.clear()
     resourceWarmUp.clear()
+    for (const objectUrl of mediaElementObjectUrls.values())
+      URL.revokeObjectURL(objectUrl)
+    mediaElementObjectUrls.clear()
+    mediaElementObjectUrlLoading.clear()
     if (!opts.app)
       app.destroy()
 
@@ -1038,11 +1168,4 @@ function createRenderQueue(job: () => Promise<void> | void) {
   }
 
   return run
-}
-
-function readVideoAudioSampleRate(clip: MP4Clip): number {
-  const sampleRate = (clip as { meta?: { audioSampleRate?: number } }).meta?.audioSampleRate
-  if (typeof sampleRate === 'number' && Number.isFinite(sampleRate) && sampleRate > 0)
-    return sampleRate
-  return 48000
 }

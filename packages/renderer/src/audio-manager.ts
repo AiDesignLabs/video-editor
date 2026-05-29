@@ -1,4 +1,4 @@
-import type { IAudioSegment, IVideoProtocol } from '@video-editor/shared'
+import type { IAudioSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import type { AudioPlanEvent, TimelinePlan } from './timeline'
 interface Mp4State {
   sources: AudioBufferSourceNode[]
@@ -25,8 +25,15 @@ interface PlannedVoiceRuntime {
   lastRate?: number
 }
 
+type AudioElementSegment = IAudioSegment | IVideoFramesSegment
+
+interface AudioManagerOptions {
+  resolveMediaElementUrl?: (segment: AudioElementSegment) => string | undefined
+}
+
 export class AudioManager {
   private protocol: IVideoProtocol
+  private options: AudioManagerOptions
   private mp4States = new Map<string, Mp4State>()
   private mp4Gains = new Map<string, GainNode>()
   private plannedVideoAudioGains = new Map<string, number>()
@@ -35,8 +42,9 @@ export class AudioManager {
   private audioElements = new Map<string, AudioElementState>()
   private ctx: AudioContext
 
-  constructor(protocol: IVideoProtocol) {
+  constructor(protocol: IVideoProtocol, options: AudioManagerOptions = {}) {
     this.protocol = protocol
+    this.options = options
     this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
   }
 
@@ -287,6 +295,9 @@ export class AudioManager {
     const key = this.videoKey(event.segmentId)
     const voice = this.getOrCreatePlannedVoice(event)
     if (event.action === 'stop') {
+      const state = this.audioElements.get(key)
+      if (state)
+        this.pauseAudioElementState(state)
       this.stopMp4Audio(event.segmentId)
       this.plannedVideoAudioGains.delete(key)
       this.plannedVideoAudioRates.delete(key)
@@ -295,13 +306,60 @@ export class AudioManager {
       return
     }
 
+    const segment = this.findVideoSegment(event.segmentId)
+    if (!segment)
+      return
+    const state = this.getOrCreateAudioElementState(key, segment)
+
     if (event.action === 'start' || event.action === 'seek') {
-      if (voice.phase === 'playing' || event.action === 'seek')
-        this.stopMp4Audio(event.segmentId)
-      else
-        this.resetMp4Audio(event.segmentId)
-      if (typeof event.sourceTimeMs === 'number')
-        voice.lastSourceSec = Math.max(0, event.sourceTimeMs / 1000)
+      this.stopMp4Audio(event.segmentId)
+      const sourceOffsetMs = this.computeSegmentSourceOffsetMs(
+        segment,
+        event.atTimelineMs,
+        event.sourceTimeMs,
+      )
+      const { targetSourceSec, isSourceExhausted } = this.resolveAudioElementSourceWindow(
+        state,
+        segment,
+        sourceOffsetMs,
+      )
+      if (isSourceExhausted) {
+        this.pauseAudioElementState(state)
+        voice.lastSourceSec = targetSourceSec
+        voice.phase = 'ended'
+        return
+      }
+      const needsSeek = targetSourceSec !== undefined
+        && (voice.phase !== 'playing'
+          || event.action === 'seek'
+          || voice.lastSourceSec === undefined
+          || Math.abs((voice.lastSourceSec ?? 0) - targetSourceSec) > 0.02)
+      if (needsSeek) {
+        const seekApplied = this.seekAudioElement(state, targetSourceSec, event.atTimelineMs)
+        if (!seekApplied && targetSourceSec > 0.05) {
+          this.pauseAudioElementState(state)
+          voice.phase = 'idle'
+          return
+        }
+      }
+
+      if (typeof event.gain === 'number') {
+        const normalizedGain = this.normalizeVolume(event.gain)
+        if (voice.lastGain === undefined || Math.abs((voice.lastGain ?? 0) - normalizedGain) > 0.001)
+          state.el.volume = normalizedGain
+        this.plannedVideoAudioGains.set(key, normalizedGain)
+        voice.lastGain = normalizedGain
+      }
+      if (typeof event.rate === 'number') {
+        const normalizedRate = this.normalizePlayRate(event.rate)
+        if (voice.lastRate === undefined || Math.abs((voice.lastRate ?? 0) - normalizedRate) > 0.001)
+          state.el.playbackRate = normalizedRate
+        this.plannedVideoAudioRates.set(key, normalizedRate)
+        voice.lastRate = normalizedRate
+      }
+      if (targetSourceSec !== undefined)
+        voice.lastSourceSec = targetSourceSec
+      this.playAudioElementState(state)
       voice.phase = 'playing'
     }
 
@@ -309,6 +367,8 @@ export class AudioManager {
       const normalizedGain = this.normalizeVolume(event.gain)
       if (voice.lastGain === undefined || Math.abs((voice.lastGain ?? 0) - normalizedGain) > 0.001)
         this.plannedVideoAudioGains.set(key, normalizedGain)
+      if (voice.lastGain === undefined || Math.abs((voice.lastGain ?? 0) - normalizedGain) > 0.001)
+        state.el.volume = normalizedGain
       const gainNode = this.mp4Gains.get(key)
       if (gainNode)
         gainNode.gain.value = normalizedGain
@@ -319,6 +379,8 @@ export class AudioManager {
       const normalizedRate = this.normalizePlayRate(event.rate)
       if (voice.lastRate === undefined || Math.abs((voice.lastRate ?? 0) - normalizedRate) > 0.001)
         this.plannedVideoAudioRates.set(key, normalizedRate)
+      if (voice.lastRate === undefined || Math.abs((voice.lastRate ?? 0) - normalizedRate) > 0.001)
+        state.el.playbackRate = normalizedRate
       voice.lastRate = normalizedRate
     }
   }
@@ -390,14 +452,15 @@ export class AudioManager {
     return gainNode
   }
 
-  private getOrCreateAudioElementState(key: string, segment: IAudioSegment): AudioElementState {
+  private getOrCreateAudioElementState(key: string, segment: AudioElementSegment): AudioElementState {
+    const nextUrl = this.options.resolveMediaElementUrl?.(segment) ?? segment.url
     const existing = this.audioElements.get(key)
     if (existing) {
-      if (existing.url !== segment.url) {
+      if (existing.url !== nextUrl) {
         existing.el.pause()
-        existing.el.src = segment.url
+        existing.el.src = nextUrl
         existing.el.currentTime = 0
-        existing.url = segment.url
+        existing.url = nextUrl
         existing.pendingPlay = undefined
         existing.lastTimelineMs = undefined
         existing.lastSourceSec = undefined
@@ -406,14 +469,14 @@ export class AudioManager {
       return existing
     }
 
-    const el = new Audio(segment.url)
+    const el = new Audio(nextUrl)
     el.preload = 'auto'
     el.loop = false
     el.volume = this.normalizeVolume(segment.volume)
     el.playbackRate = this.normalizePlayRate(segment.playRate)
     const state: AudioElementState = {
       segmentId: segment.id,
-      url: segment.url,
+      url: nextUrl,
       el,
     }
     this.audioElements.set(key, state)
@@ -495,7 +558,7 @@ export class AudioManager {
   }
 
   private computeSegmentSourceOffsetMs(
-    segment: IAudioSegment,
+    segment: AudioElementSegment,
     timelineMs: number,
     sourceTimeMs?: number,
   ): number {
@@ -509,7 +572,7 @@ export class AudioManager {
 
   private resolveAudioElementSourceWindow(
     state: AudioElementState,
-    segment: IAudioSegment,
+    segment: AudioElementSegment,
     sourceOffsetMs: number,
   ): { targetSourceSec: number, isSourceExhausted: boolean } {
     const playRate = this.normalizePlayRate(segment.playRate)
@@ -567,6 +630,16 @@ export class AudioManager {
       for (const segment of track.children) {
         if (segment.id === id && segment.segmentType === 'audio')
           return segment as IAudioSegment
+      }
+    }
+    return undefined
+  }
+
+  private findVideoSegment(id: string): IVideoFramesSegment | undefined {
+    for (const track of this.protocol.tracks) {
+      for (const segment of track.children) {
+        if (segment.id === id && segment.segmentType === 'frames' && segment.type === 'video')
+          return segment as IVideoFramesSegment
       }
     }
     return undefined

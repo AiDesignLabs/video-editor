@@ -7,20 +7,36 @@ import type {
   IImageFramesSegment,
   IStickerSegment,
   ITextSegment,
+  IVideoFramesSegment,
   IVideoProtocol,
   TrackUnion,
 } from '@video-editor/shared'
 import { ref } from '@vue/reactivity'
 import { describe, expect, it, vi } from 'vitest'
 
-const { audioManagerInstances } = vi.hoisted(() => ({
+const { audioManagerInstances, mp4ClipInstances, opfsState } = vi.hoisted(() => ({
   audioManagerInstances: [] as Array<{
     protocol: IVideoProtocol
+    options?: {
+      resolveMediaElementUrl?: (segment: IAudioSegment | IVideoFramesSegment) => string | undefined
+    }
     setProtocol: ReturnType<typeof vi.fn>
     applyTimelinePlan: ReturnType<typeof vi.fn>
     resetTimelineState: ReturnType<typeof vi.fn>
     destroy: ReturnType<typeof vi.fn>
   }>,
+  mp4ClipInstances: [] as Array<{
+    source: unknown
+    options?: { audio?: boolean }
+    ready: Promise<void>
+    meta: { width: number, height: number }
+    tick: ReturnType<typeof vi.fn>
+    destroy: ReturnType<typeof vi.fn>
+  }>,
+  opfsState: {
+    exists: false,
+    originFile: undefined as File | undefined,
+  },
 }))
 
 vi.mock('@video-editor/protocol', () => ({
@@ -35,12 +51,29 @@ vi.mock('@video-editor/protocol', () => ({
 }))
 
 vi.mock('@webav/av-cliper', () => ({
-  MP4Clip: class {},
+  MP4Clip: class {
+    public source: unknown
+    public options?: { audio?: boolean }
+    public ready = Promise.resolve()
+    public meta = { width: 640, height: 360 }
+    public tick = vi.fn(async () => ({
+      video: { close: vi.fn() },
+      audio: [],
+    }))
+    public destroy = vi.fn()
+
+    constructor(source: unknown, options?: { audio?: boolean }) {
+      this.source = source
+      this.options = options
+      mp4ClipInstances.push(this)
+    }
+  },
 }))
 
 vi.mock('opfs-tools', () => ({
   file: vi.fn(() => ({
-    exists: vi.fn(async () => false),
+    exists: vi.fn(async () => opfsState.exists),
+    getOriginFile: vi.fn(async () => opfsState.originFile),
   })),
 }))
 
@@ -90,6 +123,13 @@ vi.mock('pixi.js', () => {
   class Sprite {
     public destroyed = false
     public texture: unknown
+    public anchor = { set: vi.fn() }
+    public position = { set: vi.fn() }
+    public scale = { set: vi.fn() }
+    public rotation = 0
+    public alpha = 1
+    public width = 0
+    public height = 0
 
     constructor(texture?: unknown) {
       this.texture = texture
@@ -118,6 +158,9 @@ vi.mock('pixi.js', () => {
 vi.mock('./audio-manager', () => {
   class AudioManager {
     public protocol: IVideoProtocol
+    public options?: {
+      resolveMediaElementUrl?: (segment: IAudioSegment | IVideoFramesSegment) => string | undefined
+    }
     public setProtocol = vi.fn((protocol: IVideoProtocol) => {
       this.protocol = protocol
     })
@@ -125,8 +168,14 @@ vi.mock('./audio-manager', () => {
     public resetTimelineState = vi.fn()
     public destroy = vi.fn()
 
-    constructor(protocol: IVideoProtocol) {
+    constructor(
+      protocol: IVideoProtocol,
+      options?: {
+        resolveMediaElementUrl?: (segment: IAudioSegment | IVideoFramesSegment) => string | undefined
+      },
+    ) {
       this.protocol = protocol
+      this.options = options
       audioManagerInstances.push(this)
     }
   }
@@ -155,6 +204,18 @@ function createFrameSegment(id: string, startTime: number, endTime: number): IIm
     url: `https://example.com/${id}.png`,
     startTime,
     endTime,
+  }
+}
+
+function createVideoSegment(id: string, startTime: number, endTime: number): IVideoFramesSegment {
+  return {
+    id,
+    segmentType: 'frames',
+    type: 'video',
+    url: `https://example.com/${id}.mp4`,
+    startTime,
+    endTime,
+    fromTime: 0,
   }
 }
 
@@ -227,6 +288,47 @@ function createMockApp() {
   }
 }
 
+function stubVideoRenderGlobals(options?: { pendingFetchUrls?: Set<string> }) {
+  const originalDocument = globalThis.document
+  const originalFetch = globalThis.fetch
+
+  const drawImage = vi.fn()
+  const createElement = vi.fn((tagName: string) => {
+    if (tagName === 'canvas') {
+      return {
+        width: 0,
+        height: 0,
+        getContext: vi.fn(() => ({ drawImage })),
+      }
+    }
+    throw new Error(`Unexpected element: ${tagName}`)
+  })
+
+  ;(globalThis as unknown as { document: Pick<Document, 'createElement'> }).document = { createElement } as unknown as Pick<Document, 'createElement'>
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input)
+    if (options?.pendingFetchUrls?.has(url))
+      return new Promise<Response>(() => {})
+
+    return Promise.resolve({
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.close()
+        },
+      }),
+    } as Response)
+  })
+  ;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
+
+  return {
+    fetchMock,
+    restore: () => {
+      ;(globalThis as unknown as { document: typeof originalDocument }).document = originalDocument
+      ;(globalThis as unknown as { fetch: typeof originalFetch }).fetch = originalFetch
+    },
+  }
+}
+
 function stubAnimationFrame() {
   const originalRaf = globalThis.requestAnimationFrame
   const originalCancel = globalThis.cancelAnimationFrame
@@ -268,6 +370,251 @@ async function flushReactivity() {
   await Promise.resolve()
   await Promise.resolve()
 }
+
+describe('createRenderer video segment preloading', () => {
+  it('resolves video segment audio from an OPFS object URL', async () => {
+    audioManagerInstances.length = 0
+    opfsState.exists = true
+    opfsState.originFile = { name: 'video-1.mp4' } as File
+    const createObjectURL = vi.fn(() => 'blob:opfs-video-1')
+    const revokeObjectURL = vi.fn()
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    URL.createObjectURL = createObjectURL
+    URL.revokeObjectURL = revokeObjectURL
+    const protocol = ref<IVideoProtocol>({
+      id: 'renderer-video-audio-opfs',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [
+        {
+          trackId: 'frames-track',
+          trackType: 'frames',
+          isMain: true,
+          children: [
+            createVideoSegment('video-1', 0, 1000),
+          ],
+        },
+      ],
+    })
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as unknown as Parameters<typeof createRenderer>[0]['app'],
+      manualRender: true,
+    })
+
+    try {
+      await flushReactivity()
+      await flushReactivity()
+
+      const audioManager = getAudioManagerInstance()
+      const videoSegment = protocol.value.tracks[0]!.children[0] as IVideoFramesSegment
+      expect(audioManager.options?.resolveMediaElementUrl?.(videoSegment)).toBe('blob:opfs-video-1')
+      expect(createObjectURL).toHaveBeenCalledWith(opfsState.originFile)
+    }
+    finally {
+      renderer.destroy()
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:opfs-video-1')
+      URL.createObjectURL = originalCreateObjectURL
+      URL.revokeObjectURL = originalRevokeObjectURL
+      opfsState.exists = false
+      opfsState.originFile = undefined
+    }
+  })
+
+  it('opens MP4Clip for preview visuals without decoding video segment audio', async () => {
+    audioManagerInstances.length = 0
+    mp4ClipInstances.length = 0
+    const { restore } = stubVideoRenderGlobals()
+    const protocol = ref<IVideoProtocol>({
+      id: 'renderer-video-visual-only',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [
+        {
+          trackId: 'frames-track',
+          trackType: 'frames',
+          isMain: true,
+          children: [
+            createVideoSegment('video-1', 0, 1000),
+          ],
+        },
+      ],
+    })
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as any,
+      manualRender: true,
+      warmUpResources: false,
+      videoSourceMode: 'mp4clip',
+    })
+
+    try {
+      await renderer.renderAt(100)
+
+      expect(mp4ClipInstances[0]?.options).toEqual({ audio: false })
+    }
+    finally {
+      restore()
+      renderer.destroy()
+    }
+  })
+
+  it('loads and draws the first frame of the next video segment before it becomes active', async () => {
+    audioManagerInstances.length = 0
+    mp4ClipInstances.length = 0
+    const { restore } = stubVideoRenderGlobals()
+    const protocol = ref<IVideoProtocol>({
+      id: 'renderer-video-preload',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [
+        {
+          trackId: 'frames-track',
+          trackType: 'frames',
+          isMain: true,
+          children: [
+            createVideoSegment('video-1', 0, 1000),
+            createVideoSegment('video-2', 1000, 2000),
+          ],
+        },
+      ],
+    })
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as any,
+      manualRender: true,
+      warmUpResources: false,
+      videoSourceMode: 'mp4clip',
+    })
+
+    try {
+      await renderer.renderAt(800)
+      await flushReactivity()
+
+      expect(mp4ClipInstances).toHaveLength(2)
+      expect(mp4ClipInstances.some(instance => instance.tick.mock.calls.some(([time]) => time === 0))).toBe(true)
+    }
+    finally {
+      restore()
+      renderer.destroy()
+    }
+  })
+
+  it('does not start video preloading before the next segment is close enough', async () => {
+    audioManagerInstances.length = 0
+    mp4ClipInstances.length = 0
+    const { restore } = stubVideoRenderGlobals()
+    const protocol = ref<IVideoProtocol>({
+      id: 'renderer-video-preload-window',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [
+        {
+          trackId: 'frames-track',
+          trackType: 'frames',
+          isMain: true,
+          children: [
+            createVideoSegment('video-1', 0, 5000),
+            createVideoSegment('video-2', 5000, 9000),
+          ],
+        },
+      ],
+    })
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as any,
+      manualRender: true,
+      warmUpResources: false,
+      videoSourceMode: 'mp4clip',
+    })
+
+    try {
+      await renderer.renderAt(1000)
+      await flushReactivity()
+
+      expect(mp4ClipInstances).toHaveLength(1)
+      await renderer.renderAt(3600)
+      await flushReactivity()
+      expect(mp4ClipInstances).toHaveLength(2)
+    }
+    finally {
+      restore()
+      renderer.destroy()
+    }
+  })
+
+  it('keeps repeated render passes from starting more preloads than the in-flight limit', async () => {
+    audioManagerInstances.length = 0
+    mp4ClipInstances.length = 0
+    const pendingFetchUrls = new Set([
+      'https://example.com/video-2.mp4',
+      'https://example.com/video-3.mp4',
+      'https://example.com/video-4.mp4',
+      'https://example.com/video-5.mp4',
+    ])
+    const { fetchMock, restore } = stubVideoRenderGlobals({ pendingFetchUrls })
+    const protocol = ref<IVideoProtocol>({
+      id: 'renderer-video-preload-concurrency',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [
+        {
+          trackId: 'frames-track',
+          trackType: 'frames',
+          isMain: true,
+          children: [
+            createVideoSegment('video-1', 0, 1000),
+            createVideoSegment('video-2', 1000, 2000),
+            createVideoSegment('video-3', 1100, 2100),
+            createVideoSegment('video-4', 1200, 2200),
+            createVideoSegment('video-5', 1300, 2300),
+          ],
+        },
+      ],
+    })
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as any,
+      manualRender: true,
+      warmUpResources: false,
+      videoSourceMode: 'mp4clip',
+    })
+
+    try {
+      await renderer.renderAt(0)
+      await flushReactivity()
+      await renderer.renderAt(100)
+      await flushReactivity()
+
+      const fetchedUrls = fetchMock.mock.calls.map(([url]) => String(url))
+      expect(fetchedUrls).toEqual([
+        'https://example.com/video-2.mp4',
+        'https://example.com/video-3.mp4',
+        'https://example.com/video-1.mp4',
+      ])
+    }
+    finally {
+      restore()
+      renderer.destroy()
+    }
+  })
+})
 
 describe('createRenderer protocol sync', () => {
   it('updates AudioManager with latest protocol after deep mutation', async () => {
