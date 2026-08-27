@@ -1,4 +1,4 @@
-import type { IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { ITransform, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { VisualEffectParam, VisualPlanItem } from './types'
 import { isVideoFramesSegment } from '@video-editor/shared'
 
@@ -6,6 +6,7 @@ export interface VisualRenderItem {
   segment: SegmentUnion
   sourceTimeMs: number
   opacity: number
+  transform?: ITransform
   includeAudio: boolean
   effects?: VisualEffectParam[]
 }
@@ -32,6 +33,7 @@ export function createVisualRenderItems(
       segment,
       sourceTimeMs: Math.max(0, visual.sourceTimeMs),
       opacity: fromOpacity,
+      transform: visual.transform,
       includeAudio: true,
       effects: visual.effects,
     })
@@ -56,6 +58,7 @@ export function createVisualRenderItems(
       segment: targetSegment,
       sourceTimeMs: targetSourceTimeMs,
       opacity: targetOpacity,
+      transform: 'transform' in targetSegment ? targetSegment.transform : undefined,
       includeAudio: false,
       effects: visual.effects,
     })

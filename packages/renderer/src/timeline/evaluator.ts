@@ -1,5 +1,6 @@
 import type {
   IAudioSegment,
+  ITransform,
   IVideoProtocol,
   SegmentUnion,
   TrackUnion,
@@ -189,6 +190,7 @@ function buildVisualPlanItem(input: {
     zOrder: trackOrder * 10000 + childIndex,
     sourceTimeMs: mapSourceTimeMs(segment, atMs),
     opacity: readOpacity(segment),
+    transform: readTransform(segment),
     transition: computeTransition(segment, transition, atMs),
     effects: effects.length ? effects : undefined,
   }
@@ -269,6 +271,10 @@ function computeTransition(
 
 function isActiveAt(segment: SegmentUnion, atMs: number): boolean {
   return segment.startTime <= atMs && atMs < segment.endTime
+}
+
+function readTransform(segment: SegmentUnion): ITransform | undefined {
+  return 'transform' in segment ? segment.transform : undefined
 }
 
 function readOpacity(segment: SegmentUnion): number {

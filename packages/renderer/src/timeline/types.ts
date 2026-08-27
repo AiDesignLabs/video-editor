@@ -1,4 +1,4 @@
-import type { ITrackType } from '@video-editor/shared'
+import type { ITrackType, ITransform } from '@video-editor/shared'
 
 export type AudioVoiceAction = 'start' | 'stop' | 'seek' | 'gain' | 'rate'
 
@@ -27,6 +27,7 @@ export interface VisualPlanItem {
   zOrder: number
   sourceTimeMs: number
   opacity: number
+  transform?: ITransform
   transition?: {
     fromSegmentId: string
     toSegmentId: string

@@ -1,4 +1,4 @@
-import type { IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { ITransform, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { PixiDisplayObject } from './types'
 import { toRaw } from '@vue/reactivity'
 import { Graphics, Sprite, Texture } from 'pixi.js'
@@ -17,6 +17,7 @@ export function collectResourceUrls(protocol: IVideoProtocol) {
 
 export interface ApplyDisplayPropsOptions {
   opacity?: number
+  transform?: ITransform
 }
 
 export function applyDisplayProps(
@@ -29,7 +30,7 @@ export function applyDisplayProps(
   const opacity = normalizeOpacity(options.opacity ?? readOpacity(segment))
   const sourceWidth = display instanceof Sprite ? display.texture.width || width : width
   const sourceHeight = display instanceof Sprite ? display.texture.height || height : height
-  const layout = computeSegmentLayout(segment, width, height, sourceWidth, sourceHeight)
+  const layout = computeSegmentLayout(segment, width, height, sourceWidth, sourceHeight, options.transform)
 
   if (display instanceof Sprite) {
     display.anchor.set(0.5)

@@ -1,4 +1,4 @@
-import type { IFillMode, SegmentUnion } from '@video-editor/shared'
+import type { IFillMode, ITransform, SegmentUnion } from '@video-editor/shared'
 
 export interface SegmentLayout {
   width: number
@@ -46,6 +46,7 @@ export function computeSegmentLayout(
   stageHeight: number,
   sourceWidth: number,
   sourceHeight: number,
+  transformOverride?: ITransform,
 ): SegmentLayout {
   const fillMode = 'fillMode' in segment ? segment.fillMode : undefined
   const { width, height } = resolveFillSize(
@@ -56,7 +57,7 @@ export function computeSegmentLayout(
     stageHeight,
   )
 
-  const transform = 'transform' in segment ? segment.transform : undefined
+  const transform = transformOverride ?? ('transform' in segment ? segment.transform : undefined)
   const [px, py] = transform?.position ?? [0, 0]
   const [sx, sy] = transform?.scale ?? [1, 1]
   const rotation = transform?.rotation?.[2] ?? 0

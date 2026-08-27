@@ -238,6 +238,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       applyVisualEffects(display, segment, visual.effects)
       applyDisplayProps(display, segment, stageWidth, stageHeight, {
         opacity: visual.opacity,
+        transform: visual.transform,
       })
       if (isVideoSegment(segment))
         await updateVideoFrame(segment, visual.sourceTimeMs)
