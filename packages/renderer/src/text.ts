@@ -1,5 +1,5 @@
 import type { ITextBasic } from '@video-editor/shared'
-import { renderTxt2ImgBitmap } from '@webav/av-cliper'
+import { renderTextToImageBitmap } from './text-bitmap'
 
 const DEFAULT_TEXT_BITMAP_CACHE_LIMIT = 100
 const textBitmapCache = new Map<string, ImageBitmap>()
@@ -83,7 +83,7 @@ export async function renderTextBitmap(content: string, cssText: string) {
     return cached
   }
 
-  const bitmap = await renderTxt2ImgBitmap(content, cssText)
+  const bitmap = await renderTextToImageBitmap(content, cssText)
   if (textBitmapCacheLimit > 0) {
     textBitmapCache.set(key, bitmap)
     trimCache()

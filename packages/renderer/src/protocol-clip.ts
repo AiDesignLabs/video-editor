@@ -70,7 +70,7 @@ export class ProtocolVideoClip implements IClip {
       autoPlay: false,
       freezeOnPause: false,
       manualRender: true,
-      videoSourceMode: rendererOptions.videoSourceMode ?? 'mp4clip',
+      videoSourceMode: rendererOptions.videoSourceMode ?? 'auto',
     })
     this.renderer = renderer
 

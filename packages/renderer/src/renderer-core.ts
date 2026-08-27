@@ -13,7 +13,8 @@ import {
   unref,
   watch,
 } from '@vue/reactivity'
-import { MP4Clip } from '@webav/av-cliper'
+import type { MediaInputHandle } from '@video-editor/media'
+import { openMediaInput } from '@video-editor/media'
 import { file as opfsFile } from 'opfs-tools'
 import { Container, Sprite, Texture } from 'pixi.js'
 import { createApp as create2dApp } from './2d'
@@ -49,7 +50,7 @@ export interface RendererOptions {
   autoPlay?: boolean
   freezeOnPause?: boolean
   manualRender?: boolean
-  videoSourceMode?: 'auto' | 'mp4clip' | 'element'
+  videoSourceMode?: 'auto' | 'element'
   warmUpResources?: boolean
 }
 
@@ -96,13 +97,13 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const resourceWarmUp = new Set<string>()
   const displayCache = new Map<string, PixiDisplayObject>()
   const displayLoading = new Map<string, Promise<PixiDisplayObject | undefined>>()
-  const mp4ClipUnsupportedKeys = new Set<string>()
-  const mp4ClipErrorLoggedKeys = new Set<string>()
+  const decoderUnsupportedKeys = new Set<string>()
+  const decoderErrorLoggedKeys = new Set<string>()
   const videoSourceMode = opts.videoSourceMode ?? 'auto'
   type VideoEntry = (
     | {
-      kind: 'mp4clip'
-      clip: MP4Clip
+      kind: 'decoder'
+      handle: MediaInputHandle
       canvas: HTMLCanvasElement
       texture: Texture
       sprite: Sprite
@@ -597,11 +598,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
     void ensureMediaElementObjectUrl(segment.url)
     const urlKey = getResourceKey(segment.url)
-    const allowMp4Clip = videoSourceMode !== 'element'
-    const allowVideoElement = videoSourceMode !== 'mp4clip'
-    if (urlKey && mp4ClipUnsupportedKeys.has(urlKey)) {
-      if (!allowVideoElement)
-        throw new Error(`[renderer] MP4Clip unsupported for ${segment.url}`)
+    const allowDecoder = videoSourceMode !== 'element'
+    if (urlKey && decoderUnsupportedKeys.has(urlKey)) {
       const spriteFromElement = await loadVideoSpriteViaElement(segment.url).catch((err) => {
         console.error('[renderer] failed to load video via <video>', segment.url, err)
         return undefined
@@ -613,46 +611,31 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       return undefined
     }
 
-    if (allowMp4Clip) {
-      const spriteFromClip = await loadVideoSpriteViaMP4Clip(segment.url).catch((err) => {
-        if (urlKey && isMp4ClipUnsupported(err))
-          mp4ClipUnsupportedKeys.add(urlKey)
-        if (!urlKey || !mp4ClipErrorLoggedKeys.has(urlKey)) {
+    if (allowDecoder) {
+      const spriteFromDecoder = await loadVideoSpriteViaDecoder(segment.url).catch((err) => {
+        if (!urlKey || !decoderErrorLoggedKeys.has(urlKey)) {
           if (urlKey)
-            mp4ClipErrorLoggedKeys.add(urlKey)
-          console.error('[renderer] failed to load video via MP4Clip', segment.url, err)
+            decoderErrorLoggedKeys.add(urlKey)
+          console.error('[renderer] failed to load video via decoder', segment.url, err)
         }
-        if (!allowVideoElement)
-          throw err
         return undefined
       })
-      if (spriteFromClip) {
-        videoEntries.set(segment.id, spriteFromClip)
-        return spriteFromClip.sprite
+      if (spriteFromDecoder) {
+        videoEntries.set(segment.id, spriteFromDecoder)
+        return spriteFromDecoder.sprite
       }
     }
 
-    if (allowVideoElement) {
-      const spriteFromElement = await loadVideoSpriteViaElement(segment.url).catch((err) => {
-        console.error('[renderer] failed to load video via <video>', segment.url, err)
-        return undefined
-      })
-      if (spriteFromElement) {
-        videoEntries.set(segment.id, spriteFromElement)
-        return spriteFromElement.sprite
-      }
+    const spriteFromElement = await loadVideoSpriteViaElement(segment.url).catch((err) => {
+      console.error('[renderer] failed to load video via <video>', segment.url, err)
+      return undefined
+    })
+    if (spriteFromElement) {
+      videoEntries.set(segment.id, spriteFromElement)
+      return spriteFromElement.sprite
     }
 
     return undefined
-  }
-
-  function isMp4ClipUnsupported(err: unknown) {
-    if (!(err instanceof Error))
-      return false
-    const msg = err.message || ''
-    return msg.includes('stream is done')
-      || msg.includes('not emit ready')
-      || msg.includes('tick video timeout')
   }
 
   async function updateVideoFrame(
@@ -665,7 +648,6 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
     try {
       const relativeMs = Math.max(0, sourceTimeMs)
-      const relativeUs = Math.floor(relativeMs * 1000)
       if (entry.kind === 'frozen') {
         const urlKey = getResourceKey(segment.url)
         if (!urlKey)
@@ -676,38 +658,33 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         videoEntries.set(segment.id, revived)
         return await updateVideoFrame(segment, sourceTimeMs)
       }
-      if (entry.kind === 'mp4clip') {
+      if (entry.kind === 'decoder') {
         try {
-          const res = await entry.clip.tick(relativeUs)
-          if (res.video) {
-            const ctx = entry.canvas.getContext('2d')
-            if (ctx) {
-              ctx.drawImage(res.video, 0, 0, entry.canvas.width, entry.canvas.height)
+          const ctx = entry.canvas.getContext('2d')
+          if (ctx) {
+            const drawn = await entry.handle.drawFrame(ctx, relativeMs)
+            if (drawn)
               refreshCanvasTexture(entry.texture)
-            }
-            res.video.close()
           }
           return
         }
         catch (err) {
           const urlKey = getResourceKey(segment.url)
-          if (urlKey && isMp4ClipUnsupported(err)) {
-            mp4ClipUnsupportedKeys.add(urlKey)
-            entry.clip.destroy()
-            if (videoSourceMode !== 'mp4clip') {
-              const replacement = await loadVideoSpriteViaElement(segment.url, { sprite: entry.sprite, oldTexture: entry.texture }).catch((elementErr) => {
-                console.error('[renderer] failed to fallback to <video> after MP4Clip error', segment.url, elementErr)
-                return undefined
-              })
-              if (replacement) {
-                videoEntries.set(segment.id, replacement)
-                return await updateVideoFrame(segment, sourceTimeMs)
-              }
+          if (urlKey) {
+            decoderUnsupportedKeys.add(urlKey)
+            entry.handle.dispose()
+            const replacement = await loadVideoSpriteViaElement(segment.url, { sprite: entry.sprite, oldTexture: entry.texture }).catch((elementErr) => {
+              console.error('[renderer] failed to fallback to <video> after decoder error', segment.url, elementErr)
+              return undefined
+            })
+            if (replacement) {
+              videoEntries.set(segment.id, replacement)
+              return await updateVideoFrame(segment, sourceTimeMs)
             }
           }
-          if (urlKey && !mp4ClipErrorLoggedKeys.has(urlKey)) {
-            mp4ClipErrorLoggedKeys.add(urlKey)
-            console.error('[renderer] MP4Clip tick failed', segment.url, err)
+          if (urlKey && !decoderErrorLoggedKeys.has(urlKey)) {
+            decoderErrorLoggedKeys.add(urlKey)
+            console.error('[renderer] decoder frame failed', segment.url, err)
           }
           return
         }
@@ -729,30 +706,17 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   async function loadVideoEntry(url: string, urlKey: string, reuse: { sprite: Sprite, oldTexture?: Texture }) {
-    const allowMp4Clip = videoSourceMode !== 'element'
-    const allowVideoElement = videoSourceMode !== 'mp4clip'
-    if (mp4ClipUnsupportedKeys.has(urlKey)) {
-      if (!allowVideoElement)
-        throw new Error(`[renderer] MP4Clip unsupported for ${url}`)
-      return await loadVideoSpriteViaElement(url, reuse).catch(() => undefined)
-    }
-
-    if (allowMp4Clip) {
-      const fromClip = await loadVideoSpriteViaMP4Clip(url, reuse).catch((err) => {
-        if (isMp4ClipUnsupported(err))
-          mp4ClipUnsupportedKeys.add(urlKey)
-        if (!allowVideoElement)
-          throw err
-        return undefined
-      })
-      if (fromClip)
-        return fromClip
-    }
-
-    if (allowVideoElement)
+    const allowDecoder = videoSourceMode !== 'element'
+    if (decoderUnsupportedKeys.has(urlKey))
       return await loadVideoSpriteViaElement(url, reuse).catch(() => undefined)
 
-    return undefined
+    if (allowDecoder) {
+      const fromDecoder = await loadVideoSpriteViaDecoder(url, reuse).catch(() => undefined)
+      if (fromDecoder)
+        return fromDecoder
+    }
+
+    return await loadVideoSpriteViaElement(url, reuse).catch(() => undefined)
   }
 
   function isVideoSegment(segment: SegmentUnion): segment is IVideoFramesSegment {
@@ -851,8 +815,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   function freezeVideoEntries() {
     for (const [id, entry] of videoEntries) {
-      if (entry.kind === 'mp4clip') {
-        entry.clip.destroy()
+      if (entry.kind === 'decoder') {
+        entry.handle.dispose()
         videoEntries.set(id, {
           kind: 'frozen',
           canvas: entry.canvas,
@@ -869,8 +833,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   function destroyVideoEntry(entry: VideoEntry) {
-    if (entry.kind === 'mp4clip') {
-      entry.clip.destroy()
+    if (entry.kind === 'decoder') {
+      entry.handle.dispose()
       return
     }
 
@@ -915,38 +879,26 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     })
   }
 
-  async function loadVideoSpriteViaMP4Clip(url: string, reuse?: { sprite: Sprite, oldTexture?: Texture }): Promise<VideoEntry | undefined> {
+  async function loadVideoSpriteViaDecoder(url: string, reuse?: { sprite: Sprite, oldTexture?: Texture }): Promise<VideoEntry | undefined> {
     let file: ReturnType<typeof opfsFile> | undefined
     if (shouldUseResourceManager(url)) {
       await resourceManager.add(url).catch(() => {})
       file = await getOpfsFile(url)
     }
 
-    let clip: MP4Clip | undefined
+    const originFile = file ? await file.getOriginFile() : undefined
+    const source = originFile ?? await (await fetch(url)).blob()
+    const handle = openMediaInput(source)
     try {
-      if (file) {
-        clip = new MP4Clip(file, { audio: false })
-      }
-      else {
-        const res = await fetch(url)
-        if (!res.body) {
-          const buffer = await res.arrayBuffer()
-          const stream = new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(new Uint8Array(buffer))
-              controller.close()
-            },
-          })
-          clip = new MP4Clip(stream, { audio: false })
-        }
-        else {
-          clip = new MP4Clip(res.body, { audio: false })
-        }
+      if (!(await handle.canDecodeVideo())) {
+        handle.dispose()
+        const urlKey = getResourceKey(url)
+        if (urlKey)
+          decoderUnsupportedKeys.add(urlKey)
+        return undefined
       }
 
-      await clip.ready
-
-      const { width, height } = clip.meta
+      const { width, height } = await handle.meta()
       const canvas = document.createElement('canvas')
       canvas.width = width || 1
       canvas.height = height || 1
@@ -957,10 +909,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         reuse.oldTexture?.destroy(true)
       }
 
-      return { kind: 'mp4clip', clip, canvas, texture, sprite, meta: { width, height } }
+      return { kind: 'decoder', handle, canvas, texture, sprite, meta: { width, height } }
     }
     catch (err) {
-      clip?.destroy()
+      handle.dispose()
       throw err
     }
   }

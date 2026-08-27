@@ -14,7 +14,7 @@ import type {
 import { ref } from '@vue/reactivity'
 import { describe, expect, it, vi } from 'vitest'
 
-const { audioManagerInstances, mp4ClipInstances, opfsState } = vi.hoisted(() => ({
+const { audioManagerInstances, mediaInputHandles, opfsState } = vi.hoisted(() => ({
   audioManagerInstances: [] as Array<{
     protocol: IVideoProtocol
     options?: {
@@ -25,13 +25,15 @@ const { audioManagerInstances, mp4ClipInstances, opfsState } = vi.hoisted(() => 
     resetTimelineState: ReturnType<typeof vi.fn>
     destroy: ReturnType<typeof vi.fn>
   }>,
-  mp4ClipInstances: [] as Array<{
+  mediaInputHandles: [] as Array<{
     source: unknown
-    options?: { audio?: boolean }
-    ready: Promise<void>
-    meta: { width: number, height: number }
-    tick: ReturnType<typeof vi.fn>
-    destroy: ReturnType<typeof vi.fn>
+    meta: ReturnType<typeof vi.fn>
+    canDecodeVideo: ReturnType<typeof vi.fn>
+    canDecodeAudio: ReturnType<typeof vi.fn>
+    drawFrame: ReturnType<typeof vi.fn>
+    thumbnails: ReturnType<typeof vi.fn>
+    decodeAudioSlice: ReturnType<typeof vi.fn>
+    dispose: ReturnType<typeof vi.fn>
   }>,
   opfsState: {
     exists: false,
@@ -50,23 +52,28 @@ vi.mock('@video-editor/protocol', () => ({
   getResourceKey: (url: string) => url,
 }))
 
-vi.mock('@webav/av-cliper', () => ({
-  MP4Clip: class {
-    public source: unknown
-    public options?: { audio?: boolean }
-    public ready = Promise.resolve()
-    public meta = { width: 640, height: 360 }
-    public tick = vi.fn(async () => ({
-      video: { close: vi.fn() },
-      audio: [],
-    }))
-    public destroy = vi.fn()
-
-    constructor(source: unknown, options?: { audio?: boolean }) {
-      this.source = source
-      this.options = options
-      mp4ClipInstances.push(this)
+vi.mock('@video-editor/media', () => ({
+  openMediaInput: (source: unknown) => {
+    const handle = {
+      source,
+      meta: vi.fn(async () => ({
+        durationMs: 1000,
+        width: 640,
+        height: 360,
+        audioSampleRate: 48000,
+        audioChanCount: 2,
+        hasVideo: true,
+        hasAudio: true,
+      })),
+      canDecodeVideo: vi.fn(async () => true),
+      canDecodeAudio: vi.fn(async () => true),
+      drawFrame: vi.fn(async () => true),
+      thumbnails: vi.fn(async () => []),
+      decodeAudioSlice: vi.fn(async () => undefined),
+      dispose: vi.fn(),
     }
+    mediaInputHandles.push(handle)
+    return handle
   },
 }))
 
@@ -316,7 +323,8 @@ function stubVideoRenderGlobals(options?: { pendingFetchUrls?: Set<string> }) {
           controller.close()
         },
       }),
-    } as Response)
+      blob: async () => new Blob(),
+    } as unknown as Response)
   })
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
 
@@ -425,9 +433,9 @@ describe('createRenderer video segment preloading', () => {
     }
   })
 
-  it('opens MP4Clip for preview visuals without decoding video segment audio', async () => {
+  it('opens the decoder for preview visuals without decoding video segment audio', async () => {
     audioManagerInstances.length = 0
-    mp4ClipInstances.length = 0
+    mediaInputHandles.length = 0
     const { restore } = stubVideoRenderGlobals()
     const protocol = ref<IVideoProtocol>({
       id: 'renderer-video-visual-only',
@@ -452,13 +460,14 @@ describe('createRenderer video segment preloading', () => {
       app: createMockApp() as any,
       manualRender: true,
       warmUpResources: false,
-      videoSourceMode: 'mp4clip',
+      videoSourceMode: 'auto',
     })
 
     try {
       await renderer.renderAt(100)
 
-      expect(mp4ClipInstances[0]?.options).toEqual({ audio: false })
+      expect(mediaInputHandles[0]?.drawFrame).toHaveBeenCalled()
+      expect(mediaInputHandles[0]?.decodeAudioSlice).not.toHaveBeenCalled()
     }
     finally {
       restore()
@@ -468,7 +477,7 @@ describe('createRenderer video segment preloading', () => {
 
   it('loads and draws the first frame of the next video segment before it becomes active', async () => {
     audioManagerInstances.length = 0
-    mp4ClipInstances.length = 0
+    mediaInputHandles.length = 0
     const { restore } = stubVideoRenderGlobals()
     const protocol = ref<IVideoProtocol>({
       id: 'renderer-video-preload',
@@ -494,15 +503,15 @@ describe('createRenderer video segment preloading', () => {
       app: createMockApp() as any,
       manualRender: true,
       warmUpResources: false,
-      videoSourceMode: 'mp4clip',
+      videoSourceMode: 'auto',
     })
 
     try {
       await renderer.renderAt(800)
       await flushReactivity()
 
-      expect(mp4ClipInstances).toHaveLength(2)
-      expect(mp4ClipInstances.some(instance => instance.tick.mock.calls.some(([time]) => time === 0))).toBe(true)
+      expect(mediaInputHandles).toHaveLength(2)
+      expect(mediaInputHandles.some(instance => instance.drawFrame.mock.calls.some(([, time]) => time === 0))).toBe(true)
     }
     finally {
       restore()
@@ -512,7 +521,7 @@ describe('createRenderer video segment preloading', () => {
 
   it('does not start video preloading before the next segment is close enough', async () => {
     audioManagerInstances.length = 0
-    mp4ClipInstances.length = 0
+    mediaInputHandles.length = 0
     const { restore } = stubVideoRenderGlobals()
     const protocol = ref<IVideoProtocol>({
       id: 'renderer-video-preload-window',
@@ -538,17 +547,17 @@ describe('createRenderer video segment preloading', () => {
       app: createMockApp() as any,
       manualRender: true,
       warmUpResources: false,
-      videoSourceMode: 'mp4clip',
+      videoSourceMode: 'auto',
     })
 
     try {
       await renderer.renderAt(1000)
       await flushReactivity()
 
-      expect(mp4ClipInstances).toHaveLength(1)
+      expect(mediaInputHandles).toHaveLength(1)
       await renderer.renderAt(3600)
       await flushReactivity()
-      expect(mp4ClipInstances).toHaveLength(2)
+      expect(mediaInputHandles).toHaveLength(2)
     }
     finally {
       restore()
@@ -558,7 +567,7 @@ describe('createRenderer video segment preloading', () => {
 
   it('keeps repeated render passes from starting more preloads than the in-flight limit', async () => {
     audioManagerInstances.length = 0
-    mp4ClipInstances.length = 0
+    mediaInputHandles.length = 0
     const pendingFetchUrls = new Set([
       'https://example.com/video-2.mp4',
       'https://example.com/video-3.mp4',
@@ -593,7 +602,7 @@ describe('createRenderer video segment preloading', () => {
       app: createMockApp() as any,
       manualRender: true,
       warmUpResources: false,
-      videoSourceMode: 'mp4clip',
+      videoSourceMode: 'auto',
     })
 
     try {
