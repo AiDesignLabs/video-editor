@@ -6,6 +6,7 @@ import type {
   TrackUnion,
 } from '@video-editor/shared'
 import type { ResolvedTransitionEdge } from './transition-resolver'
+import { sampleSegmentKeyframe, sampleVisualKeyframes } from './keyframes'
 import type {
   ActiveVoiceRef,
   AudioPlanEvent,
@@ -189,8 +190,7 @@ function buildVisualPlanItem(input: {
     segmentType: segment.segmentType,
     zOrder: trackOrder * 10000 + childIndex,
     sourceTimeMs: mapSourceTimeMs(segment, atMs),
-    opacity: readOpacity(segment),
-    transform: readTransform(segment),
+    ...resolveVisualProps(segment, atMs),
     transition: computeTransition(segment, transition, atMs),
     effects: effects.length ? effects : undefined,
   }
@@ -211,7 +211,10 @@ function toActiveVoiceMeta(segment: SegmentUnion, track: TrackUnion, atMs: numbe
   }
 
   if (isVideoFramesSegment(segment)) {
-    const gain = normalizeVolume(segment.volume)
+    const keyframedVolume = sampleSegmentKeyframe(segment, 'volume', atMs)
+    const gain = keyframedVolume !== undefined
+      ? normalizeVolume(keyframedVolume)
+      : normalizeVolume(segment.volume)
     if (gain <= 0)
       return undefined
     return {
@@ -277,6 +280,15 @@ function readTransform(segment: SegmentUnion): ITransform | undefined {
   return 'transform' in segment ? segment.transform : undefined
 }
 
+function resolveVisualProps(segment: SegmentUnion, atMs: number): { opacity: number, transform?: ITransform } {
+  const baseTransform = readTransform(segment)
+  const sampled = sampleVisualKeyframes(segment, atMs, baseTransform)
+  return {
+    opacity: sampled.opacity ?? readOpacity(segment),
+    transform: sampled.transform ?? baseTransform,
+  }
+}
+
 function readOpacity(segment: SegmentUnion): number {
   if ('opacity' in segment && typeof segment.opacity === 'number' && Number.isFinite(segment.opacity))
     return clamp(segment.opacity, 0, 1)
@@ -284,7 +296,10 @@ function readOpacity(segment: SegmentUnion): number {
 }
 
 function computeAudioSegmentGain(segment: IAudioSegment, relativeMs: number): number {
-  const baseVolume = normalizeVolume(segment.volume)
+  const keyframedVolume = sampleSegmentKeyframe(segment, 'volume', segment.startTime + relativeMs)
+  const baseVolume = keyframedVolume !== undefined
+    ? normalizeVolume(keyframedVolume)
+    : normalizeVolume(segment.volume)
   const segmentDurationMs = Math.max(0, segment.endTime - segment.startTime)
   const fadeInDurationMs = Math.max(0, segment.fadeInDuration ?? 0)
   const fadeOutDurationMs = Math.max(0, segment.fadeOutDuration ?? 0)
@@ -321,12 +336,15 @@ function collectActiveEffects(protocol: IVideoProtocol, atMs: number): VisualEff
         })
       }
       else if (segment.segmentType === 'filter') {
+        const keyframedIntensity = sampleSegmentKeyframe(segment, 'intensity', atMs)
         effects.push({
           segmentType: 'filter',
           segmentId: segment.id,
           filterId: segment.filterId,
           name: segment.name,
-          intensity: normalizeVolume(segment.intensity),
+          intensity: keyframedIntensity !== undefined
+            ? normalizeVolume(keyframedIntensity)
+            : normalizeVolume(segment.intensity),
         })
       }
     }

@@ -6,7 +6,7 @@ import type { ComposeAudioInput } from './timeline'
 import { createMp4Encoder, openMediaInput } from '@video-editor/media'
 import { Application } from 'pixi.js'
 import { createRenderer } from './renderer-core'
-import { createComposeAudioInputs } from './timeline'
+import { createComposeAudioInputs, sampleFrames } from './timeline'
 
 export interface ComposeClipOptions {
   appOptions?: Partial<ApplicationOptions>
@@ -135,16 +135,43 @@ async function renderAudioMix(protocol: IVideoProtocol, durationMs: number): Pro
     source.playbackRate.value = playRate
 
     const gainNode = ctx.createGain()
-    if (fadeInSec > 0) {
-      gainNode.gain.setValueAtTime(0, startSec)
-      gainNode.gain.linearRampToValueAtTime(volume, startSec + fadeInSec)
+    const fadeEnvelopeAt = (relSec: number) => {
+      let envelope = 1
+      if (fadeInSec > 0 && relSec < fadeInSec)
+        envelope = Math.max(0, relSec / fadeInSec)
+      const untilEndSec = segmentDurationSec - relSec
+      if (fadeOutSec > 0 && untilEndSec < fadeOutSec)
+        envelope = Math.min(envelope, Math.max(0, untilEndSec / fadeOutSec))
+      return envelope
+    }
+    if (input.volumeKeyframes?.length) {
+      // Sample the keyframed volume curve (x fade envelope) on a fixed grid.
+      const curveOffsetMs = Math.max(0, input.startTime - (input.segmentStartTime ?? input.startTime))
+      const stepSec = 0.05
+      gainNode.gain.setValueAtTime(
+        normalizeVolume(sampleFrames(input.volumeKeyframes, curveOffsetMs)) * fadeEnvelopeAt(0),
+        startSec,
+      )
+      for (let relSec = stepSec; relSec < segmentDurationSec + stepSec; relSec += stepSec) {
+        const clampedRelSec = Math.min(relSec, segmentDurationSec)
+        const curveValue = normalizeVolume(sampleFrames(input.volumeKeyframes, curveOffsetMs + clampedRelSec * 1000))
+        gainNode.gain.linearRampToValueAtTime(curveValue * fadeEnvelopeAt(clampedRelSec), startSec + clampedRelSec)
+        if (clampedRelSec >= segmentDurationSec)
+          break
+      }
     }
     else {
-      gainNode.gain.setValueAtTime(volume, startSec)
-    }
-    if (fadeOutSec > 0) {
-      gainNode.gain.setValueAtTime(volume, Math.max(startSec, endSec - fadeOutSec))
-      gainNode.gain.linearRampToValueAtTime(0, endSec)
+      if (fadeInSec > 0) {
+        gainNode.gain.setValueAtTime(0, startSec)
+        gainNode.gain.linearRampToValueAtTime(volume, startSec + fadeInSec)
+      }
+      else {
+        gainNode.gain.setValueAtTime(volume, startSec)
+      }
+      if (fadeOutSec > 0) {
+        gainNode.gain.setValueAtTime(volume, Math.max(startSec, endSec - fadeOutSec))
+        gainNode.gain.linearRampToValueAtTime(0, endSec)
+      }
     }
 
     source.connect(gainNode)

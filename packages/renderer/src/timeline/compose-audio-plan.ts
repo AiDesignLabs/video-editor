@@ -1,4 +1,4 @@
-import type { IAudioSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
+import type { IAudioSegment, IKeyframe, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import type { AudioPlanEvent } from './types'
 import { createComposeRunner } from './compose-runner'
 
@@ -13,6 +13,10 @@ export interface ComposeAudioInput {
   volume?: number
   fadeInDuration?: number
   fadeOutDuration?: number
+  /** Keyframed volume curve (timeMs relative to segment.startTime), replaces `volume` when present. */
+  volumeKeyframes?: IKeyframe[]
+  /** Original segment start, needed to rebase the curve onto the voice window. */
+  segmentStartTime?: number
 }
 
 interface SegmentLookup {
@@ -112,6 +116,7 @@ function finalizeVoice(
   if (endTime <= startTime)
     return undefined
 
+  const volumeTrack = segment.keyframes?.find(track => track.property === 'volume' && track.frames.length > 0)
   const base: ComposeAudioInput = {
     segmentId: segment.id,
     segmentKind: runtime.segmentKind,
@@ -121,6 +126,8 @@ function finalizeVoice(
     fromTime: runtime.fromTime,
     playRate: runtime.playRate,
     volume: readSegmentVolume(segment),
+    volumeKeyframes: volumeTrack ? [...volumeTrack.frames] : undefined,
+    segmentStartTime: segment.startTime,
   }
 
   if (segment.segmentType === 'audio') {

@@ -20,6 +20,7 @@ export {
 
 export type { EffectDefinition } from './effect-registry'
 export { getEffectDefinition, listEffectDefinitions, registerEffect } from './effect-registry'
+export { cubicBezierEase, findKeyframeTrack, sampleFrames, sampleKeyframes, sampleSegmentKeyframe, sampleVisualKeyframes } from './keyframes'
 export { computePaletteMatrix, PALETTE_NEUTRAL, paletteToColorMatrix } from './palette-filter'
 export { createPixiFiltersFromVisualEffects } from './pixi-effects'
 export { createPreviewRunner } from './preview-runner'
