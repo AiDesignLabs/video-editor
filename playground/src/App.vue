@@ -297,6 +297,16 @@ function removeSelectedSegment() {
     commands.setSelectedSegment(undefined)
 }
 
+function splitSelectedSegment() {
+  const id = selectedSegmentId.value
+  if (!id)
+    return
+
+  const result = commands.splitSegment(id, currentTimeMs.value)
+  if (result.success)
+    commands.setSelectedSegment(result.rightId)
+}
+
 function handleGlobalKeydown(event: KeyboardEvent) {
   if (event.defaultPrevented || event.isComposing)
     return
@@ -314,6 +324,12 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   if ((event.key === 'Delete' || event.key === 'Backspace') && selectedSegmentId.value) {
     event.preventDefault()
     removeSelectedSegment()
+    return
+  }
+
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b' && selectedSegmentId.value) {
+    event.preventDefault()
+    splitSelectedSegment()
   }
 }
 
@@ -610,6 +626,9 @@ function handleAddSegmentClick(data: {
         </button>
         <button class="btn ghost" :disabled="!selectedSegmentId" @click="removeSelectedSegment">
           删除选中片段
+        </button>
+        <button class="btn ghost" :disabled="!selectedSegmentId" title="Cmd/Ctrl+B" @click="splitSelectedSegment">
+          分割
         </button>
       </div>
     </section>

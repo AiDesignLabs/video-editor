@@ -54,6 +54,7 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     updateSegment: protocolManager.updateSegment,
     moveSegment: protocolManager.moveSegment,
     resizeSegment: protocolManager.resizeSegment,
+    splitSegment: protocolManager.splitSegment,
     addTransition: protocolManager.addTransition,
     removeTransition: protocolManager.removeTransition,
     updateTransition: protocolManager.updateTransition,

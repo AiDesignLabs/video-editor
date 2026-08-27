@@ -3127,3 +3127,161 @@ describe('complex undo/redo scenarios', () => {
     expect(p4.tracks[0].children[1].id).toBe('frame-3')
   })
 })
+
+describe('splitSegment', () => {
+  it('splits a video segment and remaps fromTime by playRate', () => {
+    const { addSegment, splitSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    curTime.value = 0
+    const video: IVideoFramesSegment = {
+      id: 'video-split',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'http://example.com/video.mp4',
+      startTime: 0,
+      endTime: 4000,
+      fromTime: 500,
+      playRate: 2,
+    }
+    addSegment(video)
+
+    const result = splitSegment('video-split', 1000)
+    expect(result.success).toBe(true)
+    expect(result.leftId).toBe('video-split')
+    expect(result.rightId).not.toBe('')
+
+    const track = exportProtocol().tracks[0]
+    const [left, right] = track.children as IVideoFramesSegment[]
+    expect(left.id).toBe('video-split')
+    expect(left.startTime).toBe(0)
+    expect(left.endTime).toBe(1000)
+    expect(left.fromTime).toBe(500)
+    expect(right.id).toBe(result.rightId)
+    expect(right.startTime).toBe(1000)
+    expect(right.endTime).toBe(4000)
+    // 1000ms of timeline at playRate 2 consumes 2000ms of source.
+    expect(right.fromTime).toBe(2500)
+    expect(right.playRate).toBe(2)
+  })
+
+  it('splits a text segment with a pure timeline cut', () => {
+    const { addSegment, splitSegment, exportProtocol } = createVideoProtocolManager(protocol)
+
+    const text: ITextSegment = {
+      id: 'text-split',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 2000,
+      texts: [{ content: 'Hello' }],
+    }
+    addSegment(text)
+
+    const result = splitSegment('text-split', 800)
+    expect(result.success).toBe(true)
+    const [left, right] = exportProtocol().tracks[0].children as ITextSegment[]
+    expect(left.endTime).toBe(800)
+    expect(right.startTime).toBe(800)
+    expect(right.endTime).toBe(2000)
+    expect(right.texts).toEqual([{ content: 'Hello' }])
+  })
+
+  it('rejects split points outside the segment', () => {
+    const { addSegment, splitSegment } = createVideoProtocolManager(protocol)
+
+    const bounds: ITextSegment = {
+      id: 'text-bounds',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'x' }],
+    }
+    addSegment(bounds)
+
+    expect(splitSegment('text-bounds', 0).success).toBe(false)
+    expect(splitSegment('text-bounds', 1000).success).toBe(false)
+    expect(splitSegment('text-bounds', -5).success).toBe(false)
+    expect(splitSegment('missing-id', 500).success).toBe(false)
+  })
+
+  it('redistributes audio fades across the halves', () => {
+    const { addSegment, splitSegment, exportProtocol } = createVideoProtocolManager(protocol)
+
+    const audio: IAudioSegment = {
+      id: 'audio-split',
+      segmentType: 'audio',
+      url: 'http://example.com/a.mp3',
+      startTime: 0,
+      endTime: 4000,
+      fadeInDuration: 800,
+      fadeOutDuration: 900,
+    }
+    addSegment(audio)
+
+    const result = splitSegment('audio-split', 1000)
+    expect(result.success).toBe(true)
+    const [left, right] = exportProtocol().tracks[0].children as IAudioSegment[]
+    // Left keeps a clamped fade-in and drops the fade-out; right mirrors it.
+    expect(left.fadeInDuration).toBe(500)
+    expect(left.fadeOutDuration).toBeUndefined()
+    expect(right.fadeInDuration).toBeUndefined()
+    expect(right.fadeOutDuration).toBe(900)
+  })
+
+  it('re-points outgoing transition edges to the right half', () => {
+    const { addSegment, addTransition, splitSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    const video: IFramesSegmentUnion = {
+      id: 'trans-a',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'http://example.com/video.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+    const idA = addSegment(video).id
+    curTime.value = 1000
+    const idB = addSegment({ ...video, id: 'trans-b' }).id
+
+    expect(addTransition({ id: 't-1', name: 'fade', duration: 400 }, 1000)).toBe(true)
+
+    const result = splitSegment(idA, 500)
+    expect(result.success).toBe(true)
+
+    const transitions = exportProtocol().transitions ?? []
+    expect(transitions).toContainEqual({
+      id: 't-1',
+      name: 'fade',
+      duration: 400,
+      fromSegmentId: result.rightId,
+      toSegmentId: idB,
+    })
+  })
+
+  it('records the split as a single undo entry', () => {
+    const { addSegment, splitSegment, exportProtocol, undo, redo, undoCount } = createVideoProtocolManager(protocol)
+
+    const undoTarget: ITextSegment = {
+      id: 'undo-split',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 2000,
+      texts: [{ content: 'undo me' }],
+    }
+    addSegment(undoTarget)
+    expect(undoCount.value).toBe(1)
+
+    const result = splitSegment('undo-split', 900)
+    expect(result.success).toBe(true)
+    expect(undoCount.value).toBe(2)
+    expect(exportProtocol().tracks[0].children).toHaveLength(2)
+
+    undo()
+    const afterUndo = exportProtocol().tracks[0].children
+    expect(afterUndo).toHaveLength(1)
+    expect(afterUndo[0].id).toBe('undo-split')
+    expect(afterUndo[0].endTime).toBe(2000)
+
+    redo()
+    expect(exportProtocol().tracks[0].children).toHaveLength(2)
+  })
+})

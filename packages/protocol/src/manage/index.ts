@@ -753,6 +753,94 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     return { success, affectedSegments, affectedTracks, createdTracks, removedTrackIds }
   }
 
+  const splitSegment = (segmentId: string, timelineMs: number): {
+    success: boolean
+    leftId: string
+    rightId: string
+    affectedSegments: SegmentUnion[]
+  } => {
+    let affectedTrackId: string | null = null
+    let rightId = ''
+
+    const success = updateProtocolWithTransitionSync((protocol) => {
+      const track = protocol.tracks.find(t => t.children.some(s => s.id === segmentId))
+      if (!track)
+        return false
+      const index = track.children.findIndex(s => s.id === segmentId)
+      const left = track.children[index]
+      if (!Number.isFinite(timelineMs) || timelineMs <= left.startTime || timelineMs >= left.endTime)
+        return false
+
+      const hasSegmentId = (id: string) => protocol.tracks.some(t => t.children.some(s => s.id === id))
+      rightId = options?.idFactory?.segment?.() ?? genRandomId()
+      while (hasSegmentId(rightId))
+        rightId = options?.idFactory?.segment?.() ?? genRandomId()
+
+      // Deep-clone via JSON: `left` is an immer draft, not a structured-cloneable target.
+      const right = JSON.parse(JSON.stringify(left)) as SegmentUnion
+      right.id = rightId
+      right.startTime = timelineMs
+      right.endTime = left.endTime
+      left.endTime = timelineMs
+
+      // Timeline deltas map to source time scaled by playRate (evaluator sourceMs formula).
+      if (isSegmentWithFromTime(left) && isSegmentWithFromTime(right)) {
+        const playRate = normalizeSegmentPlayRate(left)
+        right.fromTime = Math.max(0, (left.fromTime ?? 0) + (timelineMs - left.startTime) * playRate)
+      }
+
+      // A split must be audibly seamless: fade-in stays on the left half,
+      // fade-out on the right, both clamped to their half's duration.
+      if (isAudioSegment(left) && isAudioSegment(right)) {
+        const leftDuration = left.endTime - left.startTime
+        const rightDuration = right.endTime - right.startTime
+        delete left.fadeOutDuration
+        delete right.fadeInDuration
+        if (typeof left.fadeInDuration === 'number')
+          left.fadeInDuration = Math.min(left.fadeInDuration, leftDuration / 2)
+        if (typeof right.fadeOutDuration === 'number')
+          right.fadeOutDuration = Math.min(right.fadeOutDuration, rightDuration / 2)
+      }
+
+      try {
+        validator.verifySegment(JSON.parse(JSON.stringify(left)))
+        validator.verifySegment(JSON.parse(JSON.stringify(right)))
+      }
+      catch {
+        throw new Error('invalid segment data')
+      }
+
+      // Both halves tile the original span exactly, so the main-track
+      // no-gap invariant is preserved by construction.
+      ;(track.children as SegmentUnion[]).splice(index + 1, 0, right)
+
+      // Re-point outgoing transition edges to the right half before the
+      // transition sync garbage-collects the now non-adjacent pair.
+      for (const edge of protocol.transitions ?? []) {
+        if (edge.fromSegmentId === segmentId)
+          edge.fromSegmentId = rightId
+      }
+
+      affectedTrackId = track.trackId
+      return true
+    })
+
+    const affectedSegments: SegmentUnion[] = []
+    if (success && affectedTrackId) {
+      const currentProtocol = exportProtocol()
+      const track = currentProtocol.tracks.find(t => t.trackId === affectedTrackId)
+      if (track)
+        affectedSegments.push(...cloneAffectedSegments(track.children))
+    }
+
+    return {
+      success,
+      leftId: success ? segmentId : '',
+      rightId: success ? rightId : '',
+      affectedSegments,
+    }
+  }
+
   function updateSegment<T extends ITrackType>(updater: (segment: TrackTypeMapSegment[T]) => void, id?: string, type?: T) {
     updateProtocol((protocol) => {
       const _id = id ?? selectedSegment.value?.id
@@ -993,6 +1081,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     updateSegment,
     moveSegment,
     resizeSegment,
+    splitSegment,
     exportProtocol,
     addTransition,
     removeTransition,

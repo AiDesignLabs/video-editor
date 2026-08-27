@@ -65,6 +65,8 @@ export interface EditorCoreCommands {
   moveSegment: ProtocolManager['moveSegment']
   /** Resize a segment's time range. */
   resizeSegment: ProtocolManager['resizeSegment']
+  /** Split a segment into two at a timeline position (single undo step). */
+  splitSegment: ProtocolManager['splitSegment']
   /** Add a transition at the current time or a specified time. */
   addTransition: ProtocolManager['addTransition']
   /** Remove a transition by segment id. */
