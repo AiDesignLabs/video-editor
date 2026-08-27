@@ -191,14 +191,17 @@ async function mountRendererInstance(options: {
     autoPlay: false,
     videoSourceMode: 'auto' as const,
     appOptions: {
-      resizeTo: host ?? window,
+      width: host?.clientWidth || 1280,
+      height: host?.clientHeight || 720,
       background: '#0f172a',
     },
   }
   const instance = await createRenderer(rendererOptions)
   renderer.value = instance
-  if (host)
+  if (host) {
     host.replaceChildren(instance.app.canvas)
+    observeCanvasHostResize(host, instance)
+  }
 
   if (typeof options.seekToMs === 'number')
     instance.seek(options.seekToMs)
@@ -206,6 +209,30 @@ async function mountRendererInstance(options: {
   scrub.value = instance.currentTime.value
   if (options.resumePlayback)
     instance.play()
+}
+
+const PREVIEW_MAX_RESOLUTION = 3
+let hostResizeObserver: ResizeObserver | undefined
+let lastRendererResizeKey = ''
+
+function observeCanvasHostResize(host: HTMLElement, instance: Renderer) {
+  hostResizeObserver?.disconnect()
+  const applyResize = () => {
+    const width = Math.max(1, Math.round(host.clientWidth))
+    const height = Math.max(1, Math.round(host.clientHeight))
+    const dpr = window.devicePixelRatio || 1
+    const resolution = Math.min(Math.max(dpr, 1), PREVIEW_MAX_RESOLUTION)
+    const key = `${width}x${height}@${resolution}`
+    if (key === lastRendererResizeKey)
+      return
+    lastRendererResizeKey = key
+    instance.app.renderer.resize(width, height, resolution)
+    // The ticker is paused while not playing; re-render one frame at the new size.
+    void instance.renderAt(instance.currentTime.value)
+  }
+  applyResize()
+  hostResizeObserver = new ResizeObserver(applyResize)
+  hostResizeObserver.observe(host)
 }
 
 onMounted(async () => {
@@ -223,6 +250,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  hostResizeObserver?.disconnect()
+  hostResizeObserver = undefined
   renderer.value?.destroy()
   clearThumbnails()
   clearComposeOutput()

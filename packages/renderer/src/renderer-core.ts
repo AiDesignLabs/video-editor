@@ -28,6 +28,7 @@ import {
   placeholder,
 } from './helpers'
 import { buildTextContent, buildTextCss, renderTextBitmap } from './text'
+import { measureTextCss } from './text-bitmap'
 import {
   createEmptyEvaluatorState,
   createPixiFiltersFromVisualEffects,
@@ -96,6 +97,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const resourceManager = createResourceManager({ dir: opts.resourceDir })
   const resourceWarmUp = new Set<string>()
   const displayCache = new Map<string, PixiDisplayObject>()
+  const textDisplayIds = new Set<string>()
+  let lastTextStageKey = ''
   const displayLoading = new Map<string, Promise<PixiDisplayObject | undefined>>()
   const decoderUnsupportedKeys = new Set<string>()
   const decoderErrorLoggedKeys = new Set<string>()
@@ -190,6 +193,20 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     const renderTimelineMs = normalizeRenderTime(protocol, at)
     const stageWidth = task.app.renderer.width
     const stageHeight = task.app.renderer.height
+
+    // Text bitmaps are rasterized for a specific stage size/resolution; rebuild on change.
+    const textStageKey = `${stageWidth}x${stageHeight}@${task.app.renderer.resolution || 1}`
+    if (textStageKey !== lastTextStageKey) {
+      lastTextStageKey = textStageKey
+      for (const id of textDisplayIds) {
+        const display = displayCache.get(id)
+        if (display) {
+          display.destroy()
+          displayCache.delete(id)
+        }
+      }
+      textDisplayIds.clear()
+    }
 
     syncAudioWithScheduler(protocol, at)
     preloadUpcomingVideoDisplays(protocol, renderTimelineMs)
@@ -558,6 +575,24 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     return undefined
   }
 
+  function computeTextRasterScale(segment: ITextSegment, content: string, cssText: string) {
+    const measured = measureTextCss(content, cssText)
+    const stageWidth = Math.max(1, app.renderer.width)
+    const stageHeight = Math.max(1, app.renderer.height)
+    // Contain-fit magnification applied by the layout (undefined fillMode => contain).
+    let magnification = Math.min(
+      stageWidth / Math.max(1, measured.width),
+      stageHeight / Math.max(1, measured.height),
+    )
+    const transformScale = segment.transform?.scale
+    if (transformScale)
+      magnification *= Math.max(Math.abs(transformScale[0] ?? 1), Math.abs(transformScale[1] ?? 1), 0.01)
+    const resolution = app.renderer.resolution || 1
+    const raw = magnification * resolution
+    // Quantize to 0.5 steps to bound cache cardinality across resizes.
+    return Math.min(8, Math.max(1, Math.round(raw * 2) / 2))
+  }
+
   async function buildTextDisplay(segment: ITextSegment): Promise<PixiDisplayObject | undefined> {
     const content = buildTextContent(segment.texts)
     if (!content)
@@ -567,7 +602,9 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (!text)
       return undefined
 
-    const rendered = await renderTextBitmap(content, buildTextCss(text))
+    textDisplayIds.add(segment.id)
+    const cssText = buildTextCss(text)
+    const rendered = await renderTextBitmap(content, cssText, computeTextRasterScale(segment, content, cssText))
     // resolution maps the oversampled bitmap back to its CSS-pixel layout size.
     const texture = new Texture({
       source: new ImageSource({ resource: rendered.bitmap, resolution: rendered.scale }),

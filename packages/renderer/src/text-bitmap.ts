@@ -19,6 +19,8 @@ export function resolveTextRasterScale() {
   return Math.min(4, Math.max(2, Math.ceil(dpr)))
 }
 
+const MAX_TEXT_RASTER_DIMENSION = 8192
+
 export async function renderTextToImageBitmap(
   content: string,
   cssText: string,
@@ -27,6 +29,9 @@ export async function renderTextToImageBitmap(
   await document.fonts.ready
 
   const { width, height } = measureText(content, cssText)
+  // Stay under browser canvas limits for very long text or large scales.
+  const maxScale = MAX_TEXT_RASTER_DIMENSION / Math.max(width, height)
+  scale = Math.max(1, Math.min(scale, maxScale))
   const style = `display: inline-block; margin: 0; ${cssText}`
   // viewBox keeps the CSS-pixel layout while the raster is scale× larger.
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * scale}" height="${height * scale}" viewBox="0 0 ${width} ${height}">`
@@ -45,6 +50,11 @@ export async function renderTextToImageBitmap(
   ctx.drawImage(img, 0, 0, width * scale, height * scale)
   const bitmap = await createImageBitmap(canvas)
   return { bitmap, width, height, scale }
+}
+
+/** Measure the CSS-pixel layout size of the given text without rasterizing. */
+export function measureTextCss(content: string, cssText: string) {
+  return measureText(content, cssText)
 }
 
 function measureText(content: string, cssText: string) {

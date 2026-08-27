@@ -78,15 +78,15 @@ export function buildTextCss(text: ITextBasic) {
   return css.join('; ')
 }
 
-export async function renderTextBitmap(content: string, cssText: string) {
-  const key = `${cssText}::${content}`
+export async function renderTextBitmap(content: string, cssText: string, scale?: number) {
+  const key = `${cssText}::${content}::s${scale ?? 'auto'}`
   const cached = textBitmapCache.get(key)
   if (cached) {
     touchCache(key, cached)
     return cached
   }
 
-  const bitmap = await renderTextToImageBitmap(content, cssText)
+  const bitmap = await renderTextToImageBitmap(content, cssText, scale)
   if (textBitmapCacheLimit > 0) {
     textBitmapCache.set(key, bitmap)
     trimCache()

@@ -11,7 +11,13 @@ declare global {
 export async function createApp(opts?: Partial<ApplicationOptions>) {
   const app = new Application()
 
-  await app.init({ resizeTo: window, backgroundAlpha: 0, ...opts })
+  await app.init({
+    resizeTo: window,
+    backgroundAlpha: 0,
+    resolution: globalThis.devicePixelRatio || 1,
+    autoDensity: true,
+    ...opts,
+  })
 
   if (import.meta.env.DEV) {
     globalThis.__PIXI_APP__ = app
