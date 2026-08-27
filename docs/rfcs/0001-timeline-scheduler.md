@@ -85,7 +85,7 @@ graph TD
    - No ownership of business timeline decisions.
 5. `Decode/Resource Service`
    - Fetch/decode/cache/media metadata.
-   - Pluggable implementation (`native`, `webav`, `libmedia`, hybrid).
+   - Pluggable implementation (`native`, `mediabunny`, `libmedia`, hybrid).
 
 ## 7. Data Model (v1)
 

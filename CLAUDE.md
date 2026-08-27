@@ -43,6 +43,7 @@ pnpm -F <package> <command>            # Alternative filter syntax
 video-editor/
 ├── packages/
 │   ├── shared/        # TypeScript types only (IVideoProtocol, segments, tracks)
+│   ├── media/         # Media decode/encode abstraction over mediabunny (WebCodecs)
 │   ├── protocol/      # Reactive state manager + OPFS resources + Ajv validation
 │   ├── editor-core/   # Headless commands/selectors/plugins API
 │   ├── renderer/      # Pixi.js rendering engine
@@ -52,7 +53,7 @@ video-editor/
 │   └── devtools/      # Reactivity check utility
 ├── playground/        # Demo app (root-level)
 ├── scripts/           # Git hooks, reactivity verification
-└── types/             # Global TypeScript definitions (mp4box)
+└── types/             # Global TypeScript definitions
 ```
 
 ### Dependency Flow
@@ -196,7 +197,7 @@ The drag-drop logic is split across three composables in `packages/ui/src/VideoT
 Protocol package uses Origin Private File System for browser-local storage:
 - Default directory: `/video-editor-res`
 - `createResourceManager()` provides CRUD operations
-- `getMp4Meta()` extracts video metadata via mp4box.js
+- `getMp4Meta()` extracts video metadata via @video-editor/media (mediabunny)
 - Thumbnail extraction in `resource/thumbnails.ts`
 
 ## Important Notes

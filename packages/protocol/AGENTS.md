@@ -23,7 +23,7 @@ src/
 | Segment validation | `verify/rules/*.ts` | Per-type JSON schemas |
 | Full protocol verify | `verify/index.ts` | `createValidator().verify()` |
 | OPFS resource CRUD | `resource/index.ts` | `createResourceManager()` |
-| Video metadata | `resource/meta.ts` | `getMp4Meta()` via mp4box.js |
+| Video metadata | `resource/meta.ts` | `getMp4Meta()` via @video-editor/media |
 | Thumbnail extraction | `resource/thumbnails.ts` | Frame snapshots for timeline |
 | Remote fetch → OPFS | `resource/fetch.ts` | Stream resources to local storage |
 

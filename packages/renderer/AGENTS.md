@@ -32,7 +32,7 @@ src/
 
 ### Video Sources
 Dual-source strategy:
-- **MP4Clip** (WebAV): High-performance for supported formats
+- **WebCodecs decoder** (@video-editor/media / mediabunny): High-performance for supported formats
 - **HTMLVideoElement**: Fallback for broader compatibility
 
 ### Protocol Binding
