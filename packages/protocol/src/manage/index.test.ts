@@ -2171,6 +2171,41 @@ describe('moveSegment - undo/redo', () => {
 })
 
 describe('resizeSegment', () => {
+  it('scales fromTime by playRate when trimming the start edge', () => {
+    const { addSegment, resizeSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    curTime.value = 1000
+    const audioRate: IAudioSegment = {
+      id: 'audio-rate',
+      segmentType: 'audio',
+      url: 'https://example.com/a.mp3',
+      startTime: 1000,
+      endTime: 5000,
+      fromTime: 1000,
+      playRate: 2,
+    }
+    addSegment(audioRate)
+    const track = exportProtocol().tracks[0]
+
+    // Trim in by 500ms of timeline => 1000ms of source at playRate 2.
+    resizeSegment({ segmentId: 'audio-rate', trackId: track.trackId, startTime: 1500, endTime: 5000 })
+    let seg = exportProtocol().tracks[0].children[0] as IAudioSegment
+    expect(seg.fromTime).toBe(2000)
+
+    // Extend left by 700ms of timeline => source rewinds 1400ms.
+    resizeSegment({ segmentId: 'audio-rate', trackId: track.trackId, startTime: 800, endTime: 5000 })
+    seg = exportProtocol().tracks[0].children[0] as IAudioSegment
+    expect(seg.startTime).toBe(800)
+    expect(seg.fromTime).toBe(600)
+
+    // Extending left beyond the available source clamps: only 600ms of source
+    // (= 300ms of timeline at playRate 2) remains before fromTime hits 0.
+    resizeSegment({ segmentId: 'audio-rate', trackId: track.trackId, startTime: 0, endTime: 5000 })
+    seg = exportProtocol().tracks[0].children[0] as IAudioSegment
+    expect(seg.fromTime).toBe(0)
+    expect(seg.startTime).toBe(500)
+  })
+
   it('should resize text segment', () => {
     const { addSegment, resizeSegment, exportProtocol } = createVideoProtocolManager(protocol)
 

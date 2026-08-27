@@ -95,6 +95,13 @@ function isSegmentWithFromTime(segment: SegmentUnion): segment is IVideoFramesSe
   return isVideoFramesSegment(segment) || isAudioSegment(segment)
 }
 
+function normalizeSegmentPlayRate(segment: IVideoFramesSegment | IAudioSegment): number {
+  const rate = segment.playRate
+  if (typeof rate !== 'number' || !Number.isFinite(rate))
+    return 1
+  return Math.min(100, Math.max(0.1, rate))
+}
+
 function getMainFramesTrack(protocol: IVideoProtocol): TrackTypeMapTrack['frames'] | undefined {
   return protocol.tracks.find(track => track.trackType === 'frames' && (track as TrackTypeMapTrack['frames']).isMain) as TrackTypeMapTrack['frames'] | undefined
 }
@@ -704,8 +711,10 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       // - Extending left (startTime decreases) => fromTime decreases (clamped at 0)
       if (segmentWithFromTime && nextStartTime !== originalStartTime) {
         const originalFromTime = segmentWithFromTime.fromTime ?? 0
+        // Timeline deltas map to source time scaled by playRate (see evaluator sourceMs formula).
+        const playRate = normalizeSegmentPlayRate(segmentWithFromTime)
         const requestedDeltaStart = nextStartTime - originalStartTime
-        const clampedDeltaStart = Math.max(requestedDeltaStart, -originalFromTime)
+        const clampedDeltaStart = Math.max(requestedDeltaStart, -originalFromTime / playRate)
 
         if (clampedDeltaStart !== requestedDeltaStart) {
           nextStartTime = originalStartTime + clampedDeltaStart
@@ -714,7 +723,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         if (!Number.isFinite(nextDuration) || nextDuration < 0)
           return false
 
-        nextFromTime = originalFromTime + clampedDeltaStart
+        nextFromTime = Math.max(0, originalFromTime + clampedDeltaStart * playRate)
         segmentWithFromTime.fromTime = nextFromTime
       }
 
