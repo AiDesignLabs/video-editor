@@ -27,8 +27,9 @@ import {
   computeDuration,
   placeholder,
 } from './helpers'
-import { buildTextContent, buildTextCss, renderTextBitmap } from './text'
-import { measureTextCss } from './text-bitmap'
+import type { TextRun } from './text'
+import { buildTextRuns, renderTextBitmap } from './text'
+import { measureTextRuns } from './text-bitmap'
 import {
   createEmptyEvaluatorState,
   createPixiFiltersFromVisualEffects,
@@ -575,8 +576,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     return undefined
   }
 
-  function computeTextRasterScale(segment: ITextSegment, content: string, cssText: string) {
-    const measured = measureTextCss(content, cssText)
+  function computeTextRasterScale(segment: ITextSegment, runs: TextRun[]) {
+    const measured = measureTextRuns(runs)
     const stageWidth = Math.max(1, app.renderer.width)
     const stageHeight = Math.max(1, app.renderer.height)
     // Contain-fit magnification applied by the layout (undefined fillMode => contain).
@@ -594,17 +595,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   async function buildTextDisplay(segment: ITextSegment): Promise<PixiDisplayObject | undefined> {
-    const content = buildTextContent(segment.texts)
-    if (!content)
-      return undefined
-
-    const [text] = segment.texts
-    if (!text)
+    const runs = buildTextRuns(segment.texts)
+    if (!runs.length)
       return undefined
 
     textDisplayIds.add(segment.id)
-    const cssText = buildTextCss(text)
-    const rendered = await renderTextBitmap(content, cssText, computeTextRasterScale(segment, content, cssText))
+    const rendered = await renderTextBitmap(runs, computeTextRasterScale(segment, runs))
     // resolution maps the oversampled bitmap back to its CSS-pixel layout size.
     const texture = new Texture({
       source: new ImageSource({ resource: rendered.bitmap, resolution: rendered.scale }),

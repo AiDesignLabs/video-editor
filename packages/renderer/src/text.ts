@@ -1,8 +1,8 @@
 import type { ITextBasic } from '@video-editor/shared'
-import type { RenderedTextBitmap } from './text-bitmap'
-import { renderTextToImageBitmap } from './text-bitmap'
+import type { RenderedTextBitmap, TextRun } from './text-bitmap'
+import { renderTextRunsToImageBitmap } from './text-bitmap'
 
-export type { RenderedTextBitmap } from './text-bitmap'
+export type { RenderedTextBitmap, TextRun } from './text-bitmap'
 
 const DEFAULT_TEXT_BITMAP_CACHE_LIMIT = 100
 const textBitmapCache = new Map<string, RenderedTextBitmap>()
@@ -36,6 +36,20 @@ export function buildTextContent(texts: ITextBasic[]) {
   return texts.map(item => item.content).filter(Boolean).join('\n')
 }
 
+/** Each ITextBasic renders as one line with its own style. */
+export function buildTextRuns(texts: ITextBasic[]): TextRun[] {
+  return texts
+    .filter(item => !!item.content)
+    .map(item => ({ content: item.content ?? '', cssText: buildTextCss(item) }))
+}
+
+function applyColorOpacity(color: string, opacity?: number) {
+  if (typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity >= 1)
+    return color
+  const clamped = Math.max(0, opacity)
+  return `color-mix(in srgb, ${color} ${clamped * 100}%, transparent)`
+}
+
 export function buildTextCss(text: ITextBasic) {
   const fontFamily = Array.isArray(text.fontFamily)
     ? text.fontFamily.join(', ')
@@ -62,9 +76,9 @@ export function buildTextCss(text: ITextBasic) {
   if (typeof text.leading === 'number')
     css.push(`line-height: ${text.leading}px`)
   if (text.background?.color)
-    css.push(`background: ${text.background.color}`)
+    css.push(`background: ${applyColorOpacity(text.background.color, text.background.opacity)}`)
   if (text.stroke?.color && typeof text.stroke.width === 'number')
-    css.push(`-webkit-text-stroke: ${text.stroke.width}px ${text.stroke.color}`)
+    css.push(`-webkit-text-stroke: ${text.stroke.width}px ${applyColorOpacity(text.stroke.color, text.stroke.opacity)}`)
   if (text.underline)
     css.push('text-decoration: underline')
   if (text.dropShadow?.color && typeof text.dropShadow.distance === 'number') {
@@ -72,21 +86,21 @@ export function buildTextCss(text: ITextBasic) {
     const offsetX = Math.cos(angle) * text.dropShadow.distance
     const offsetY = Math.sin(angle) * text.dropShadow.distance
     const blur = text.dropShadow.blur ?? 0
-    css.push(`text-shadow: ${offsetX}px ${offsetY}px ${blur}px ${text.dropShadow.color}`)
+    css.push(`text-shadow: ${offsetX}px ${offsetY}px ${blur}px ${applyColorOpacity(text.dropShadow.color, text.dropShadow.opacity)}`)
   }
 
   return css.join('; ')
 }
 
-export async function renderTextBitmap(content: string, cssText: string, scale?: number) {
-  const key = `${cssText}::${content}::s${scale ?? 'auto'}`
+export async function renderTextBitmap(runs: TextRun[], scale?: number) {
+  const key = `${JSON.stringify(runs)}::s${scale ?? 'auto'}`
   const cached = textBitmapCache.get(key)
   if (cached) {
     touchCache(key, cached)
     return cached
   }
 
-  const bitmap = await renderTextToImageBitmap(content, cssText, scale)
+  const bitmap = await renderTextRunsToImageBitmap(runs, scale)
   if (textBitmapCacheLimit > 0) {
     textBitmapCache.set(key, bitmap)
     trimCache()
