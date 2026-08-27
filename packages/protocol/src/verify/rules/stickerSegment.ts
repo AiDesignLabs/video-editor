@@ -1,7 +1,7 @@
 import type { IStickerSegment } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
 import { INVALID_END_TIME, INVALID_FILL_MODE, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_START_TIME, INVALID_URL, TYPE_ERROR_PREFIX } from './common'
-import { commonAnimationDefs, commonPaletteDefs, commonTransformDefs } from './commonDefs'
+import { commonKeyframesProperty, commonAnimationDefs, commonPaletteDefs, commonTransformDefs } from './commonDefs'
 
 export const TYPE_ERROR_STICKER_SEGMENT = `${TYPE_ERROR_PREFIX} object`
 export const INVALID_STICKER_SEGMENT_TYPE = 'type segmentType must be a string and equal to "sticker"'
@@ -26,6 +26,7 @@ export const stickerSegmentRule: JSONSchemaType<IStickerSegment> = {
     animation: { $ref: '#/definitions/IAnimation' },
     transform: { $ref: '#/definitions/ITransform' },
     palette: { $ref: '#/definitions/IPalette' },
+    keyframes: commonKeyframesProperty as JSONSchemaType<IStickerSegment>['properties']['keyframes'],
     extra: {
       type: 'object',
       nullable: true,

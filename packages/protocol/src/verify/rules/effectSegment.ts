@@ -1,6 +1,7 @@
 import type { IEffectSegment } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
 import { INVALID_END_TIME, INVALID_ID, INVALID_START_TIME, INVALID_URL, TYPE_ERROR_PREFIX } from './common'
+import { commonKeyframesProperty } from './commonDefs'
 
 export const TYPE_ERROR_EFFECT_SEGMENT = `${TYPE_ERROR_PREFIX} object`
 export const INVALID_EFFECT_SEGMENT_TYPE = 'type segmentType must be a string and equal to "effect"'
@@ -15,6 +16,7 @@ export const effectSegmentRule: JSONSchemaType<IEffectSegment> = {
     segmentType: { type: 'string', const: 'effect' },
     effectId: { type: 'string' },
     name: { type: 'string' },
+    keyframes: commonKeyframesProperty as JSONSchemaType<IEffectSegment>['properties']['keyframes'],
     extra: {
       type: 'object',
       nullable: true,

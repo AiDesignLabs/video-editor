@@ -1,7 +1,7 @@
 import type { ITextSegment } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
 import { INVALID_END_TIME, INVALID_ID, INVALID_START_TIME, INVALID_URL, TYPE_ERROR_PREFIX } from './common'
-import { commonAnimationDefs, commonBackgroundDefs, commonDropShadowDefs, commonStrokeDefs, commonTextBasicDefs, commonTransformDefs } from './commonDefs'
+import { commonKeyframesProperty, commonAnimationDefs, commonBackgroundDefs, commonDropShadowDefs, commonStrokeDefs, commonTextBasicDefs, commonTransformDefs } from './commonDefs'
 
 export const TYPE_ERROR_TEXT_SEGMENT = `${TYPE_ERROR_PREFIX} object`
 export const INVALID_TEXTS = 'data/texts must be an array and at least one item'
@@ -29,6 +29,7 @@ export const textSegmentRule: JSONSchemaType<ITextSegment> = {
     transform: { $ref: '#/definitions/ITransform' },
     animation: { $ref: '#/definitions/IAnimation' },
     opacity: { type: 'number', minimum: 0, maximum: 1, nullable: true },
+    keyframes: commonKeyframesProperty as JSONSchemaType<ITextSegment>['properties']['keyframes'],
     extra: {
       type: 'object',
       nullable: true,

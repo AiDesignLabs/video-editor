@@ -5,12 +5,50 @@ import { INVALID_RGBA } from './common'
 export const INVALID_ANIMATION_TYPE = 'data/animation/type must be a string and one of ["in", "out", "combo"]'
 export const INVALID_TEXT_BASIC_ALIGN_TYPE = 'data/align must be a string and one of ["left", "center", "right", "justify"]'
 
-type Definition = NonNullable<JSONSchemaType<IFramesSegmentUnion>['definitions']>[string]
+export type Definition = NonNullable<JSONSchemaType<IFramesSegmentUnion>['definitions']>[string]
 
 // exclude `oneOf` field，and extends `properties` field
 type GDefinition<T> = Omit<Definition, 'oneOf'> & {
   properties: Required<Record<keyof T, Definition['properties'][string]>>
   oneOf?: Definition['oneOf']
+}
+
+/**
+ * Complete inline schema for the optional `keyframes` field. Every segment
+ * rule must include it (the JSONSchemaType compiler enforces coverage);
+ * cast it to the rule's own property type at the use site, mirroring `extra`.
+ */
+export const commonKeyframesProperty: Definition = {
+  type: 'array',
+  nullable: true,
+  items: {
+    type: 'object',
+    properties: {
+      property: {
+        type: 'string',
+        enum: ['opacity', 'position.x', 'position.y', 'scale', 'rotation', 'volume', 'intensity'],
+      },
+      frames: {
+        type: 'array',
+        minItems: 1,
+        items: {
+          type: 'object',
+          properties: {
+            timeMs: { type: 'number', minimum: 0 },
+            value: { type: 'number' },
+            easing: {
+              anyOf: [
+                { type: 'string', enum: ['linear', 'easeIn', 'easeOut', 'easeInOut'] },
+                { type: 'array', items: { type: 'number' }, minItems: 4, maxItems: 4 },
+              ],
+            },
+          },
+          required: ['timeMs', 'value'],
+        },
+      },
+    },
+    required: ['property', 'frames'],
+  },
 }
 
 export const commonTransformDefs: GDefinition<ITransform> = {

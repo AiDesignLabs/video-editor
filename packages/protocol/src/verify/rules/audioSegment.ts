@@ -1,6 +1,7 @@
 import type { IAudioSegment } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
 import { INVALID_END_TIME, INVALID_FROM_TIME, INVALID_ID, INVALID_START_TIME, INVALID_URL, TYPE_ERROR_PREFIX } from './common'
+import { commonKeyframesProperty } from './commonDefs'
 
 export const TYPE_ERROR_AUDIO_SEGMENT = `${TYPE_ERROR_PREFIX} object`
 export const INVALID_AUDIO_SEGMENT_TYPE = 'type segmentType must be a string and equal to "audio"'
@@ -18,6 +19,7 @@ export const audioSegmentRule: JSONSchemaType<IAudioSegment> = {
     playRate: { type: 'number', minimum: 0.1, maximum: 100, nullable: true },
     fadeInDuration: { type: 'number', minimum: 0, nullable: true },
     fadeOutDuration: { type: 'number', minimum: 0, nullable: true },
+    keyframes: commonKeyframesProperty as JSONSchemaType<IAudioSegment>['properties']['keyframes'],
     extra: {
       type: 'object',
       nullable: true,

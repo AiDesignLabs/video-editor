@@ -1,6 +1,7 @@
 import type { IFilterSegment } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
 import { INVALID_END_TIME, INVALID_ID, INVALID_START_TIME, INVALID_URL, TYPE_ERROR_PREFIX } from './common'
+import { commonKeyframesProperty } from './commonDefs'
 
 export const TYPE_ERROR_FILTER_SEGMENT = `${TYPE_ERROR_PREFIX} object`
 export const INVALID_FILTER_SEGMENT_TYPE = 'type segmentType must be a string and equal to "filter"'
@@ -16,6 +17,7 @@ export const filterSegmentRule: JSONSchemaType<IFilterSegment> = {
     filterId: { type: 'string' },
     name: { type: 'string' },
     intensity: { type: 'number', minimum: 0, maximum: 1, nullable: true },
+    keyframes: commonKeyframesProperty as JSONSchemaType<IFilterSegment>['properties']['keyframes'],
     extra: {
       type: 'object',
       nullable: true,

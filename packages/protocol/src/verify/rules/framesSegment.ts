@@ -1,7 +1,7 @@
 import type { IFramesSegmentUnion } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
 import { INVALID_END_TIME, INVALID_FILL_MODE, INVALID_FROM_TIME, INVALID_ID, INVALID_IMAGE_FORMAT, INVALID_RGBA, INVALID_START_TIME, INVALID_URL, TYPE_ERROR_PREFIX } from './common'
-import { commonAnimationDefs, commonPaletteDefs, commonTransformDefs } from './commonDefs'
+import { commonKeyframesProperty, commonAnimationDefs, commonPaletteDefs, commonTransformDefs } from './commonDefs'
 
 export const TYPE_ERROR_FRAMES_SEGMENT = `${TYPE_ERROR_PREFIX} object`
 export const INVALID_FRAMES_TYPE = 'type must be a string and one of ["image", "video", "3D"]'
@@ -33,6 +33,7 @@ export const framesSegmentRule: JSONSchemaType<IFramesSegmentUnion> = {
     animation: { $ref: '#/definitions/IAnimation' },
     palette: { $ref: '#/definitions/IPalette' },
     background: { type: 'string', pattern: '^rgba\\([0-9]+,[0-9]+,[0-9]+,[0-9]+\\)$', nullable: true },
+    keyframes: commonKeyframesProperty as JSONSchemaType<IFramesSegmentUnion>['properties']['keyframes'],
     extra: {
       type: 'object',
       nullable: true,

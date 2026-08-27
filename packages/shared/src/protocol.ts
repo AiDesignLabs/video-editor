@@ -143,7 +143,31 @@ export interface ISegment<T extends ITrackType = ITrackType> {
   endTime: number
   segmentType: T
   url?: string
+  /** Optional per-property animation curves; see docs/rfcs/0002-keyframe-curves.md. */
+  keyframes?: IKeyframeTrack[]
   extra?: SegmentExtra<T> | null
+}
+
+export type IKeyframeProperty
+  = 'opacity' | 'position.x' | 'position.y' | 'scale' | 'rotation'
+    | 'volume' | 'intensity'
+
+export type IKeyframeEasing
+  = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut'
+    | [number, number, number, number] // cubic-bezier control points
+
+export interface IKeyframe {
+  /** Timeline time relative to segment.startTime, in ms (not scaled by playRate). */
+  timeMs: number
+  value: number
+  /** Easing toward the next keyframe. Defaults to 'linear'. */
+  easing?: IKeyframeEasing
+}
+
+export interface IKeyframeTrack {
+  property: IKeyframeProperty
+  /** Sorted ascending by timeMs; at least one frame. */
+  frames: IKeyframe[]
 }
 
 export interface ITransform {
