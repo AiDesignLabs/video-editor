@@ -1,0 +1,25 @@
+{
+  "name": "@video-editor/media",
+  "type": "module",
+  "version": "0.0.1-beta.34",
+  "description": "Media decode/encode abstraction over mediabunny (WebCodecs)",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js"
+    },
+    "./*": "./*"
+  },
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "mediabunny": "catalog:"
+  }
+}

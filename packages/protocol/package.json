@@ -24,6 +24,7 @@
     "@vue/reactivity": "catalog:"
   },
   "dependencies": {
+    "@video-editor/media": "workspace:*",
     "@video-editor/shared": "workspace:*",
     "@webav/av-cliper": "catalog:",
     "@webav/mp4box.js": "catalog:",

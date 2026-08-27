@@ -25,6 +25,7 @@ catalog:
   eslint: ^9.39.2
   immer: ^11.1.0
   lint-staged: ^16.2.7
+  mediabunny: ^1.55.3
   opfs-tools: ^0.7.4
   pixi.js: ^8.14.3
   playwright: ^1.57.0

@@ -66,6 +66,9 @@ catalogs:
     lint-staged:
       specifier: ^16.2.7
       version: 16.2.7
+    mediabunny:
+      specifier: ^1.55.3
+      version: 1.55.3
     opfs-tools:
       specifier: ^0.7.4
       version: 0.7.4
@@ -201,6 +204,12 @@ importers:
         specifier: 'catalog:'
         version: 3.5.26
 
+  packages/media:
+    dependencies:
+      mediabunny:
+        specifier: 'catalog:'
+        version: 1.55.3
+
   packages/plugins:
     dependencies:
       vue:
@@ -209,6 +218,9 @@ importers:
 
   packages/protocol:
     dependencies:
+      '@video-editor/media':
+        specifier: workspace:*
+        version: link:../media
       '@video-editor/shared':
         specifier: workspace:*
         version: link:../shared
@@ -243,6 +255,9 @@ importers:
 
   packages/renderer:
     dependencies:
+      '@video-editor/media':
+        specifier: workspace:*
+        version: link:../media
       '@video-editor/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -1144,6 +1159,12 @@ packages:
 
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
+
+  '@types/dom-mediacapture-transform@0.1.12':
+    resolution: {integrity: sha512-d7/QsLRwF864A5mgIM/YrfiglHoYn7zgCcAoJgW404r+2DwnNr7EBbLnCWpmOMgH8y0te73L1AV6H1bmauaWFw==}
+
+  '@types/dom-webcodecs@0.1.13':
+    resolution: {integrity: sha512-O5hkiFIcjjszPIYyUSyvScyvrBoV3NOEEZx/pMlsu44TKzWNkLVBBxnxJz42in5n3QIolYOcBYFCPZZ0h8SkwQ==}
 
   '@types/earcut@3.0.0':
     resolution: {integrity: sha512-k/9fOUGO39yd2sCjrbAJvGDEQvRwRnQIZlBz43roGwUZo5SHAmyVvSFyaVVZkicRVCaDXPKlbxrUcBuJoSWunQ==}
@@ -2662,6 +2683,9 @@ packages:
 
   mdn-data@2.12.2:
     resolution: {integrity: sha512-IEn+pegP1aManZuckezWCO+XZQDplx1366JoVhTpMpBB1sPey/SbveZQUosKiKiGYjg1wH4pMlNgXbCiYgihQA==}
+
+  mediabunny@1.55.3:
+    resolution: {integrity: sha512-kpBhMiJHGmerizzObAT1XLZDyImO4ZEKXaxjjfxGVkycQ0U5of/xlLepm1Izp3P+3jlaedFSRI5fJnv3Q5xV6A==}
 
   micromark-core-commonmark@2.0.3:
     resolution: {integrity: sha512-RDBrHEMSxVFLg6xvnXmb1Ayr2WzLAWjeSATAoxwKYJV94TeNavgoIdA0a9ytzDSVzBy2YKFK+emCPOEibLeCrg==}
@@ -4473,6 +4497,12 @@ snapshots:
       '@types/ms': 2.1.0
 
   '@types/deep-eql@4.0.2': {}
+
+  '@types/dom-mediacapture-transform@0.1.12':
+    dependencies:
+      '@types/dom-webcodecs': 0.1.13
+
+  '@types/dom-webcodecs@0.1.13': {}
 
   '@types/earcut@3.0.0': {}
 
@@ -6370,6 +6400,11 @@ snapshots:
   mdn-data@2.0.30: {}
 
   mdn-data@2.12.2: {}
+
+  mediabunny@1.55.3:
+    dependencies:
+      '@types/dom-mediacapture-transform': 0.1.12
+      '@types/dom-webcodecs': 0.1.13
 
   micromark-core-commonmark@2.0.3:
     dependencies:
