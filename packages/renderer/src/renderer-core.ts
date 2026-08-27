@@ -136,6 +136,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const mediaElementObjectUrlLoading = new Map<string, Promise<string | undefined>>()
   const audioManager: AudioManagerApi = new AudioManager(validatedProtocol.value, {
     resolveMediaElementUrl,
+    loadVideoAudioBuffer,
   }) as unknown as AudioManagerApi
   const transport = createTimelineTransport({
     initialTimelineMs: currentTime.value,
@@ -751,6 +752,35 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       return undefined
     }
     return undefined
+  }
+
+  async function loadVideoAudioBuffer(segment: IVideoFramesSegment): Promise<AudioBuffer | undefined> {
+    if (!segment.url)
+      return undefined
+    let file: ReturnType<typeof opfsFile> | undefined
+    if (shouldUseResourceManager(segment.url)) {
+      await resourceManager.add(segment.url).catch(() => {})
+      file = await getOpfsFile(segment.url)
+    }
+    const originFile = file ? await file.getOriginFile() : undefined
+    const source = originFile ?? await (await fetch(segment.url)).blob()
+    const handle = openMediaInput(source)
+    try {
+      if (!(await handle.canDecodeAudio()))
+        return undefined
+      const fromTimeMs = Math.max(0, segment.fromTime ?? 0)
+      const playRate = Math.max(0.1, segment.playRate ?? 1)
+      const spanMs = Math.max(0, segment.endTime - segment.startTime) * playRate
+      if (spanMs <= 0)
+        return undefined
+      return await handle.decodeAudioSlice(fromTimeMs, fromTimeMs + spanMs)
+    }
+    catch {
+      return undefined
+    }
+    finally {
+      handle.dispose()
+    }
   }
 
   function resolveMediaElementUrl(segment: { url: string, segmentType?: string, type?: string }) {

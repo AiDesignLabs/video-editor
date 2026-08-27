@@ -313,3 +313,60 @@ describe('AudioManager audio-element seek guards', () => {
     manager.destroy()
   })
 })
+
+describe('AudioManager video buffer audio', () => {
+  beforeEach(() => {
+    MockAudioElement.reset()
+    vi.stubGlobal('Audio', MockAudioElement as unknown as typeof Audio)
+    vi.stubGlobal('window', {
+      AudioContext: MockAudioContext,
+      webkitAudioContext: MockAudioContext,
+      setInterval: globalThis.setInterval.bind(globalThis),
+      clearInterval: globalThis.clearInterval.bind(globalThis),
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('schedules video segment audio on the WebAudio clock when a buffer loader is provided', async () => {
+    const startSpy = vi.spyOn(MockBufferSource.prototype, 'start')
+    const buffer = new MockAudioBuffer(2, 48000 * 12, 48000) as unknown as AudioBuffer
+    const loadVideoAudioBuffer = vi.fn(async () => buffer)
+    const manager = new AudioManager(createVideoAudioProtocol(), { loadVideoAudioBuffer })
+
+    manager.applyTimelinePlan(createVideoPlan('start', 2000), true)
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(loadVideoAudioBuffer).toHaveBeenCalledTimes(1)
+    // No hidden <audio> element clock for video segments on this path.
+    expect(MockAudioElement.instances).toHaveLength(0)
+    expect(startSpy).toHaveBeenCalledTimes(1)
+    // sourceTimeMs 2000 with fromTime 500 → 1.5s into the decoded buffer.
+    expect(startSpy).toHaveBeenCalledWith(0, 1.5)
+
+    manager.destroy()
+  })
+
+  it('falls back to the media element path when the buffer loader yields nothing', async () => {
+    MockAudioElement.reset({ duration: 12 })
+    const loadVideoAudioBuffer = vi.fn(async () => undefined)
+    const manager = new AudioManager(createVideoAudioProtocol(), { loadVideoAudioBuffer })
+
+    manager.applyTimelinePlan(createVideoPlan('start', 2000), true)
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    manager.applyTimelinePlan(createVideoPlan('start', 2100), true)
+
+    const element = MockAudioElement.instances[0]
+    expect(element).toBeDefined()
+    expect(element?.playCalls).toBe(1)
+
+    manager.destroy()
+  })
+})

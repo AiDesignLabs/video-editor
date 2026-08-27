@@ -31,6 +31,30 @@ type AudioElementSegment = IAudioSegment | IVideoFramesSegment
 
 interface AudioManagerOptions {
   resolveMediaElementUrl?: (segment: AudioElementSegment) => string | undefined
+  /**
+   * When provided, video segment audio is decoded into an AudioBuffer and
+   * scheduled on the WebAudio clock (single clock with the mix bus) instead of
+   * being played through a hidden <audio> element.
+   */
+  loadVideoAudioBuffer?: (segment: IVideoFramesSegment) => Promise<AudioBuffer | undefined>
+}
+
+interface VideoBufferVoice {
+  segmentId: string
+  /** Invalidation key over the fields that change the decoded window. */
+  cacheKey: string
+  /** Source time (ms) represented by buffer position 0. */
+  bufferStartMs: number
+  gainNode: GainNode
+  buffer?: AudioBuffer
+  loading?: Promise<AudioBuffer | undefined>
+  pendingStart?: { offsetSec: number, requestedAtCtxTime: number }
+  /** Decode yielded no buffer; fall back to the <audio> element path. */
+  failed?: boolean
+  source?: AudioBufferSourceNode
+  startCtxTime: number
+  startOffsetSec: number
+  rate: number
 }
 
 export class AudioManager {
@@ -42,6 +66,7 @@ export class AudioManager {
   private plannedVideoAudioRates = new Map<string, number>()
   private plannedVoices = new Map<string, PlannedVoiceRuntime>()
   private audioElements = new Map<string, AudioElementState>()
+  private videoBufferVoices = new Map<string, VideoBufferVoice>()
   private ctx: AudioContext
 
   constructor(protocol: IVideoProtocol, options: AudioManagerOptions = {}) {
@@ -158,6 +183,8 @@ export class AudioManager {
 
   public destroy() {
     this.stopAll()
+    for (const key of [...this.videoBufferVoices.keys()])
+      this.stopVideoBufferVoice(key)
     for (const state of this.audioElements.values())
       this.destroyAudioElement(state.el)
     this.audioElements.clear()
@@ -167,6 +194,9 @@ export class AudioManager {
     for (const state of this.audioElements.values()) {
       this.pauseAudioElementState(state)
     }
+
+    for (const key of [...this.videoBufferVoices.keys()])
+      this.stopVideoBufferVoice(key, { keepVoice: true })
 
     for (const state of this.mp4States.values()) {
       for (const source of state.sources) {
@@ -201,7 +231,189 @@ export class AudioManager {
       this.applySegmentAudioEvent(event)
       return
     }
+    if (this.options.loadVideoAudioBuffer) {
+      this.applyVideoBufferAudioEvent(event)
+      return
+    }
     this.applyVideoAudioEvent(event)
+  }
+
+  private applyVideoBufferAudioEvent(event: AudioPlanEvent) {
+    const key = this.videoKey(event.segmentId)
+    const voice = this.getOrCreatePlannedVoice(event)
+
+    if (event.action === 'stop') {
+      this.stopVideoBufferVoice(key)
+      voice.phase = 'ended'
+      this.plannedVoices.delete(event.voiceId)
+      return
+    }
+
+    const segment = this.findVideoSegment(event.segmentId)
+    if (!segment)
+      return
+    const state = this.getOrCreateVideoBufferVoice(key, segment)
+    if (state.failed) {
+      this.applyVideoAudioEvent(event)
+      return
+    }
+
+    if (typeof event.gain === 'number')
+      state.gainNode.gain.value = this.normalizeVolume(event.gain)
+    if (typeof event.rate === 'number') {
+      const normalizedRate = this.normalizePlayRate(event.rate)
+      if (normalizedRate !== state.rate) {
+        state.rate = normalizedRate
+        if (state.source) {
+          // Rebase the drift tracking before changing the live playback rate.
+          state.startOffsetSec = this.currentVideoBufferOffsetSec(state)
+          state.startCtxTime = this.ctx.currentTime
+          state.source.playbackRate.value = normalizedRate
+        }
+      }
+    }
+
+    if (event.action === 'start' || event.action === 'seek') {
+      const sourceOffsetMs = this.computeSegmentSourceOffsetMs(
+        segment,
+        event.atTimelineMs,
+        event.sourceTimeMs,
+      )
+      const playRate = this.normalizePlayRate(segment.playRate)
+      const fromTimeMs = Math.max(0, segment.fromTime ?? 0)
+      const segmentDurationMs = Math.max(0, segment.endTime - segment.startTime)
+      const maxSourceSec = (fromTimeMs + segmentDurationMs * playRate) / 1000
+      const normalizedSourceSec = Math.max(0, sourceOffsetMs / 1000)
+      if (normalizedSourceSec >= maxSourceSec - 0.01) {
+        this.stopVideoBufferVoice(key, { keepVoice: true })
+        voice.lastSourceSec = normalizedSourceSec
+        voice.phase = 'ended'
+        return
+      }
+
+      const offsetSec = Math.max(0, normalizedSourceSec - state.bufferStartMs / 1000)
+      this.startVideoBufferVoice(state, offsetSec, event.action === 'seek')
+      voice.lastSourceSec = normalizedSourceSec
+      voice.phase = 'playing'
+    }
+  }
+
+  private getOrCreateVideoBufferVoice(key: string, segment: IVideoFramesSegment): VideoBufferVoice {
+    const cacheKey = [
+      segment.url,
+      segment.fromTime ?? 0,
+      segment.endTime - segment.startTime,
+      segment.playRate ?? 1,
+    ].join('::')
+    const existing = this.videoBufferVoices.get(key)
+    if (existing && existing.cacheKey === cacheKey)
+      return existing
+    if (existing)
+      this.stopVideoBufferVoice(key)
+
+    const gainNode = this.ctx.createGain()
+    gainNode.gain.value = this.normalizeVolume(segment.volume)
+    gainNode.connect(this.ctx.destination)
+    const state: VideoBufferVoice = {
+      segmentId: segment.id,
+      cacheKey,
+      bufferStartMs: Math.max(0, segment.fromTime ?? 0),
+      gainNode,
+      startCtxTime: 0,
+      startOffsetSec: 0,
+      rate: this.normalizePlayRate(segment.playRate),
+    }
+    this.videoBufferVoices.set(key, state)
+    return state
+  }
+
+  private startVideoBufferVoice(state: VideoBufferVoice, offsetSec: number, forceSeek: boolean) {
+    if (!state.buffer) {
+      state.pendingStart = { offsetSec, requestedAtCtxTime: this.ctx.currentTime }
+      if (!state.loading) {
+        const segment = this.findVideoSegment(state.segmentId)
+        if (!segment || !this.options.loadVideoAudioBuffer)
+          return
+        state.loading = this.options.loadVideoAudioBuffer(segment)
+          .catch(() => undefined)
+          .then((buffer) => {
+            state.loading = undefined
+            state.buffer = buffer ?? undefined
+            if (!buffer)
+              state.failed = true
+            const pending = state.pendingStart
+            state.pendingStart = undefined
+            if (buffer && pending) {
+              // Compensate for the time the decode took.
+              const elapsedSec = Math.max(0, this.ctx.currentTime - pending.requestedAtCtxTime)
+              this.startVideoBufferVoice(state, pending.offsetSec + elapsedSec * state.rate, true)
+            }
+            return buffer ?? undefined
+          })
+      }
+      return
+    }
+
+    if (state.source) {
+      const currentOffsetSec = this.currentVideoBufferOffsetSec(state)
+      if (!forceSeek && Math.abs(currentOffsetSec - offsetSec) <= 0.05)
+        return
+      this.stopVideoBufferSource(state)
+    }
+
+    const clampedOffsetSec = Math.max(0, Math.min(offsetSec, state.buffer.duration))
+    if (clampedOffsetSec >= state.buffer.duration)
+      return
+    const source = this.ctx.createBufferSource()
+    source.buffer = state.buffer
+    source.playbackRate.value = state.rate
+    source.connect(state.gainNode)
+    source.onended = () => {
+      if (state.source === source)
+        state.source = undefined
+    }
+    source.start(0, clampedOffsetSec)
+    state.source = source
+    state.startCtxTime = this.ctx.currentTime
+    state.startOffsetSec = clampedOffsetSec
+  }
+
+  private currentVideoBufferOffsetSec(state: VideoBufferVoice) {
+    if (!state.source)
+      return state.startOffsetSec
+    return state.startOffsetSec + Math.max(0, this.ctx.currentTime - state.startCtxTime) * state.rate
+  }
+
+  private stopVideoBufferSource(state: VideoBufferVoice) {
+    const source = state.source
+    if (!source)
+      return
+    state.source = undefined
+    try {
+      source.onended = null
+      source.stop()
+      source.disconnect()
+    }
+    catch {
+      // Source may already be stopped or disconnected.
+    }
+  }
+
+  private stopVideoBufferVoice(key: string, options: { keepVoice?: boolean } = {}) {
+    const state = this.videoBufferVoices.get(key)
+    if (!state)
+      return
+    this.stopVideoBufferSource(state)
+    state.pendingStart = undefined
+    if (options.keepVoice)
+      return
+    try {
+      state.gainNode.disconnect()
+    }
+    catch {
+      // Gain may already be disconnected.
+    }
+    this.videoBufferVoices.delete(key)
   }
 
   private applySegmentAudioEvent(event: AudioPlanEvent) {
