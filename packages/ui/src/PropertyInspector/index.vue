@@ -41,6 +41,14 @@ const hasPalette = computed(() => {
 const isVideo = computed(() => segment.value?.segmentType === 'frames'
   && (segment.value as DeepReadonly<SegmentUnion> & { type?: string }).type === 'video')
 
+// Template-friendly accessors (object-type casts inside templates break dts emit).
+const opacityValue = computed(() => (segment.value as { opacity?: number } | null)?.opacity ?? 1)
+const volumeValue = computed(() => (segment.value as { volume?: number } | null)?.volume ?? 1)
+const playRateValue = computed(() => (segment.value as { playRate?: number } | null)?.playRate ?? 1)
+const fillModeValue = computed(() => (segment.value as { fillMode?: IFillMode } | null)?.fillMode ?? 'contain')
+const transformValue = computed(() => (segment.value as { transform?: DeepReadonly<ITransform> } | null)?.transform)
+const paletteValue = computed(() => (segment.value as { palette?: DeepReadonly<IPalette> } | null)?.palette)
+
 function formatMs(value: number) {
   return `${(value / 1000).toFixed(2)}s`
 }
@@ -229,7 +237,7 @@ function removeTextLine(index: number) {
         <NumberField
           v-if="hasOpacity"
           label="不透明度"
-          :model-value="(segment as { opacity?: number }).opacity ?? 1"
+          :model-value="opacityValue"
           :min="0" :max="1" :step="0.01" slider
           @update:model-value="setOpacity"
         />
@@ -237,13 +245,13 @@ function removeTextLine(index: number) {
         <template v-if="isVideo || segment.segmentType === 'audio'">
           <NumberField
             label="音量"
-            :model-value="(segment as { volume?: number }).volume ?? 1"
+            :model-value="volumeValue"
             :min="0" :max="1" :step="0.01" slider
             @update:model-value="setVolume"
           />
           <NumberField
             label="倍速"
-            :model-value="(segment as { playRate?: number }).playRate ?? 1"
+            :model-value="playRateValue"
             :min="0.1" :max="4" :step="0.1" slider
             @update:model-value="setPlayRate"
           />
@@ -253,7 +261,7 @@ function removeTextLine(index: number) {
           <span class="property-inspector__label">填充</span>
           <select
             class="property-inspector__select"
-            :value="(segment as { fillMode?: IFillMode }).fillMode ?? 'contain'"
+            :value="fillModeValue"
             @change="setFillMode"
           >
             <option value="contain">contain</option>
@@ -304,14 +312,14 @@ function removeTextLine(index: number) {
       <TransformSection
         v-if="hasTransform"
         class="property-inspector__section"
-        :transform="(segment as { transform?: DeepReadonly<ITransform> }).transform"
+        :transform="transformValue"
         @change="setTransform"
       />
 
       <PaletteSection
         v-if="hasPalette"
         class="property-inspector__section"
-        :palette="(segment as { palette?: DeepReadonly<IPalette> }).palette"
+        :palette="paletteValue"
         @change="setPalette"
       />
 
