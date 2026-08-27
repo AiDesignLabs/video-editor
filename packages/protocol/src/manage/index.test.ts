@@ -3285,3 +3285,42 @@ describe('splitSegment', () => {
     expect(exportProtocol().tracks[0].children).toHaveLength(2)
   })
 })
+
+describe('splitSegment keyframes rebase', () => {
+  it('rebases keyframes across the halves with boundary samples', () => {
+    const { addSegment, splitSegment, exportProtocol } = createVideoProtocolManager(protocol)
+
+    const text: ITextSegment = {
+      id: 'kf-split',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 2000,
+      texts: [{ content: 'x' }],
+      keyframes: [
+        {
+          property: 'opacity',
+          frames: [
+            { timeMs: 0, value: 0 },
+            { timeMs: 2000, value: 1 },
+          ],
+        },
+      ],
+    }
+    addSegment(text)
+
+    const result = splitSegment('kf-split', 500)
+    expect(result.success).toBe(true)
+    const [left, right] = exportProtocol().tracks[0].children as ITextSegment[]
+
+    // Left keeps its frame before the cut plus a boundary sample at the cut.
+    expect(left.keyframes?.[0]?.frames).toEqual([
+      { timeMs: 0, value: 0 },
+      { timeMs: 500, value: 0.25 },
+    ])
+    // Right starts from the boundary sample and shifts the remaining frames.
+    expect(right.keyframes?.[0]?.frames).toEqual([
+      { timeMs: 0, value: 0.25 },
+      { timeMs: 1500, value: 1 },
+    ])
+  })
+})

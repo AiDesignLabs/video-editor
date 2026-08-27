@@ -1,7 +1,7 @@
 import type { IAudioSegment, ITrack, ITrackType, ITransition, ITransitionEdge, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
 import type { DeepReadonly } from '@vue/reactivity'
 import type { PartialByKeys } from './utils'
-import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
+import { isAudioSegment, isVideoFramesSegment, sampleKeyframes } from '@video-editor/shared'
 import { computed, reactive, readonly, ref, toRaw } from '@vue/reactivity'
 import { createValidator } from '../verify'
 import { useHistory } from './immer'
@@ -800,6 +800,29 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
           left.fadeInDuration = Math.min(left.fadeInDuration, leftDuration / 2)
         if (typeof right.fadeOutDuration === 'number')
           right.fadeOutDuration = Math.min(right.fadeOutDuration, rightDuration / 2)
+      }
+
+      // Rebase keyframes (RFC 0002 §3.7): the left half keeps frames before
+      // the cut, the right half keeps the rest shifted by -offset; both gain
+      // a boundary keyframe sampled at the cut so the result stays seamless.
+      if (left.keyframes?.length) {
+        const offsetMs = timelineMs - left.startTime
+        right.keyframes = (right.keyframes ?? []).map(track => ({
+          property: track.property,
+          frames: [
+            { timeMs: 0, value: sampleKeyframes(track, offsetMs) },
+            ...track.frames
+              .filter(frame => frame.timeMs > offsetMs)
+              .map(frame => ({ ...frame, timeMs: frame.timeMs - offsetMs })),
+          ],
+        }))
+        left.keyframes = left.keyframes.map(track => ({
+          property: track.property,
+          frames: [
+            ...track.frames.filter(frame => frame.timeMs < offsetMs),
+            { timeMs: offsetMs, value: sampleKeyframes(track, offsetMs) },
+          ],
+        }))
       }
 
       try {
