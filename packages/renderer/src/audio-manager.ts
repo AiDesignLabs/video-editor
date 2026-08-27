@@ -1,5 +1,7 @@
 import type { IAudioSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import type { AudioPlanEvent, TimelinePlan } from './timeline'
+import { createAudioContext } from './audio-context'
+
 interface Mp4State {
   sources: AudioBufferSourceNode[]
   nextStartAt?: number
@@ -45,7 +47,7 @@ export class AudioManager {
   constructor(protocol: IVideoProtocol, options: AudioManagerOptions = {}) {
     this.protocol = protocol
     this.options = options
-    this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    this.ctx = createAudioContext()
   }
 
   public setProtocol(protocol: IVideoProtocol) {
@@ -144,7 +146,7 @@ export class AudioManager {
           source.stop()
           source.disconnect()
         }
-        catch (e) {
+        catch {
           // Source may already be stopped or disconnected
         }
       }
@@ -172,7 +174,7 @@ export class AudioManager {
           source.stop(0)
           source.disconnect()
         }
-        catch (e) {
+        catch {
           // Source may already be stopped or disconnected
         }
       }
@@ -183,7 +185,7 @@ export class AudioManager {
       try {
         gain.disconnect()
       }
-      catch (e) {
+      catch {
         // Gain may already be disconnected
       }
     }
@@ -487,14 +489,14 @@ export class AudioManager {
     try {
       el.pause()
     }
-    catch (e) {
+    catch {
       // Ignore media element pause failures.
     }
     el.removeAttribute('src')
     try {
       el.load()
     }
-    catch (e) {
+    catch {
       // Ignore load failures during teardown.
     }
   }
@@ -516,7 +518,7 @@ export class AudioManager {
     try {
       state.el.pause()
     }
-    catch (e) {
+    catch {
       // Ignore media element pause failures.
     }
     state.pendingPlay = undefined
@@ -539,7 +541,7 @@ export class AudioManager {
       state.lastSourceSec = normalizedTargetSec
       return true
     }
-    catch (e) {
+    catch {
       // Metadata not ready or browser rejected out-of-range seek.
       return false
     }

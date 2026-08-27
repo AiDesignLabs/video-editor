@@ -1,10 +1,10 @@
 import type { IVideoProtocol } from '@video-editor/shared'
 import type { IClip } from '@webav/av-cliper'
 import type { ApplicationOptions } from 'pixi.js'
-import { Application } from 'pixi.js'
 import type { RendererOptions } from './renderer-core'
-import { createRenderer } from './renderer-core'
+import { Application } from 'pixi.js'
 import { computeDuration } from './helpers'
+import { createRenderer } from './renderer-core'
 
 export interface ProtocolVideoClipOptions {
   width?: number

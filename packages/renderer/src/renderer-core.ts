@@ -1,7 +1,6 @@
 import type { ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { ComputedRef, Ref, ShallowRef } from '@vue/reactivity'
-import type { Filter as PixiFilter } from 'pixi.js'
-import type { Application, ApplicationOptions } from 'pixi.js'
+import type { Application, ApplicationOptions, Filter as PixiFilter } from 'pixi.js'
 import type { TimelinePlan } from './timeline'
 import type { MaybeRef, PixiDisplayObject } from './types'
 import { createResourceManager, createValidator, getResourceKey } from '@video-editor/protocol'
@@ -27,16 +26,16 @@ import {
   computeDuration,
   placeholder,
 } from './helpers'
+import { buildTextContent, buildTextCss, renderTextBitmap } from './text'
 import {
   createEmptyEvaluatorState,
   createPixiFiltersFromVisualEffects,
   createPreviewAudioTicker,
   createPreviewRunner,
-  createVisualRenderItems,
   createTimelineTransport,
+  createVisualRenderItems,
   evaluateTimelinePlan,
 } from './timeline'
-import { buildTextContent, buildTextCss, renderTextBitmap } from './text'
 
 const DEFAULT_RES_DIR = '/video-editor-res'
 const VIDEO_PRELOAD_LOOKAHEAD_MS = 1500
@@ -604,7 +603,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       if (!allowVideoElement)
         throw new Error(`[renderer] MP4Clip unsupported for ${segment.url}`)
       const spriteFromElement = await loadVideoSpriteViaElement(segment.url).catch((err) => {
-        console.warn('[renderer] failed to load video via <video>', segment.url, err)
+        console.error('[renderer] failed to load video via <video>', segment.url, err)
         return undefined
       })
       if (spriteFromElement) {
@@ -621,14 +620,13 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         if (!urlKey || !mp4ClipErrorLoggedKeys.has(urlKey)) {
           if (urlKey)
             mp4ClipErrorLoggedKeys.add(urlKey)
-          console.warn('[renderer] failed to load video via MP4Clip', segment.url, err)
+          console.error('[renderer] failed to load video via MP4Clip', segment.url, err)
         }
         if (!allowVideoElement)
           throw err
         return undefined
       })
       if (spriteFromClip) {
-        console.info('[renderer] video source: mp4clip', segment.url)
         videoEntries.set(segment.id, spriteFromClip)
         return spriteFromClip.sprite
       }
@@ -636,11 +634,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
     if (allowVideoElement) {
       const spriteFromElement = await loadVideoSpriteViaElement(segment.url).catch((err) => {
-        console.warn('[renderer] failed to load video via <video>', segment.url, err)
+        console.error('[renderer] failed to load video via <video>', segment.url, err)
         return undefined
       })
       if (spriteFromElement) {
-        console.info('[renderer] video source: element', segment.url)
         videoEntries.set(segment.id, spriteFromElement)
         return spriteFromElement.sprite
       }
@@ -699,7 +696,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
             entry.clip.destroy()
             if (videoSourceMode !== 'mp4clip') {
               const replacement = await loadVideoSpriteViaElement(segment.url, { sprite: entry.sprite, oldTexture: entry.texture }).catch((elementErr) => {
-                console.warn('[renderer] failed to fallback to <video> after MP4Clip error', segment.url, elementErr)
+                console.error('[renderer] failed to fallback to <video> after MP4Clip error', segment.url, elementErr)
                 return undefined
               })
               if (replacement) {
@@ -710,7 +707,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
           }
           if (urlKey && !mp4ClipErrorLoggedKeys.has(urlKey)) {
             mp4ClipErrorLoggedKeys.add(urlKey)
-            console.warn('[renderer] MP4Clip tick failed', segment.url, err)
+            console.error('[renderer] MP4Clip tick failed', segment.url, err)
           }
           return
         }
@@ -727,7 +724,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       })
     }
     catch (err) {
-      console.warn('[renderer] update video frame failed', err)
+      console.error('[renderer] update video frame failed', err)
     }
   }
 
@@ -764,7 +761,6 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       && typeof segment.url === 'string'
       && isRenderableVideoUrl(segment.url)
   }
-
 
   function normalizeRenderTime(protocol: IVideoProtocol, at: number) {
     const total = computeDuration(protocol)
@@ -822,11 +818,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       return await loading
 
     const job = (async () => {
-      let file = await getOpfsFile(url)
-      if (!file) {
-        await resourceManager.add(url).catch(() => {})
-        file = await getOpfsFile(url)
-      }
+      await resourceManager.add(url).catch(() => {})
+      const file = await getOpfsFile(url)
       if (!file)
         return undefined
 
@@ -896,6 +889,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   function waitForMediaEvent(target: HTMLMediaElement, type: string, timeoutMs = 1000) {
     return new Promise<void>((resolve, reject) => {
+      let cleanup = () => {}
       const timer = window.setTimeout(() => {
         cleanup()
         reject(new Error(`Timed out waiting for media event: ${type}`))
@@ -910,7 +904,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         const mediaError = target.error ? `${target.error.code}` : 'unknown'
         reject(new Error(`Media error (${mediaError}) while waiting for ${type}`))
       }
-      const cleanup = () => {
+      cleanup = () => {
         window.clearTimeout(timer)
         target.removeEventListener(type, onOk)
         target.removeEventListener('error', onErr)
@@ -924,11 +918,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   async function loadVideoSpriteViaMP4Clip(url: string, reuse?: { sprite: Sprite, oldTexture?: Texture }): Promise<VideoEntry | undefined> {
     let file: ReturnType<typeof opfsFile> | undefined
     if (shouldUseResourceManager(url)) {
+      await resourceManager.add(url).catch(() => {})
       file = await getOpfsFile(url)
-      if (!file) {
-        await resourceManager.add(url).catch(() => {})
-        file = await getOpfsFile(url)
-      }
     }
 
     let clip: MP4Clip | undefined
@@ -1034,7 +1025,6 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     return { kind: 'element', video, canvas, texture, sprite, meta: { width, height } }
   }
 
-
   async function updateVideoElementFrame(entry: Extract<VideoEntry, { kind: 'element' }>, opts: { targetSec: number, playbackRate: number }) {
     const { video, canvas, texture } = entry
 
@@ -1083,7 +1073,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       img.crossOrigin = 'anonymous'
       img.onload = () => resolve(Texture.from(img))
       img.onerror = () => {
-        console.warn('[renderer] failed to load image', url)
+        console.error('[renderer] failed to load image', url)
         resolve(undefined)
       }
       img.src = url

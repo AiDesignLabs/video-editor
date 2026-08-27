@@ -1,12 +1,14 @@
+import { createAudioContext } from './audio-context'
+
 export interface AudioData {
   numberOfChannels: number
   numberOfFrames: number
   sampleRate: number
-  copyTo(destination: ArrayBuffer | ArrayBufferView, options: { planeIndex: number }): void
-  close(): void
+  copyTo: (destination: ArrayBuffer | ArrayBufferView, options: { planeIndex: number }) => void
+  close: () => void
 }
 
-export type AudioFrames = {
+export interface AudioFrames {
   frames: Float32Array<ArrayBufferLike>[]
   sampleRate: number
 }
@@ -19,7 +21,7 @@ export class AudioFramePlayer {
   private runningNodes: AudioBufferSourceNode[] = []
 
   constructor() {
-    this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    this.ctx = createAudioContext()
   }
 
   public async play(audioChunk: AudioChunk) {
@@ -37,40 +39,44 @@ export class AudioFramePlayer {
     }
 
     const audioData = Array.isArray(audioChunk) ? audioChunk : [audioChunk]
-    if (!audioData.length) return
+    if (!audioData.length)
+      return
 
     for (const data of audioData) {
       this.scheduleBuffer(this.toAudioBuffer(data))
       try {
         data.close()
-      } catch (err) {
-        console.warn('[AudioFramePlayer] close audio data failed', err)
+      }
+      catch (err) {
+        console.error('[AudioFramePlayer] close audio data failed', err)
       }
     }
   }
 
   public async reset() {
-    this.runningNodes.forEach(node => {
+    this.runningNodes.forEach((node) => {
       try {
         node.stop()
-      } catch (err) {
-        console.warn('[AudioFramePlayer] stop node failed', err)
+      }
+      catch (err) {
+        console.error('[AudioFramePlayer] stop node failed', err)
       }
     })
     this.runningNodes = []
 
     await this.ctx.close()
-    this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    this.ctx = createAudioContext()
     this.nextStartTime = 0
   }
-  
+
   private scheduleBuffer(buffer: AudioBuffer) {
     const source = this.ctx.createBufferSource()
     source.buffer = buffer
     source.connect(this.ctx.destination)
     source.onended = () => {
       const index = this.runningNodes.indexOf(source)
-      if (index > -1) this.runningNodes.splice(index, 1)
+      if (index > -1)
+        this.runningNodes.splice(index, 1)
     }
 
     if (this.nextStartTime < this.ctx.currentTime) {
@@ -87,7 +93,7 @@ export class AudioFramePlayer {
     const buffer = this.ctx.createBuffer(
       data.numberOfChannels,
       data.numberOfFrames,
-      data.sampleRate
+      data.sampleRate,
     )
 
     for (let ch = 0; ch < data.numberOfChannels; ch++) {

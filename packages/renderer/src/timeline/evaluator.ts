@@ -4,6 +4,7 @@ import type {
   SegmentUnion,
   TrackUnion,
 } from '@video-editor/shared'
+import type { ResolvedTransitionEdge } from './transition-resolver'
 import type {
   ActiveVoiceRef,
   AudioPlanEvent,
@@ -15,7 +16,6 @@ import type {
 } from './types'
 import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
 import { collectTransitionByFromSegmentId } from './transition-resolver'
-import type { ResolvedTransitionEdge } from './transition-resolver'
 
 interface ActiveVoiceMeta extends ActiveVoiceRef {
   sourceTimeMs: number

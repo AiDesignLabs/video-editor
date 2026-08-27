@@ -81,4 +81,3 @@ export function inferResourceTypeFromUrl(url: string): ResourceType | undefined 
 
   return undefined
 }
-

@@ -1,12 +1,12 @@
-import type { file as opfsFile } from 'opfs-tools'
 import type { ICombinatorOpts } from '@webav/av-cliper'
+import type { file as opfsFile } from 'opfs-tools'
 import { Combinator, MP4Clip, OffscreenSprite } from '@webav/av-cliper'
 
-export type VideoConcatSource =
-  | string
-  | ReadableStream<Uint8Array>
-  | Blob
-  | ReturnType<typeof opfsFile>
+export type VideoConcatSource
+  = | string
+    | ReadableStream<Uint8Array>
+    | Blob
+    | ReturnType<typeof opfsFile>
 
 export interface ConcatVideoSource {
   source: VideoConcatSource
@@ -114,11 +114,10 @@ export async function concatVideos(
 
   const width = requestedWidth ?? Math.round(firstClip.meta.width || 0)
   const height = requestedHeight ?? Math.round(firstClip.meta.height || 0)
-  if (!width || !height)
-    {
-      firstClip.destroy()
-      throw new Error('concatVideos: output width/height is required')
-    }
+  if (!width || !height) {
+    firstClip.destroy()
+    throw new Error('concatVideos: output width/height is required')
+  }
 
   const combinator = new Combinator({
     ...combinatorOpts,

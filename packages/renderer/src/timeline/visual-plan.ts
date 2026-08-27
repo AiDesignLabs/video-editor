@@ -1,4 +1,4 @@
-import type { SegmentUnion, IVideoProtocol } from '@video-editor/shared'
+import type { IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { VisualEffectParam, VisualPlanItem } from './types'
 import { isVideoFramesSegment } from '@video-editor/shared'
 

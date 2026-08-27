@@ -1,5 +1,8 @@
-export { createRenderer } from './renderer-core'
-export type { Renderer, RendererOptions } from './renderer-core'
+export { composeProtocol } from './compose'
+export type {
+  ComposeProtocolOptions,
+  ComposeProtocolResult,
+} from './compose'
 
 export { concatVideos } from './concat'
 export type {
@@ -9,36 +12,33 @@ export type {
   VideoConcatSource,
 } from './concat'
 
-export { composeProtocol } from './compose'
-export type {
-  ComposeProtocolOptions,
-  ComposeProtocolResult,
-} from './compose'
-
 export { ProtocolVideoClip } from './protocol-clip'
 export type {
   ProtocolVideoClipOptions,
 } from './protocol-clip'
 
+export { createRenderer } from './renderer-core'
+export type { Renderer, RendererOptions } from './renderer-core'
+
 export {
+  collectTransitionByFromSegmentId,
   createComposeAudioInputs,
   createComposeRunner,
-  collectTransitionByFromSegmentId,
   createEmptyEvaluatorState,
   createPixiFiltersFromVisualEffects,
-  createVisualRenderItems,
   createTimelineTransport,
+  createVisualRenderItems,
   evaluateTimelinePlan,
 } from './timeline'
 export type {
   ActiveVoiceRef,
   AudioPlanEvent,
   AudioVoiceAction,
+  ComposeAudioInput,
   ComposeRunner,
   ComposeRunnerEvaluateOptions,
   CreateTimelineTransportOptions,
   EvalContext,
-  ComposeAudioInput,
   EvaluatorOutput,
   EvaluatorState,
   ResolvedTransitionEdge,
@@ -46,8 +46,8 @@ export type {
   TimelineTransport,
   TransportSnapshot,
   VisualEffectParam,
-  VisualRenderItem,
   VisualPlanItem,
+  VisualRenderItem,
   VisualTrackEffectParam,
   VisualTrackFilterParam,
 } from './timeline'

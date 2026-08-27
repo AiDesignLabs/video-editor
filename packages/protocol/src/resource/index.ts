@@ -1,47 +1,17 @@
-import { dir as _dir, file as _file, write as _write } from 'opfs-tools'
+import { dir as _dir, file as _file } from 'opfs-tools'
+import { ensureResourceCached, getCachedResourceFile, waitForResourceDirectoryWrites, waitForResourceWrite } from './cache'
 import { DEFAULT_RESOURCE_DIR } from './constants'
 import { fileTo, getResourceType } from './fetch'
 import { getResourceOpfsPath, inferResourceTypeFromUrl } from './key'
 
 export function createResourceManager(opts?: { dir?: string }) {
   const { dir = DEFAULT_RESOURCE_DIR } = opts || {}
-  const inflightByPath = new Map<string, Promise<void>>()
 
   async function add(url: string, opts?: { body?: ReadableStream<BufferSource> }) {
     if (!url)
       return
 
-    const path = getResourceOpfsPath(dir, url)
-    if (!path)
-      return
-
-    const inflight = inflightByPath.get(path)
-    if (inflight) {
-      opts?.body?.cancel?.().catch(() => {})
-      return inflight
-    }
-
-    const job = (async () => {
-      const file = _file(path)
-      if (await file.exists()) {
-        opts?.body?.cancel?.().catch(() => {})
-        return
-      }
-
-      const body = opts?.body ?? (await fetch(url)).body
-      if (!body)
-        throw new Error('Resource not found')
-
-      await _write(path, body, { overwrite: true })
-    })()
-
-    inflightByPath.set(path, job)
-    try {
-      await job
-    }
-    finally {
-      inflightByPath.delete(path)
-    }
+    await ensureResourceCached(url, dir, opts)
   }
 
   async function exists(url: string) {
@@ -52,20 +22,10 @@ export function createResourceManager(opts?: { dir?: string }) {
     if (!path)
       return false
 
-    const inflight = inflightByPath.get(path)
-    if (inflight) {
-      try {
-        await inflight
-      }
-      catch {
-        // ignore inflight failures; fall back to filesystem check
-      }
-    }
-
-    return await _file(path).exists()
+    return Boolean(await getCachedResourceFile(url, dir))
   }
 
-  async function get(url: string) {
+  async function get(url: string): Promise<unknown> {
     if (!(await exists(url)))
       return
 
@@ -89,15 +49,7 @@ export function createResourceManager(opts?: { dir?: string }) {
     if (!path)
       return
 
-    const inflight = inflightByPath.get(path)
-    if (inflight) {
-      try {
-        await inflight
-      }
-      catch {
-        // ignore inflight failures; proceed to cleanup
-      }
-    }
+    await waitForResourceWrite(path)
 
     const file = _file(path)
     if (!(await file.exists()))
@@ -107,6 +59,7 @@ export function createResourceManager(opts?: { dir?: string }) {
   }
 
   async function clear() {
+    await waitForResourceDirectoryWrites(dir)
     if (!(await _dir(dir).exists()))
       return
 
@@ -122,8 +75,8 @@ export function createResourceManager(opts?: { dir?: string }) {
 }
 
 export { DEFAULT_RESOURCE_DIR } from './constants'
-export { generateThumbnails } from './thumbnails'
-export { getMp4Meta } from './meta'
 export { getResourceKey } from './key'
-export { extractWaveform, extractWaveformFromBuffer, clearWaveformCache, peaksToSvgPath, peaksToBars } from './waveform'
+export { getMp4Meta } from './meta'
+export { generateThumbnails } from './thumbnails'
+export { clearWaveformCache, extractWaveform, extractWaveformFromBuffer, peaksToBars, peaksToSvgPath } from './waveform'
 export type { WaveformData, WaveformOptions } from './waveform'

@@ -1,10 +1,10 @@
 import type { IVideoProtocol } from '@video-editor/shared'
 import type { IClip, ICombinatorOpts } from '@webav/av-cliper'
+import type { ProtocolVideoClipOptions } from './protocol-clip'
+import type { ComposeAudioInput } from './timeline'
 import { AudioClip, Combinator, MP4Clip, OffscreenSprite } from '@webav/av-cliper'
 import { ProtocolVideoClip } from './protocol-clip'
-import type { ProtocolVideoClipOptions } from './protocol-clip'
 import { createComposeAudioInputs } from './timeline'
-import type { ComposeAudioInput } from './timeline'
 
 export interface ComposeProtocolOptions extends Omit<ICombinatorOpts, 'width' | 'height' | 'fps'> {
   width?: number
@@ -255,7 +255,7 @@ async function createProtocolAudioSprites(protocol: IVideoProtocol): Promise<Off
       sprites.push(item.value)
       continue
     }
-    console.warn('[compose] skip audio sprite due to load failure', item.reason)
+    console.error('[compose] skip audio sprite due to load failure', item.reason)
   }
   return sprites
 }

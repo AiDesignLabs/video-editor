@@ -2,9 +2,9 @@
  * Extract waveform peaks from audio for visualization
  */
 
-import { file as _file } from 'opfs-tools'
-import { getResourceKey, getResourceOpfsPath } from './key'
+import { getCachedResourceFile } from './cache'
 import { DEFAULT_RESOURCE_DIR } from './constants'
+import { getResourceKey } from './key'
 
 export interface WaveformData {
   peaks: number[] // Normalized peaks between 0 and 1
@@ -49,7 +49,7 @@ export async function extractWaveform(
   // Try to get audio data from OPFS cache or fetch
   const arrayBuffer = await getAudioArrayBuffer(url, resourceDir)
 
-  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+  const audioContext = createAudioContext()
 
   try {
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
@@ -86,7 +86,7 @@ export async function extractWaveformFromBuffer(
   if (cached)
     return cached
 
-  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+  const audioContext = createAudioContext()
 
   try {
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0))
@@ -128,25 +128,26 @@ export function clearWaveformCache(url?: string): void {
  */
 async function getAudioArrayBuffer(url: string, resourceDir: string): Promise<ArrayBuffer> {
   // Try OPFS cache first
-  const opfsPath = getResourceOpfsPath(resourceDir, url)
-  if (opfsPath) {
-    try {
-      const file = _file(opfsPath)
-      if (await file.exists()) {
-        const originFile = await file.getOriginFile()
-        if (originFile) {
-          return await originFile.arrayBuffer()
-        }
-      }
-    }
-    catch {
-      // OPFS read failed, fall back to fetch
-    }
+  const file = await getCachedResourceFile(url, resourceDir)
+  if (file) {
+    const originFile = await file.getOriginFile()
+    if (originFile)
+      return await originFile.arrayBuffer()
   }
 
   // Fall back to fetch
   const response = await fetch(url)
   return await response.arrayBuffer()
+}
+
+function createAudioContext() {
+  const legacyWindow = window as typeof window & {
+    webkitAudioContext?: typeof AudioContext
+  }
+  const AudioContextConstructor = window.AudioContext ?? legacyWindow.webkitAudioContext
+  if (!AudioContextConstructor)
+    throw new Error('Web Audio API is not supported')
+  return new AudioContextConstructor()
 }
 
 /**
@@ -163,7 +164,7 @@ function extractPeaks(
 
   if (samplesPerPeak === 0) {
     // Audio is too short, return empty peaks
-    return new Array(samples).fill(0)
+    return Array.from({ length: samples }, () => 0)
   }
 
   const peaks: number[] = []

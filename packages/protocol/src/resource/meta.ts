@@ -1,7 +1,8 @@
+import type { OTFile } from 'opfs-tools'
 import { MP4Clip } from '@webav/av-cliper'
-import { file as opfsFile } from 'opfs-tools'
+import { getCachedResourceFile } from './cache'
 import { DEFAULT_RESOURCE_DIR } from './constants'
-import { getResourceKey, getResourceOpfsPath } from './key'
+import { getResourceKey } from './key'
 
 export interface Mp4Meta {
   durationUs: number
@@ -25,12 +26,15 @@ export function getMp4Meta(url: string, options?: { resourceDir?: string }): Pro
     return cached
 
   const job = (async () => {
-    const file = await getOpfsFile(url, resourceDir)
+    const file = await getCachedResourceFile(url, resourceDir)
     const clip = await createClip(url, file)
 
     try {
       await clip.ready
-      const meta = clip.meta
+      const meta = clip.meta as typeof clip.meta & {
+        audioChanCount?: number
+        audioSampleRate?: number
+      }
       const durationUs = Number.isFinite(meta.duration) ? meta.duration : 0
       const durationMs = Math.max(0, Math.floor(durationUs / 1000))
       return {
@@ -38,8 +42,8 @@ export function getMp4Meta(url: string, options?: { resourceDir?: string }): Pro
         durationMs,
         width: meta.width,
         height: meta.height,
-        audioSampleRate: (meta as any).audioSampleRate ?? 0,
-        audioChanCount: (meta as any).audioChanCount ?? 0,
+        audioSampleRate: meta.audioSampleRate ?? 0,
+        audioChanCount: meta.audioChanCount ?? 0,
       }
     }
     catch {
@@ -55,7 +59,7 @@ export function getMp4Meta(url: string, options?: { resourceDir?: string }): Pro
   return job
 }
 
-async function createClip(url: string, file?: ReturnType<typeof opfsFile>) {
+async function createClip(url: string, file?: OTFile) {
   if (file)
     return new MP4Clip(file)
 
@@ -66,22 +70,7 @@ async function createClip(url: string, file?: ReturnType<typeof opfsFile>) {
   return new MP4Clip(res.body)
 }
 
-async function getOpfsFile(url: string, resourceDir: string) {
-  try {
-    const path = getResourceOpfsPath(resourceDir, url)
-    if (!path)
-      return undefined
-    const file = opfsFile(path, 'r')
-    if (await file.exists())
-      return file
-  }
-  catch {
-    // ignore OPFS read errors, fallback to network fetch
-  }
-  return undefined
-}
-
-async function getMp4MetaViaVideoElement(url: string, file?: ReturnType<typeof opfsFile>): Promise<Mp4Meta> {
+async function getMp4MetaViaVideoElement(url: string, file?: OTFile): Promise<Mp4Meta> {
   if (typeof document === 'undefined') {
     return {
       durationUs: 0,
@@ -115,6 +104,7 @@ async function getMp4MetaViaVideoElement(url: string, file?: ReturnType<typeof o
     }
 
     await new Promise<void>((resolve, reject) => {
+      let cleanup = () => {}
       const onOk = () => {
         cleanup()
         resolve()
@@ -123,7 +113,7 @@ async function getMp4MetaViaVideoElement(url: string, file?: ReturnType<typeof o
         cleanup()
         reject(new Error('failed to read mp4 meta via <video>'))
       }
-      const cleanup = () => {
+      cleanup = () => {
         video.removeEventListener('loadedmetadata', onOk)
         video.removeEventListener('error', onErr)
       }

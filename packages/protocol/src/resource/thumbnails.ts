@@ -1,7 +1,8 @@
 import { MP4Clip } from '@webav/av-cliper'
 import { dir as opfsDir, file as opfsFile, write as opfsWrite } from 'opfs-tools'
+import { ensureResourceCached, getCachedResourceFile } from './cache'
 import { DEFAULT_RESOURCE_DIR } from './constants'
-import { inferResourceTypeFromUrl, getResourceKey, getResourceOpfsPath } from './key'
+import { getResourceKey, inferResourceTypeFromUrl } from './key'
 
 export interface GenerateThumbnailsOptions {
   /** Thumbnail width in pixels (default 100). */
@@ -21,7 +22,6 @@ export interface Thumbnail {
   img: Blob
 }
 
-const inflightCacheByPath = new Map<string, Promise<void>>()
 const inflightThumbnails = new Map<string, Promise<Thumbnail[]>>()
 const thumbnailCache = new Map<string, Thumbnail[]>()
 const mp4ClipUnsupportedKeys = new Set<string>()
@@ -96,7 +96,7 @@ export async function generateThumbnails(url: string, options?: GenerateThumbnai
 
 async function generateThumbnailsInner(url: string, opts: Required<Pick<GenerateThumbnailsOptions, 'imgWidth' | 'resourceDir'>> & Pick<GenerateThumbnailsOptions, 'start' | 'end' | 'step'>): Promise<Thumbnail[]> {
   const { imgWidth, start, end, step, resourceDir } = opts
-  const file = await getOpfsFile(url, resourceDir) ?? await ensureCached(url, resourceDir)
+  const file = await getCachedResourceFile(url, resourceDir) ?? await ensureResourceCached(url, resourceDir)
   const urlKey = `${resourceDir}::${getResourceKey(url)}`
   if (urlKey && mp4ClipUnsupportedKeys.has(urlKey))
     return await generateThumbnailsViaVideoElement(url, file, { imgWidth, start, end, step })
@@ -127,63 +127,6 @@ async function createClip(url: string, file?: ReturnType<typeof opfsFile>) {
     throw new Error('failed to fetch resource for thumbnails')
 
   return new MP4Clip(res.body)
-}
-
-async function getOpfsFile(url: string, resourceDir: string) {
-  try {
-    const path = getResourceOpfsPath(resourceDir, url)
-    if (!path)
-      return undefined
-    const file = opfsFile(path, 'r')
-    if (await file.exists())
-      return file
-  }
-  catch {
-    // ignore OPFS read errors, fallback to network fetch
-  }
-  return undefined
-}
-
-async function ensureCached(url: string, resourceDir: string) {
-  // Avoid caching non-network URLs into OPFS.
-  if (url.startsWith('data:') || url.startsWith('blob:'))
-    return undefined
-
-  const path = getResourceOpfsPath(resourceDir, url)
-  if (!path)
-    return undefined
-
-  const existing = opfsFile(path, 'r')
-  try {
-    if (await existing.exists())
-      return existing
-  }
-  catch {
-    return undefined
-  }
-
-  const inflight = inflightCacheByPath.get(path)
-  if (inflight) {
-    await inflight.catch(() => {})
-    return await getOpfsFile(url, resourceDir)
-  }
-
-  const job = (async () => {
-    const res = await fetch(url)
-    if (!res.body)
-      throw new Error('failed to fetch resource for thumbnails')
-    await opfsWrite(path, res.body, { overwrite: true })
-  })()
-
-  inflightCacheByPath.set(path, job)
-  try {
-    await job
-  }
-  finally {
-    inflightCacheByPath.delete(path)
-  }
-
-  return await getOpfsFile(url, resourceDir)
 }
 
 function isMp4ClipUnsupported(err: unknown) {
@@ -492,9 +435,6 @@ async function generateThumbnailsViaVideoElement(
 
     return results
   }
-  catch {
-    return []
-  }
   finally {
     video.pause()
     video.removeAttribute('src')
@@ -506,6 +446,7 @@ async function generateThumbnailsViaVideoElement(
 
 function waitForVideoEvent(video: HTMLVideoElement, type: string, timeoutMs: number) {
   return new Promise<void>((resolve, reject) => {
+    let cleanup = () => {}
     const timer = window.setTimeout(() => {
       cleanup()
       reject(new Error(`Timed out waiting for video event: ${type}`))
@@ -519,7 +460,7 @@ function waitForVideoEvent(video: HTMLVideoElement, type: string, timeoutMs: num
       cleanup()
       reject(new Error(`Video error while waiting for ${type}`))
     }
-    const cleanup = () => {
+    cleanup = () => {
       window.clearTimeout(timer)
       video.removeEventListener(type, onOk)
       video.removeEventListener('error', onErr)
@@ -533,7 +474,7 @@ function waitForVideoEvent(video: HTMLVideoElement, type: string, timeoutMs: num
 function canvasToBlob(canvas: HTMLCanvasElement) {
   return new Promise<Blob | undefined>((resolve) => {
     try {
-      canvas.toBlob((blob) => resolve(blob ?? undefined), 'image/png')
+      canvas.toBlob(blob => resolve(blob ?? undefined), 'image/png')
     }
     catch {
       resolve(undefined)
