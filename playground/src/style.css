@@ -300,3 +300,11 @@ pre {
   display: block;
   object-fit: contain;
 }
+
+.editor-body {
+  margin-top: 12px;
+}
+
+.editor-body .inspector {
+  max-width: 420px;
+}

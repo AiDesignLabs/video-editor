@@ -1,4 +1,5 @@
 import type { App } from 'vue'
+import PropertyInspector from './PropertyInspector/index.vue'
 import VideoEditorTimeline from './VideoEditorTimeline/index.vue'
 import VideoTimeline from './VideoTimeline/index.vue'
 
@@ -6,8 +7,10 @@ export * from './VideoTimeline/types'
 
 export * from './VideoEditorTimeline/segments'
 
+export type { SegmentUpdater } from './PropertyInspector/types'
+
 // 导出单独组件
-export { VideoEditorTimeline, VideoTimeline }
+export { PropertyInspector, VideoEditorTimeline, VideoTimeline }
 
 export default {
   install(app: App): void {

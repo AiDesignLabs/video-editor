@@ -4,7 +4,8 @@ import type { Ref } from 'vue'
 import { createEditorCore } from '@video-editor/editor-core'
 import { generateThumbnails } from '@video-editor/protocol'
 import { composeProtocol, createRenderer, type Renderer } from '@video-editor/renderer'
-import { VideoEditorTimeline } from '@video-editor/ui'
+import type { SegmentUpdater } from '@video-editor/ui'
+import { PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 
 const swatches = {
@@ -295,6 +296,13 @@ function removeSelectedSegment() {
   const result = commands.removeSegment(id)
   if (result.success)
     commands.setSelectedSegment(undefined)
+}
+
+function handleInspectorUpdate(updater: SegmentUpdater) {
+  const selected = state.selectedSegment.value
+  if (!selected)
+    return
+  commands.updateSegment(updater, selected.id, selected.segmentType)
 }
 
 function splitSelectedSegment() {
@@ -589,6 +597,14 @@ function handleAddSegmentClick(data: {
         <div v-else-if="error" class="placeholder error">
           初始化失败: {{ error }}
         </div>
+      </div>
+
+      <div class="editor-body">
+        <PropertyInspector
+          class="inspector"
+          :segment="state.selectedSegment.value ?? null"
+          @update:segment="handleInspectorUpdate"
+        />
       </div>
 
       <div class="timeline min-h-400px">

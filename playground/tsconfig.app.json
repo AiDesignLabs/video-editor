@@ -5,14 +5,8 @@
     "composite": false,
     "rootDir": "..",
     "paths": {
-      "@video-editor/ui": [
-        "./src/shims-video-editor-ui.d.ts"
-      ],
-      "@video-editor/ui/*": [
-        "./src/shims-video-editor-ui.d.ts"
-      ],
       "@video-editor/*": [
-        "../packages/*/src/index.ts"
+        "packages/*/src/index.ts"
       ]
     },
     "typeRoots": [

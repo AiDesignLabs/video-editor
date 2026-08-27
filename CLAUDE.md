@@ -162,10 +162,11 @@ The headless editor provides a minimal, stable API:
 
 ### Commands (mutation entry point)
 - `editor.commands.addSegment(segment)` - Add segment at current time
-- `editor.commands.updateSegment(id, partial)` - Update segment properties
+- `editor.commands.updateSegment(updater, id?, type?)` - Mutate a segment via updater callback (defaults to current selection)
 - `editor.commands.removeSegment(id)` - Remove segment
 - `editor.commands.moveSegment(id, trackId, startTime)` - Move segment
-- `editor.commands.resizeSegment(id, { startTime?, endTime? })` - Resize segment
+- `editor.commands.resizeSegment({ segmentId, trackId, startTime, endTime })` - Resize segment
+- `editor.commands.splitSegment(segmentId, timelineMs)` - Split a segment at a timeline position (single undo step)
 - `editor.commands.undo()` / `redo()` - History navigation
 - `editor.commands.exportProtocol()` - Get protocol JSON
 

@@ -17,7 +17,7 @@ import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
 import type { SegmentDragPayload, SegmentLayout, SegmentResizePayload, TimelineTrack } from '../VideoTimeline/types'
 import { computed, reactive, ref, watch, watchEffect } from 'vue'
 import VideoTimeline from '../VideoTimeline/index.vue'
-import { AudioSegment, FramesSegment, SegmentBase } from './segments'
+import { AudioSegment, FramesSegment, SegmentBase, TextSegment } from './segments'
 
 defineOptions({ name: 'VideoEditorTimeline' })
 
@@ -278,7 +278,7 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
             </template>
             <template v-else-if="segment.segmentType === 'text'">
               <slot name="segment-text" :segment="segment as ITextSegment" :layout="layout">
-                <SegmentBase :segment="segment" :track-type="layout.track.type || 'unknown'" :accent-color="layout.track.color" />
+                <TextSegment :segment="segment as ITextSegment" />
               </slot>
             </template>
             <template v-else-if="segment.segmentType === 'sticker'">
