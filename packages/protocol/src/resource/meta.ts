@@ -1,5 +1,5 @@
 import type { OTFile } from 'opfs-tools'
-import { MP4Clip } from '@webav/av-cliper'
+import { openMediaInput } from '@video-editor/media'
 import { getCachedResourceFile } from './cache'
 import { DEFAULT_RESOURCE_DIR } from './constants'
 import { getResourceKey } from './key'
@@ -27,47 +27,31 @@ export function getMp4Meta(url: string, options?: { resourceDir?: string }): Pro
 
   const job = (async () => {
     const file = await getCachedResourceFile(url, resourceDir)
-    const clip = await createClip(url, file)
+    const originFile = file ? await file.getOriginFile() : undefined
+    const handle = openMediaInput(originFile ?? url)
 
     try {
-      await clip.ready
-      const meta = clip.meta as typeof clip.meta & {
-        audioChanCount?: number
-        audioSampleRate?: number
-      }
-      const durationUs = Number.isFinite(meta.duration) ? meta.duration : 0
-      const durationMs = Math.max(0, Math.floor(durationUs / 1000))
+      const meta = await handle.meta()
       return {
-        durationUs,
-        durationMs,
+        durationUs: meta.durationMs * 1000,
+        durationMs: meta.durationMs,
         width: meta.width,
         height: meta.height,
-        audioSampleRate: meta.audioSampleRate ?? 0,
-        audioChanCount: meta.audioChanCount ?? 0,
+        audioSampleRate: meta.audioSampleRate,
+        audioChanCount: meta.audioChanCount,
       }
     }
     catch {
-      // Fallback to <video> metadata extraction when MP4Clip parsing fails.
+      // Fallback to <video> metadata extraction when parsing fails.
       return await getMp4MetaViaVideoElement(url, file)
     }
     finally {
-      clip.destroy()
+      handle.dispose()
     }
   })()
 
   metaCache.set(cacheKey, job)
   return job
-}
-
-async function createClip(url: string, file?: OTFile) {
-  if (file)
-    return new MP4Clip(file)
-
-  const res = await fetch(url)
-  if (!res.body)
-    throw new Error('failed to fetch resource for mp4 meta')
-
-  return new MP4Clip(res.body)
 }
 
 async function getMp4MetaViaVideoElement(url: string, file?: OTFile): Promise<Mp4Meta> {

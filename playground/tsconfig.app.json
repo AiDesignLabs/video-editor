@@ -21,8 +21,7 @@
     ],
     "types": [
       "node",
-      "vite/client",
-      "../types/mp4box.d.ts"
+      "vite/client"
     ]
   },
   "include": [

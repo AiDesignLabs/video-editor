@@ -3,6 +3,7 @@ import { DEFAULT_RESOURCE_DIR, createResourceManager } from '.'
 import { dir as opfsDir, file as opfsFile, write as opfsWrite } from 'opfs-tools'
 import { getResourceType } from './fetch'
 import { getResourceKey } from './key'
+import { getMp4Meta } from './meta'
 import { generateThumbnails } from './thumbnails'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -49,8 +50,10 @@ describe('resource manager', () => {
 
     it('with video', async () => {
       await manager.add(videoUrl)
-      const samples = await manager.get(videoUrl)
-      expect(Array.isArray(samples) && Array.isArray(samples[0].samples) && samples[0].type).toBeTruthy()
+      // Video resources are cached for decoding elsewhere; get() resolves without demuxing.
+      await expect(manager.get(videoUrl)).resolves.toBeUndefined()
+      const meta = await getMp4Meta(videoUrl, { resourceDir: DEFAULT_RESOURCE_DIR })
+      expect(meta.width).toBeGreaterThan(0)
     })
 
     // TODO: support more resource type, such as audio, subtitle, etc.
@@ -87,8 +90,7 @@ describe('resource manager', () => {
     })
 
     it('with video', async () => {
-      const samples = await manager.get(videoUrl)
-      expect(Array.isArray(samples) && Array.isArray(samples[0].samples) && samples[0].type).toBeTruthy()
+      await expect(manager.get(videoUrl)).resolves.toBeUndefined()
     })
 
     // TODO: support more resource type, such as audio, subtitle, etc.

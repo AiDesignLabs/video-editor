@@ -1,4 +1,4 @@
-import { MP4Clip } from '@webav/av-cliper'
+import { openMediaInput } from '@video-editor/media'
 import { dir as opfsDir, file as opfsFile, write as opfsWrite } from 'opfs-tools'
 import { ensureResourceCached, getCachedResourceFile } from './cache'
 import { DEFAULT_RESOURCE_DIR } from './constants'
@@ -24,7 +24,6 @@ export interface Thumbnail {
 
 const inflightThumbnails = new Map<string, Promise<Thumbnail[]>>()
 const thumbnailCache = new Map<string, Thumbnail[]>()
-const mp4ClipUnsupportedKeys = new Set<string>()
 const maxThumbnailCacheEntries = 24
 const thumbnailManifestName = 'manifest.json'
 const thumbnailIndexName = 'index.json'
@@ -97,46 +96,27 @@ export async function generateThumbnails(url: string, options?: GenerateThumbnai
 async function generateThumbnailsInner(url: string, opts: Required<Pick<GenerateThumbnailsOptions, 'imgWidth' | 'resourceDir'>> & Pick<GenerateThumbnailsOptions, 'start' | 'end' | 'step'>): Promise<Thumbnail[]> {
   const { imgWidth, start, end, step, resourceDir } = opts
   const file = await getCachedResourceFile(url, resourceDir) ?? await ensureResourceCached(url, resourceDir)
-  const urlKey = `${resourceDir}::${getResourceKey(url)}`
-  if (urlKey && mp4ClipUnsupportedKeys.has(urlKey))
-    return await generateThumbnailsViaVideoElement(url, file, { imgWidth, start, end, step })
-
-  const clip = await createClip(url, file)
+  const originFile = file ? await file.getOriginFile() : undefined
+  const handle = openMediaInput(originFile ?? url)
 
   try {
-    await clip.ready
-    const thumbnailOpts = buildThumbnailOpts({ start, end, step })
-    return await clip.thumbnails(imgWidth, thumbnailOpts)
+    if (!(await handle.canDecodeVideo()))
+      return await generateThumbnailsViaVideoElement(url, file, { imgWidth, start, end, step })
+
+    const thumbnails = await handle.thumbnails(imgWidth, {
+      startMs: start !== undefined ? start / 1000 : undefined,
+      endMs: end !== undefined ? end / 1000 : undefined,
+      stepMs: step !== undefined ? step / 1000 : undefined,
+    })
+    // Public option/result timestamps stay in microseconds.
+    return thumbnails.map(t => ({ ts: t.tsMs * 1000, img: t.img }))
   }
-  catch (err) {
-    if (urlKey && isMp4ClipUnsupported(err))
-      mp4ClipUnsupportedKeys.add(urlKey)
+  catch {
     return await generateThumbnailsViaVideoElement(url, file, { imgWidth, start, end, step })
   }
   finally {
-    clip.destroy()
+    handle.dispose()
   }
-}
-
-async function createClip(url: string, file?: ReturnType<typeof opfsFile>) {
-  if (file)
-    return new MP4Clip(file)
-
-  const res = await fetch(url)
-  if (!res.body)
-    throw new Error('failed to fetch resource for thumbnails')
-
-  return new MP4Clip(res.body)
-}
-
-function isMp4ClipUnsupported(err: unknown) {
-  if (!(err instanceof Error))
-    return false
-  const msg = err.message || ''
-  return msg.includes('stream is done')
-    || msg.includes('not emit ready')
-    || msg.includes('tick video timeout')
-    || msg.toLowerCase().includes('call stack')
 }
 
 function shouldUseThumbnailOpfs(url: string) {
@@ -480,10 +460,4 @@ function canvasToBlob(canvas: HTMLCanvasElement) {
       resolve(undefined)
     }
   })
-}
-
-function buildThumbnailOpts(opts: { start?: number, end?: number, step?: number }) {
-  const { start, end, step } = opts
-  const hasOpts = [start, end, step].some(v => v !== undefined)
-  return hasOpts ? { start, end, step } : undefined
 }

@@ -26,8 +26,6 @@
   "dependencies": {
     "@video-editor/media": "workspace:*",
     "@video-editor/shared": "workspace:*",
-    "@webav/av-cliper": "catalog:",
-    "@webav/mp4box.js": "catalog:",
     "ajv": "catalog:",
     "ajv-errors": "catalog:",
     "ajv-formats": "catalog:",

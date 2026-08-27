@@ -12,7 +12,7 @@ export default defineConfig({
     vue(),
     dts({
       tsconfigPath: './tsconfig.build.json',
-      include: ['src', '../../types/mp4box.d.ts'],
+      include: ['src'],
       outDir: 'dist',
       insertTypesEntry: true,
       rollupTypes: true,

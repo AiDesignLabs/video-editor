@@ -15,7 +15,6 @@ export {
 export type { WaveformData, WaveformOptions } from './resource'
 export {
   fileTo,
-  fileToMP4Samples,
   getResourceType,
   vFetch,
 } from './resource/fetch'

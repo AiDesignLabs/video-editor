@@ -15,8 +15,7 @@
     ]
   },
   "include": [
-    "src",
-    "../../types/mp4box.d.ts"
+    "src"
   ],
   "exclude": [
     "**/*.test.ts",

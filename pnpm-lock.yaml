@@ -36,9 +36,6 @@ catalogs:
     '@webav/av-cliper':
       specifier: ^1.2.7
       version: 1.2.7
-    '@webav/mp4box.js':
-      specifier: 0.5.3-fenghen
-      version: 0.5.3-fenghen
     ajv:
       specifier: ^8.17.1
       version: 8.17.1
@@ -224,12 +221,6 @@ importers:
       '@video-editor/shared':
         specifier: workspace:*
         version: link:../shared
-      '@webav/av-cliper':
-        specifier: 'catalog:'
-        version: 1.2.7
-      '@webav/mp4box.js':
-        specifier: 'catalog:'
-        version: 0.5.3-fenghen
       ajv:
         specifier: 'catalog:'
         version: 8.17.1
@@ -1568,9 +1559,6 @@ packages:
 
   '@webav/internal-utils@1.2.7':
     resolution: {integrity: sha512-99hajvWwrVb/j0O3vu6zK5XXB+aAI5S4MLkPcJdw2GmGn/JYKZU8I7y7iyIf5ipuPGLucmD9O7zzb6SSeXcYkg==}
-
-  '@webav/mp4box.js@0.5.3-fenghen':
-    resolution: {integrity: sha512-jAN15I3Po1Z6Ns02iknb6KGbird9rd1h9TGldzbwsar+88ZlHd+oVjOQnFavBdNDc5vmULUnldcWGDdKc02npw==}
 
   '@webav/mp4box.js@0.5.7':
     resolution: {integrity: sha512-KgScEtDpiLnWvj1Rj8Ri9fDWxTjfdNr7cmY/PT88EmttHh6cLxMAeyD/W8Vydes4z7qV/c5VDAaP4cTlaO0E9g==}
@@ -5118,8 +5106,6 @@ snapshots:
   '@webav/internal-utils@1.2.7':
     dependencies:
       '@webav/mp4box.js': 0.5.7
-
-  '@webav/mp4box.js@0.5.3-fenghen': {}
 
   '@webav/mp4box.js@0.5.7': {}
 
