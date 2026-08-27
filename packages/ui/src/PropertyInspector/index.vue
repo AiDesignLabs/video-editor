@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { IFillMode, IPalette, ITextBasic, ITransform, SegmentUnion } from '@video-editor/shared'
+import type { IFillMode, IKeyframeProperty, IPalette, ITextBasic, ITransform, SegmentUnion } from '@video-editor/shared'
 import type { DeepReadonly } from 'vue'
 import type { SegmentUpdater } from './types'
 import { computed } from 'vue'
@@ -13,6 +13,8 @@ defineOptions({ name: 'PropertyInspector' })
 const props = defineProps<{
   segment: DeepReadonly<SegmentUnion> | null
   videoBasicInfo?: { width: number, height: number, fps: number }
+  /** Playhead position; enables the add-keyframe row when inside the segment. */
+  currentTimeMs?: number
 }>()
 
 const emit = defineEmits<{
@@ -105,6 +107,77 @@ function setPalette(palette: IPalette | undefined) {
       else
         delete draft.palette
     }
+  })
+}
+
+const keyframeProps = computed<Array<{ property: IKeyframeProperty, label: string }>>(() => {
+  const seg = segment.value
+  if (!seg)
+    return []
+  const list: Array<{ property: IKeyframeProperty, label: string }> = []
+  if (seg.segmentType === 'frames' || seg.segmentType === 'text') {
+    list.push({ property: 'opacity', label: '不透明度' })
+  }
+  if (seg.segmentType === 'frames' || seg.segmentType === 'text' || seg.segmentType === 'sticker') {
+    list.push(
+      { property: 'position.x', label: 'X' },
+      { property: 'position.y', label: 'Y' },
+      { property: 'scale', label: '缩放' },
+      { property: 'rotation', label: '旋转' },
+    )
+  }
+  if (seg.segmentType === 'audio' || (seg.segmentType === 'frames' && (seg as { type?: string }).type === 'video'))
+    list.push({ property: 'volume', label: '音量' })
+  if (seg.segmentType === 'filter')
+    list.push({ property: 'intensity', label: '强度' })
+  return list
+})
+
+const playheadInSegment = computed(() => {
+  const seg = segment.value
+  if (!seg || props.currentTimeMs === undefined)
+    return false
+  return props.currentTimeMs >= seg.startTime && props.currentTimeMs <= seg.endTime
+})
+
+function readCurrentPropertyValue(seg: DeepReadonly<SegmentUnion>, property: IKeyframeProperty): number {
+  const transform = (seg as { transform?: DeepReadonly<ITransform> }).transform
+  switch (property) {
+    case 'opacity': return (seg as { opacity?: number }).opacity ?? 1
+    case 'volume': return (seg as { volume?: number }).volume ?? 1
+    case 'intensity': return (seg as { intensity?: number }).intensity ?? 1
+    case 'position.x': return transform?.position[0] ?? 0
+    case 'position.y': return transform?.position[1] ?? 0
+    case 'scale': return transform?.scale[0] ?? 1
+    case 'rotation': return transform?.rotation[2] ?? 0
+  }
+}
+
+function addKeyframeAtPlayhead(property: IKeyframeProperty) {
+  const seg = segment.value
+  if (!seg || props.currentTimeMs === undefined)
+    return
+  const value = readCurrentPropertyValue(seg, property)
+  const timeMs = Math.max(0, Math.round(props.currentTimeMs - seg.startTime))
+  update((draft) => {
+    const tracks = draft.keyframes ?? (draft.keyframes = [])
+    let track = tracks.find(item => item.property === property)
+    if (!track) {
+      track = { property, frames: [] }
+      tracks.push(track)
+    }
+    const existing = track.frames.find(frame => frame.timeMs === timeMs)
+    if (existing)
+      existing.value = value
+    else
+      track.frames.push({ timeMs, value })
+    track.frames.sort((a, b) => a.timeMs - b.timeMs)
+  })
+}
+
+function clearKeyframes() {
+  update((draft) => {
+    delete draft.keyframes
   })
 }
 
@@ -241,6 +314,32 @@ function removeTextLine(index: number) {
         :palette="(segment as { palette?: DeepReadonly<IPalette> }).palette"
         @change="setPalette"
       />
+
+      <div v-if="keyframeProps.length && props.currentTimeMs !== undefined" class="property-inspector__section">
+        <div class="property-inspector__row property-inspector__keyframes-header">
+          <span class="property-inspector__label">关键帧</span>
+          <span v-if="!playheadInSegment" class="property-inspector__hint">播放头不在片段内</span>
+          <button
+            v-if="segment.keyframes?.length"
+            class="property-inspector__kf-clear"
+            type="button"
+            @click="clearKeyframes"
+          >清空</button>
+        </div>
+        <div class="property-inspector__kf-buttons">
+          <button
+            v-for="item in keyframeProps"
+            :key="item.property"
+            class="property-inspector__kf-button"
+            type="button"
+            :disabled="!playheadInSegment"
+            :title="`在播放头处为 ${item.label} 打关键帧`"
+            @click="addKeyframeAtPlayhead(item.property)"
+          >
+            ◆ {{ item.label }}
+          </button>
+        </div>
+      </div>
     </template>
   </aside>
 </template>
@@ -290,5 +389,33 @@ function removeTextLine(index: number) {
   --at-apply: px-1.5 py-1 rounded-4px text-[12px];
   border: 1px solid rgba(15, 23, 42, 0.15);
   background: #fff;
+}
+
+:where(.property-inspector .property-inspector__hint) {
+  --at-apply: text-[11px];
+  color: rgba(15, 23, 42, 0.4);
+}
+
+:where(.property-inspector .property-inspector__kf-buttons) {
+  --at-apply: flex items-center gap-1.5 flex-wrap;
+}
+
+:where(.property-inspector .property-inspector__kf-button) {
+  --at-apply: px-2 py-1 rounded-4px text-[11px] cursor-pointer;
+  border: 1px solid rgba(15, 23, 42, 0.15);
+  background: #fff;
+  color: rgba(15, 23, 42, 0.7);
+}
+
+:where(.property-inspector .property-inspector__kf-button:disabled) {
+  --at-apply: cursor-not-allowed;
+  opacity: 0.4;
+}
+
+:where(.property-inspector .property-inspector__kf-clear) {
+  --at-apply: ml-auto px-2 py-0.5 rounded-4px text-[11px] cursor-pointer;
+  border: 1px solid rgba(15, 23, 42, 0.15);
+  background: #fff;
+  color: rgba(15, 23, 42, 0.6);
 }
 </style>

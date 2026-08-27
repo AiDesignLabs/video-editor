@@ -17,7 +17,7 @@ import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
 import type { SegmentDragPayload, SegmentLayout, SegmentResizePayload, TimelineTrack } from '../VideoTimeline/types'
 import { computed, reactive, ref, watch, watchEffect } from 'vue'
 import VideoTimeline from '../VideoTimeline/index.vue'
-import { AudioSegment, FramesSegment, SegmentBase, TextSegment } from './segments'
+import { AudioSegment, FramesSegment, KeyframeMarkers, SegmentBase, TextSegment } from './segments'
 
 defineOptions({ name: 'VideoEditorTimeline' })
 
@@ -266,6 +266,7 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
           class="ve-editor-segment"
           :style="{ '--ve-segment-accent': layout.track.color || PRIMARY_COLOR }"
         >
+          <KeyframeMarkers :segment="segment" />
           <div class="ve-editor-segment__preview">
             <!-- Separate slots by segment type for automatic type narrowing -->
             <template v-if="segment.segmentType === 'frames'">

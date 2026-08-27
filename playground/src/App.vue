@@ -603,6 +603,7 @@ function handleAddSegmentClick(data: {
         <PropertyInspector
           class="inspector"
           :segment="state.selectedSegment.value ?? null"
+          :current-time-ms="currentTimeMs"
           @update:segment="handleInspectorUpdate"
         />
       </div>
