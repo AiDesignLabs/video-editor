@@ -1,20 +1,23 @@
 import type { ITextBasic } from '@video-editor/shared'
+import type { RenderedTextBitmap } from './text-bitmap'
 import { renderTextToImageBitmap } from './text-bitmap'
 
+export type { RenderedTextBitmap } from './text-bitmap'
+
 const DEFAULT_TEXT_BITMAP_CACHE_LIMIT = 100
-const textBitmapCache = new Map<string, ImageBitmap>()
+const textBitmapCache = new Map<string, RenderedTextBitmap>()
 let textBitmapCacheLimit = DEFAULT_TEXT_BITMAP_CACHE_LIMIT
 
-function touchCache(key: string, value: ImageBitmap) {
+function touchCache(key: string, value: RenderedTextBitmap) {
   textBitmapCache.delete(key)
   textBitmapCache.set(key, value)
 }
 
 function trimCache() {
   while (textBitmapCache.size > textBitmapCacheLimit) {
-    const [oldestKey, bitmap] = textBitmapCache.entries().next().value as [string, ImageBitmap]
+    const [oldestKey, rendered] = textBitmapCache.entries().next().value as [string, RenderedTextBitmap]
     textBitmapCache.delete(oldestKey)
-    bitmap.close?.()
+    rendered.bitmap.close?.()
   }
 }
 
@@ -24,8 +27,8 @@ export function setTextBitmapCacheLimit(limit: number) {
 }
 
 export function clearTextBitmapCache() {
-  for (const bitmap of textBitmapCache.values())
-    bitmap.close?.()
+  for (const rendered of textBitmapCache.values())
+    rendered.bitmap.close?.()
   textBitmapCache.clear()
 }
 

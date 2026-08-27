@@ -150,6 +150,8 @@ vi.mock('pixi.js', () => {
   class Texture {
     public source = { update: vi.fn() }
 
+    constructor(_options?: unknown) {}
+
     static from() {
       return new Texture()
     }
@@ -159,7 +161,11 @@ vi.mock('pixi.js', () => {
     destroy() {}
   }
 
-  return { BlurFilter, ColorMatrixFilter, Container, Filter, Sprite, Texture }
+  class ImageSource {
+    constructor(public options?: unknown) {}
+  }
+
+  return { BlurFilter, ColorMatrixFilter, Container, Filter, ImageSource, Sprite, Texture }
 })
 
 vi.mock('./audio-manager', () => {

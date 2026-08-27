@@ -16,7 +16,7 @@ import {
 import type { MediaInputHandle } from '@video-editor/media'
 import { openMediaInput } from '@video-editor/media'
 import { file as opfsFile } from 'opfs-tools'
-import { Container, Sprite, Texture } from 'pixi.js'
+import { Container, ImageSource, Sprite, Texture } from 'pixi.js'
 import { createApp as create2dApp } from './2d'
 import { AudioManager } from './audio-manager'
 import {
@@ -567,8 +567,11 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (!text)
       return undefined
 
-    const bitmap = await renderTextBitmap(content, buildTextCss(text))
-    const texture = Texture.from(bitmap)
+    const rendered = await renderTextBitmap(content, buildTextCss(text))
+    // resolution maps the oversampled bitmap back to its CSS-pixel layout size.
+    const texture = new Texture({
+      source: new ImageSource({ resource: rendered.bitmap, resolution: rendered.scale }),
+    })
     return new Sprite(texture)
   }
 

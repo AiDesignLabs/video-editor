@@ -6,26 +6,45 @@
  * derived from blob: URL SVGs that contain <foreignObject>, which would make
  * WebGL texture uploads throw a SecurityError.
  */
-export async function renderTextToImageBitmap(content: string, cssText: string): Promise<ImageBitmap> {
+export interface RenderedTextBitmap {
+  bitmap: ImageBitmap
+  /** CSS-pixel size; the bitmap itself is `scale`× larger for crisp rendering. */
+  width: number
+  height: number
+  scale: number
+}
+
+export function resolveTextRasterScale() {
+  const dpr = globalThis.devicePixelRatio || 1
+  return Math.min(4, Math.max(2, Math.ceil(dpr)))
+}
+
+export async function renderTextToImageBitmap(
+  content: string,
+  cssText: string,
+  scale: number = resolveTextRasterScale(),
+): Promise<RenderedTextBitmap> {
   await document.fonts.ready
 
   const { width, height } = measureText(content, cssText)
   const style = `display: inline-block; margin: 0; ${cssText}`
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`
-    + `<foreignObject width="100%" height="100%">`
+  // viewBox keeps the CSS-pixel layout while the raster is scale× larger.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * scale}" height="${height * scale}" viewBox="0 0 ${width} ${height}">`
+    + `<foreignObject width="${width}" height="${height}">`
     + `<div xmlns="http://www.w3.org/1999/xhtml" style="${escapeXml(style)}">${escapeXml(content)}</div>`
     + `</foreignObject></svg>`
 
-  const img = new Image(width, height)
+  const img = new Image(width * scale, height * scale)
   img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
   await img.decode()
 
-  const canvas = new OffscreenCanvas(width, height)
+  const canvas = new OffscreenCanvas(width * scale, height * scale)
   const ctx = canvas.getContext('2d')
   if (!ctx)
     throw new Error('renderTextToImageBitmap: 2d context unavailable')
-  ctx.drawImage(img, 0, 0, width, height)
-  return await createImageBitmap(canvas)
+  ctx.drawImage(img, 0, 0, width * scale, height * scale)
+  const bitmap = await createImageBitmap(canvas)
+  return { bitmap, width, height, scale }
 }
 
 function measureText(content: string, cssText: string) {
