@@ -1,6 +1,10 @@
 /**
  * Rasterize styled text into an ImageBitmap via an SVG <foreignObject>,
  * so the full CSS text stack (stroke, shadow, letter-spacing, ...) applies.
+ *
+ * The SVG must be loaded through a data: URL — Chromium taints ImageBitmaps
+ * derived from blob: URL SVGs that contain <foreignObject>, which would make
+ * WebGL texture uploads throw a SecurityError.
  */
 export async function renderTextToImageBitmap(content: string, cssText: string): Promise<ImageBitmap> {
   await document.fonts.ready
@@ -12,17 +16,16 @@ export async function renderTextToImageBitmap(content: string, cssText: string):
     + `<div xmlns="http://www.w3.org/1999/xhtml" style="${escapeXml(style)}">${escapeXml(content)}</div>`
     + `</foreignObject></svg>`
 
-  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
-  const objectUrl = URL.createObjectURL(blob)
-  try {
-    const img = new Image(width, height)
-    img.src = objectUrl
-    await img.decode()
-    return await createImageBitmap(img)
-  }
-  finally {
-    URL.revokeObjectURL(objectUrl)
-  }
+  const img = new Image(width, height)
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+  await img.decode()
+
+  const canvas = new OffscreenCanvas(width, height)
+  const ctx = canvas.getContext('2d')
+  if (!ctx)
+    throw new Error('renderTextToImageBitmap: 2d context unavailable')
+  ctx.drawImage(img, 0, 0, width, height)
+  return await createImageBitmap(canvas)
 }
 
 function measureText(content: string, cssText: string) {
