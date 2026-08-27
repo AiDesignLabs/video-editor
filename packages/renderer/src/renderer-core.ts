@@ -33,6 +33,7 @@ import { measureTextRuns } from './text-bitmap'
 import {
   createEmptyEvaluatorState,
   createPixiFiltersFromVisualEffects,
+  paletteToColorMatrix,
   createPreviewAudioTicker,
   createPreviewRunner,
   createTimelineTransport,
@@ -219,7 +220,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       fps: Math.max(protocol.fps || 30, 1),
     }, createEmptyEvaluatorState()).plan.visuals
     const visualItems = createVisualRenderItems(protocol, visualPlan)
-    const filterCache = new Map<string, PixiFilter[] | null>()
+    const activeFilterSegmentIds = new Set<string>()
 
     const renders: (PixiDisplayObject | undefined)[] = []
     for (const visual of visualItems) {
@@ -233,7 +234,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         continue
       if ((display as { destroyed?: boolean }).destroyed)
         continue
-      applyVisualEffects(display, visual.effects, filterCache)
+      activeFilterSegmentIds.add(segment.id)
+      applyVisualEffects(display, segment, visual.effects)
       applyDisplayProps(display, segment, stageWidth, stageHeight, {
         opacity: visual.opacity,
       })
@@ -246,6 +248,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
     if (generation !== renderGeneration)
       return
+    evictInactiveSegmentFilters(activeFilterSegmentIds)
     layer.removeChildren()
     const cleaned = renders.filter(Boolean) as PixiDisplayObject[]
     if (cleaned.length)
@@ -255,20 +258,54 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     task.app.render()
   }
 
+  // Filters are reused across frames per segment and only rebuilt when their
+  // parameters change; entries are destroyed once the segment leaves the plan.
+  const segmentFilterCache = new Map<string, { key: string, filters: PixiFilter[] }>()
+
+  function destroySegmentFilters(entry: { filters: PixiFilter[] }) {
+    for (const filter of entry.filters)
+      filter.destroy()
+  }
+
+  function evictInactiveSegmentFilters(activeIds: Set<string>) {
+    for (const [id, entry] of segmentFilterCache) {
+      if (activeIds.has(id))
+        continue
+      destroySegmentFilters(entry)
+      segmentFilterCache.delete(id)
+    }
+  }
+
+  function clearSegmentFilterCache() {
+    for (const entry of segmentFilterCache.values())
+      destroySegmentFilters(entry)
+    segmentFilterCache.clear()
+  }
+
   function applyVisualEffects(
     display: PixiDisplayObject,
+    segment: SegmentUnion,
     effects: TimelinePlan['visuals'][number]['effects'],
-    cache: Map<string, PixiFilter[] | null>,
   ) {
-    const key = effects?.length ? JSON.stringify(effects) : ''
-    let resolved = cache.get(key)
-    if (resolved === undefined) {
-      resolved = effects?.length
-        ? createPixiFiltersFromVisualEffects(effects)
-        : null
-      cache.set(key, resolved)
+    const palette = 'palette' in segment ? segment.palette : undefined
+    const key = `${effects?.length ? JSON.stringify(effects) : ''}|${palette ? JSON.stringify(palette) : ''}`
+
+    let entry = segmentFilterCache.get(segment.id)
+    if (!entry || entry.key !== key) {
+      if (entry)
+        destroySegmentFilters(entry)
+      const filters: PixiFilter[] = effects?.length ? createPixiFiltersFromVisualEffects(effects) : []
+      if (palette) {
+        const paletteFilter = paletteToColorMatrix(palette)
+        if (paletteFilter)
+          filters.push(paletteFilter)
+      }
+      entry = { key, filters }
+      segmentFilterCache.set(segment.id, entry)
     }
-    ;(display as PixiDisplayObject & { filters?: PixiFilter[] | null }).filters = resolved
+
+    ;(display as PixiDisplayObject & { filters?: PixiFilter[] | null }).filters
+      = entry.filters.length ? entry.filters : null
   }
 
   const queueRender = createRenderQueue(() => renderScene({
@@ -403,6 +440,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   function clearDisplays() {
     layer.removeChildren()
+    clearSegmentFilterCache()
     for (const display of displayCache.values()) {
       display.destroy()
     }

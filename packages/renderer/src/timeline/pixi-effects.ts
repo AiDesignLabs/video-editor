@@ -1,6 +1,7 @@
 import type { Filter } from 'pixi.js'
 import type { VisualEffectParam } from './types'
 import { BlurFilter, ColorMatrixFilter } from 'pixi.js'
+import { getEffectDefinition, registerEffect } from './effect-registry'
 
 export function createPixiFiltersFromVisualEffects(effects: VisualEffectParam[] | undefined): Filter[] {
   if (!effects?.length)
@@ -8,6 +9,12 @@ export function createPixiFiltersFromVisualEffects(effects: VisualEffectParam[] 
 
   const filters: Filter[] = []
   for (const effect of effects) {
+    // Registered ids win; unknown ids fall back to legacy name matching.
+    const definition = getEffectDefinition(effect)
+    if (definition) {
+      filters.push(...definition.build(effect))
+      continue
+    }
     const filter = effect.segmentType === 'filter'
       ? buildFilterTrackEffect(effect)
       : buildNamedEffect(effect)
@@ -16,6 +23,34 @@ export function createPixiFiltersFromVisualEffects(effects: VisualEffectParam[] 
   }
   return filters
 }
+
+function readIntensity(param: VisualEffectParam): number {
+  return normalizeIntensity(param.segmentType === 'filter' ? param.intensity : 1)
+}
+
+function colorMatrix(apply: (matrix: ColorMatrixFilter, intensity: number) => void) {
+  return (param: VisualEffectParam): Filter[] => {
+    const matrix = new ColorMatrixFilter()
+    apply(matrix, readIntensity(param))
+    return [matrix]
+  }
+}
+
+// Built-in definitions keyed by canonical effectId/filterId.
+registerEffect({
+  id: 'blur',
+  label: 'Blur',
+  build: param => [new BlurFilter({ strength: 1 + readIntensity(param) * 14, quality: 2, kernelSize: 5 })],
+})
+registerEffect({ id: 'grayscale', label: 'Grayscale', build: colorMatrix((m, i) => m.grayscale(i, false)) })
+registerEffect({ id: 'sepia', label: 'Sepia', build: colorMatrix(m => m.sepia(false)) })
+registerEffect({ id: 'negative', label: 'Negative', build: colorMatrix(m => m.negative(false)) })
+registerEffect({ id: 'vintage', label: 'Vintage', build: colorMatrix(m => m.vintage(false)) })
+registerEffect({ id: 'contrast', label: 'Contrast', build: colorMatrix((m, i) => m.contrast(0.5 + i * 0.5, false)) })
+registerEffect({ id: 'brightness', label: 'Brightness', build: colorMatrix((m, i) => m.brightness(0.5 + i, false)) })
+registerEffect({ id: 'saturate', label: 'Saturate', build: colorMatrix((m, i) => m.saturate(i, false)) })
+registerEffect({ id: 'cool', label: 'Cool', build: colorMatrix((m, i) => m.hue(-20 * i, false)) })
+registerEffect({ id: 'sharpen', label: 'Sharpen', build: colorMatrix(m => m.contrast(0.75, false)) })
 
 function buildFilterTrackEffect(effect: Extract<VisualEffectParam, { segmentType: 'filter' }>): Filter | undefined {
   const token = normalizeToken(effect.name, effect.filterId)

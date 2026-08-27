@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import type { IFillMode, ITextBasic, ITransform, SegmentUnion } from '@video-editor/shared'
+import type { IFillMode, IPalette, ITextBasic, ITransform, SegmentUnion } from '@video-editor/shared'
 import type { DeepReadonly } from 'vue'
 import type { SegmentUpdater } from './types'
 import { computed } from 'vue'
 import NumberField from './NumberField.vue'
+import PaletteSection from './sections/PaletteSection.vue'
 import TextSection from './sections/TextSection.vue'
 import TransformSection from './sections/TransformSection.vue'
 
@@ -28,6 +29,11 @@ const hasTransform = computed(() => {
 const hasOpacity = computed(() => {
   const type = segment.value?.segmentType
   return type === 'frames' || type === 'text'
+})
+
+const hasPalette = computed(() => {
+  const type = segment.value?.segmentType
+  return type === 'frames' || type === 'sticker'
 })
 
 const isVideo = computed(() => segment.value?.segmentType === 'frames'
@@ -88,6 +94,17 @@ function setIntensity(value: number | undefined) {
   update((draft) => {
     if (draft.segmentType === 'filter')
       draft.intensity = value === undefined ? undefined : Math.max(0, Math.min(1, value))
+  })
+}
+
+function setPalette(palette: IPalette | undefined) {
+  update((draft) => {
+    if (draft.segmentType === 'frames' || draft.segmentType === 'sticker') {
+      if (palette)
+        draft.palette = palette
+      else
+        delete draft.palette
+    }
   })
 }
 
@@ -216,6 +233,13 @@ function removeTextLine(index: number) {
         class="property-inspector__section"
         :transform="(segment as { transform?: DeepReadonly<ITransform> }).transform"
         @change="setTransform"
+      />
+
+      <PaletteSection
+        v-if="hasPalette"
+        class="property-inspector__section"
+        :palette="(segment as { palette?: DeepReadonly<IPalette> }).palette"
+        @change="setPalette"
       />
     </template>
   </aside>

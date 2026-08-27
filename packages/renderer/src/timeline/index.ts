@@ -18,6 +18,9 @@ export {
   evaluateTimelinePlan,
 } from './evaluator'
 
+export type { EffectDefinition } from './effect-registry'
+export { getEffectDefinition, listEffectDefinitions, registerEffect } from './effect-registry'
+export { computePaletteMatrix, PALETTE_NEUTRAL, paletteToColorMatrix } from './palette-filter'
 export { createPixiFiltersFromVisualEffects } from './pixi-effects'
 export { createPreviewRunner } from './preview-runner'
 
