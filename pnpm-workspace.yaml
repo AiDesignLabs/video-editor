@@ -14,7 +14,6 @@ catalog:
   '@vitest/browser': ^4.0.16
   '@vue/reactivity': ^3.5.26
   '@vueuse/core': ^14.1.0
-  '@webav/av-cliper': ^1.2.7
   ajv: ^8.17.1
   ajv-errors: ^3.0.0
   ajv-formats: ^3.0.1

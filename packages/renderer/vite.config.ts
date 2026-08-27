@@ -29,7 +29,7 @@ export default defineConfig({
         '@vue/reactivity',
         '@video-editor/shared',
         '@video-editor/protocol',
-        '@webav/av-cliper',
+        '@video-editor/media',
         'opfs-tools',
       ],
     },

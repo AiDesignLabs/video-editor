@@ -33,9 +33,6 @@ catalogs:
     '@vueuse/core':
       specifier: ^14.1.0
       version: 14.1.0
-    '@webav/av-cliper':
-      specifier: ^1.2.7
-      version: 1.2.7
     ajv:
       specifier: ^8.17.1
       version: 8.17.1
@@ -255,9 +252,6 @@ importers:
       '@video-editor/shared':
         specifier: workspace:*
         version: link:../shared
-      '@webav/av-cliper':
-        specifier: 'catalog:'
-        version: 1.2.7
       opfs-tools:
         specifier: 'catalog:'
         version: 0.7.4
@@ -1553,15 +1547,6 @@ packages:
     resolution: {integrity: sha512-EcKxtYvn6gx1F8z9J5/rsg3+lTQnvOruQd8fUecW99DCK04BkWD7z5KQ/wTAx+DazyoEE9dJt/zV8OIEQbM6kw==}
     peerDependencies:
       vue: ^3.5.0
-
-  '@webav/av-cliper@1.2.7':
-    resolution: {integrity: sha512-zn+h5gJVyOupTraykCz1/wiowSfV1/jqt7Kz3FHArhp1NgB74/3H9chL/Bz+uwiVYCusU9C8Eu/l3F9WvTbsig==}
-
-  '@webav/internal-utils@1.2.7':
-    resolution: {integrity: sha512-99hajvWwrVb/j0O3vu6zK5XXB+aAI5S4MLkPcJdw2GmGn/JYKZU8I7y7iyIf5ipuPGLucmD9O7zzb6SSeXcYkg==}
-
-  '@webav/mp4box.js@0.5.7':
-    resolution: {integrity: sha512-KgScEtDpiLnWvj1Rj8Ri9fDWxTjfdNr7cmY/PT88EmttHh6cLxMAeyD/W8Vydes4z7qV/c5VDAaP4cTlaO0E9g==}
 
   '@webgpu/types@0.1.66':
     resolution: {integrity: sha512-YA2hLrwLpDsRueNDXIMqN9NTzD6bCDkuXbOSe0heS+f8YE8usA6Gbv1prj81pzVHrbaAma7zObnIC+I6/sXJgA==}
@@ -3634,10 +3619,6 @@ packages:
       typescript:
         optional: true
 
-  wave-resampler@1.0.0:
-    resolution: {integrity: sha512-bE3rbpZXuKAV52Cd8/BeJvy82ZqEHK8pPWHrZ9JioaVVTBlmWbDC+u4p9blhFcf0Skepb4hlOAHc25XfqLC48g==}
-    engines: {node: '>=8'}
-
   webpack-virtual-modules@0.6.2:
     resolution: {integrity: sha512-66/V2i5hQanC51vBQKPH4aI8NMAcBW59FVBs+rC7eGHupMyfn34q7rZIE+ETlJ+XTevqfUhVVBgSUNSW2flEUQ==}
 
@@ -5095,19 +5076,6 @@ snapshots:
   '@vueuse/shared@14.1.0(vue@3.5.26(typescript@5.9.3))':
     dependencies:
       vue: 3.5.26(typescript@5.9.3)
-
-  '@webav/av-cliper@1.2.7':
-    dependencies:
-      '@webav/internal-utils': 1.2.7
-      '@webav/mp4box.js': 0.5.7
-      opfs-tools: 0.7.4
-      wave-resampler: 1.0.0
-
-  '@webav/internal-utils@1.2.7':
-    dependencies:
-      '@webav/mp4box.js': 0.5.7
-
-  '@webav/mp4box.js@0.5.7': {}
 
   '@webgpu/types@0.1.66': {}
 
@@ -7485,8 +7453,6 @@ snapshots:
       '@vue/shared': 3.5.26
     optionalDependencies:
       typescript: 5.9.3
-
-  wave-resampler@1.0.0: {}
 
   webpack-virtual-modules@0.6.2: {}
 
