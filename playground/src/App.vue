@@ -7,6 +7,9 @@ import { composeProtocol, createRenderer, type Renderer } from '@video-editor/re
 import type { SegmentUpdater } from '@video-editor/ui'
 import { PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
+import type { IKeyframeProperty, ITransform } from '@video-editor/shared'
+import type { GizmoTransformPatch } from './gizmo/types'
+import CanvasGizmo from './gizmo/CanvasGizmo.vue'
 
 const swatches = {
   primary: 'https://dummyimage.com/1280x720/6aa7ff/ffffff.png&text=Clip+A',
@@ -328,6 +331,72 @@ function handleInspectorUpdate(updater: SegmentUpdater) {
   if (!selected)
     return
   commands.updateSegment(updater, selected.id, selected.segmentType)
+}
+
+type TransformableSegment = SegmentUnion & { transform?: ITransform }
+
+function isTransformable(segment: SegmentUnion): segment is TransformableSegment {
+  return segment.segmentType === 'frames'
+    || segment.segmentType === 'text'
+    || segment.segmentType === 'sticker'
+}
+
+/** Insert or replace a keyframe on `property` at a segment-relative time. */
+function upsertKeyframe(draft: SegmentUnion, property: IKeyframeProperty, value: number, timeMs: number) {
+  const tracks = draft.keyframes ?? (draft.keyframes = [])
+  let track = tracks.find(item => item.property === property)
+  if (!track) {
+    track = { property, frames: [] }
+    tracks.push(track)
+  }
+  const existing = track.frames.find(frame => frame.timeMs === timeMs)
+  if (existing)
+    existing.value = value
+  else
+    track.frames.push({ timeMs, value })
+  track.frames.sort((a, b) => a.timeMs - b.timeMs)
+}
+
+function handleGizmoSelect(segmentId: string | null) {
+  commands.setSelectedSegment(segmentId ?? undefined)
+}
+
+function handleGizmoTransform(patch: GizmoTransformPatch) {
+  commands.updateSegment((draft) => {
+    if (!isTransformable(draft))
+      return
+
+    if (patch.keyframed) {
+      // Keyframed transforms win over the static one; write at the playhead.
+      const timeMs = Math.max(0, Math.round(currentTimeMs.value - draft.startTime))
+      if (patch.position) {
+        upsertKeyframe(draft, 'position.x', patch.position.x, timeMs)
+        upsertKeyframe(draft, 'position.y', patch.position.y, timeMs)
+      }
+      if (patch.scale)
+        upsertKeyframe(draft, 'scale', patch.scale.x, timeMs)
+      if (patch.rotationDeg !== undefined)
+        upsertKeyframe(draft, 'rotation', patch.rotationDeg, timeMs)
+      return
+    }
+
+    const transform: ITransform = draft.transform ?? {
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+    }
+    if (patch.position) {
+      transform.position[0] = patch.position.x
+      transform.position[1] = patch.position.y
+    }
+    if (patch.scale) {
+      transform.scale[0] = patch.scale.x
+      transform.scale[1] = patch.scale.y
+    }
+    if (patch.rotationDeg !== undefined)
+      transform.rotation[2] = patch.rotationDeg
+    draft.transform = transform
+  }, patch.segmentId, patch.segmentType)
 }
 
 function splitSelectedSegment() {
@@ -696,6 +765,14 @@ function handleAddSegmentClick(data: {
       <div class="stage">
         <div class="stage__viewport">
           <div ref="canvasHost" class="stage__canvas" />
+          <CanvasGizmo
+            :renderer="renderer"
+            :selected-segment-id="selectedSegmentId"
+            :current-time-ms="currentTimeMs"
+            :is-playing="isPlaying"
+            @select="handleGizmoSelect"
+            @transform="handleGizmoTransform"
+          />
           <div v-if="loading" class="stage__placeholder">
             正在初始化 Pixi 渲染器…
           </div>

@@ -1,4 +1,5 @@
-import type { ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { IKeyframeProperty, ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { VisualBox } from './gizmo-math'
 import type { ComputedRef, Ref, ShallowRef } from '@vue/reactivity'
 import type { Application, ApplicationOptions, Filter as PixiFilter } from 'pixi.js'
 import type { TimelinePlan } from './timeline'
@@ -69,7 +70,17 @@ export interface Renderer {
   tick: (deltaMs?: number) => void
   seek: (time: number) => void
   renderAt: (time: number) => Promise<void>
+  /** Geometry of every visual rendered in the last frame, in logical stage px. */
+  getVisualBoxes: () => VisualBox[]
   destroy: () => void
+}
+
+const TRANSFORM_KEYFRAME_PROPERTIES: IKeyframeProperty[] = ['position.x', 'position.y', 'scale', 'rotation']
+
+function hasTransformKeyframes(segment: SegmentUnion) {
+  return Boolean(segment.keyframes?.some(
+    track => TRANSFORM_KEYFRAME_PROPERTIES.includes(track.property) && track.frames.length > 0,
+  ))
 }
 
 interface AudioManagerApi {
@@ -165,6 +176,9 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   let lastTickAt = 0
   let renderGeneration = 0
   let lastPlaceholderDisplays: PixiDisplayObject[] = []
+  // Snapshot of the on-stage geometry of the last rendered frame; consumed by
+  // canvas interaction overlays through `getVisualBoxes()`.
+  let lastVisualBoxes: VisualBox[] = []
 
   interface RenderTask {
     app: Application
@@ -225,6 +239,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     const activeFilterSegmentIds = new Set<string>()
 
     const renders: (PixiDisplayObject | undefined)[] = []
+    const boxes: VisualBox[] = []
     for (const visual of visualItems) {
       const { segment } = visual
       if (generation !== renderGeneration)
@@ -238,9 +253,22 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         continue
       activeFilterSegmentIds.add(segment.id)
       applyVisualEffects(display, segment, visual.effects)
-      applyDisplayProps(display, segment, stageWidth, stageHeight, {
+      const { layout, baseWidth, baseHeight } = applyDisplayProps(display, segment, stageWidth, stageHeight, {
         opacity: visual.opacity,
         transform: visual.transform,
+      })
+      boxes.push({
+        segmentId: segment.id,
+        segmentType: segment.segmentType,
+        zOrder: boxes.length,
+        centerX: layout.centerX,
+        centerY: layout.centerY,
+        width: layout.width,
+        height: layout.height,
+        rotationRad: layout.rotationRad,
+        baseWidth,
+        baseHeight,
+        hasTransformKeyframes: hasTransformKeyframes(segment),
       })
       if (isVideoSegment(segment))
         await updateVideoFrame(segment, visual.sourceTimeMs)
@@ -262,6 +290,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       layer.addChild(...cleaned)
     if (generation !== renderGeneration)
       return
+    lastVisualBoxes = boxes
     task.app.render()
   }
 
@@ -1160,6 +1189,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     pause()
     renderGeneration += 1
     scope.stop()
+    lastVisualBoxes = []
     clearDisplays()
     layer.destroy({ children: true })
     displayCache.clear()
@@ -1189,6 +1219,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     tick,
     seek,
     renderAt,
+    getVisualBoxes: () => lastVisualBoxes.slice(),
     destroy,
   }
 }

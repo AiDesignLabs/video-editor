@@ -1,8 +1,9 @@
 import type { ITransform, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { SegmentLayout } from './layout'
 import type { PixiDisplayObject } from './types'
 import { toRaw } from '@vue/reactivity'
 import { Graphics, Sprite, Texture } from 'pixi.js'
-import { computeSegmentLayout } from './layout'
+import { computeSegmentLayout, resolveFillSize } from './layout'
 
 export function collectResourceUrls(protocol: IVideoProtocol) {
   const urls = new Set<string>()
@@ -20,17 +21,42 @@ export interface ApplyDisplayPropsOptions {
   transform?: ITransform
 }
 
+export interface DisplayLayoutResult {
+  layout: SegmentLayout
+  /** Fill-mode resolved size on stage BEFORE the transform scale is applied. */
+  baseWidth: number
+  baseHeight: number
+}
+
+/**
+ * Resolve the on-stage layout of a display without mutating it.
+ * Shared by `applyDisplayProps` and the renderer's visual box snapshot.
+ */
+export function computeDisplayLayout(
+  display: PixiDisplayObject,
+  segment: SegmentUnion,
+  width: number,
+  height: number,
+  transform?: ITransform,
+): DisplayLayoutResult {
+  const sourceWidth = display instanceof Sprite ? display.texture.width || width : width
+  const sourceHeight = display instanceof Sprite ? display.texture.height || height : height
+  const fillMode = 'fillMode' in segment ? segment.fillMode : undefined
+  const base = resolveFillSize(fillMode, sourceWidth, sourceHeight, width, height)
+  const layout = computeSegmentLayout(segment, width, height, sourceWidth, sourceHeight, transform)
+  return { layout, baseWidth: base.width, baseHeight: base.height }
+}
+
 export function applyDisplayProps(
   display: PixiDisplayObject,
   segment: SegmentUnion,
   width: number,
   height: number,
   options: ApplyDisplayPropsOptions = {},
-) {
+): DisplayLayoutResult {
   const opacity = normalizeOpacity(options.opacity ?? readOpacity(segment))
-  const sourceWidth = display instanceof Sprite ? display.texture.width || width : width
-  const sourceHeight = display instanceof Sprite ? display.texture.height || height : height
-  const layout = computeSegmentLayout(segment, width, height, sourceWidth, sourceHeight, options.transform)
+  const result = computeDisplayLayout(display, segment, width, height, options.transform)
+  const { layout } = result
 
   if (display instanceof Sprite) {
     display.anchor.set(0.5)
@@ -55,6 +81,8 @@ export function applyDisplayProps(
   }
 
   display.alpha = opacity
+
+  return result
 }
 
 const placeholderDisplays = new WeakSet<object>()
