@@ -1,4 +1,4 @@
-import type { IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
+import type { IAudioSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import type { AudioVoiceAction, TimelinePlan } from './timeline'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AudioManager } from './audio-manager'
@@ -182,11 +182,40 @@ function createVideoAudioProtocol(): IVideoProtocol {
   }
 }
 
-function createPlan(action: AudioVoiceAction, sourceTimeMs: number): TimelinePlan {
+function createReversedAudioProtocol(): IVideoProtocol {
+  const audioSegment: IAudioSegment = {
+    id: 'audio-1',
+    segmentType: 'audio',
+    url: 'https://example.com/audio.mp3',
+    startTime: 0,
+    endTime: 10000,
+    fromTime: 500,
+    volume: 0.8,
+    playRate: 1,
+    reversed: true,
+  }
+
   return {
-    atMs: sourceTimeMs,
-    windowStartMs: Math.max(0, sourceTimeMs - 20),
-    windowEndMs: sourceTimeMs + 100,
+    id: 'reversed-audio-manager-test',
+    version: '1.0.0',
+    width: 1280,
+    height: 720,
+    fps: 30,
+    tracks: [
+      {
+        trackId: 'audio-track',
+        trackType: 'audio',
+        children: [audioSegment],
+      },
+    ],
+  }
+}
+
+function createPlan(action: AudioVoiceAction, sourceTimeMs: number, atTimelineMs: number = sourceTimeMs): TimelinePlan {
+  return {
+    atMs: atTimelineMs,
+    windowStartMs: Math.max(0, atTimelineMs - 20),
+    windowEndMs: atTimelineMs + 100,
     visuals: [],
     audioEvents: [
       {
@@ -195,7 +224,7 @@ function createPlan(action: AudioVoiceAction, sourceTimeMs: number): TimelinePla
         trackId: 'audio-track',
         segmentKind: 'audio',
         action,
-        atTimelineMs: sourceTimeMs,
+        atTimelineMs,
         sourceTimeMs,
         gain: 1,
         rate: 1,
@@ -314,7 +343,7 @@ describe('AudioManager audio-element seek guards', () => {
   })
 })
 
-describe('AudioManager video buffer audio', () => {
+describe('AudioManager decoded buffer audio', () => {
   beforeEach(() => {
     MockAudioElement.reset()
     vi.stubGlobal('Audio', MockAudioElement as unknown as typeof Audio)
@@ -334,15 +363,15 @@ describe('AudioManager video buffer audio', () => {
   it('schedules video segment audio on the WebAudio clock when a buffer loader is provided', async () => {
     const startSpy = vi.spyOn(MockBufferSource.prototype, 'start')
     const buffer = new MockAudioBuffer(2, 48000 * 12, 48000) as unknown as AudioBuffer
-    const loadVideoAudioBuffer = vi.fn(async () => buffer)
-    const manager = new AudioManager(createVideoAudioProtocol(), { loadVideoAudioBuffer })
+    const loadAudioBuffer = vi.fn(async () => buffer)
+    const manager = new AudioManager(createVideoAudioProtocol(), { loadAudioBuffer })
 
     manager.applyTimelinePlan(createVideoPlan('start', 2000), true)
     await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(loadVideoAudioBuffer).toHaveBeenCalledTimes(1)
+    expect(loadAudioBuffer).toHaveBeenCalledTimes(1)
     // No hidden <audio> element clock for video segments on this path.
     expect(MockAudioElement.instances).toHaveLength(0)
     expect(startSpy).toHaveBeenCalledTimes(1)
@@ -354,8 +383,8 @@ describe('AudioManager video buffer audio', () => {
 
   it('falls back to the media element path when the buffer loader yields nothing', async () => {
     MockAudioElement.reset({ duration: 12 })
-    const loadVideoAudioBuffer = vi.fn(async () => undefined)
-    const manager = new AudioManager(createVideoAudioProtocol(), { loadVideoAudioBuffer })
+    const loadAudioBuffer = vi.fn(async () => undefined)
+    const manager = new AudioManager(createVideoAudioProtocol(), { loadAudioBuffer })
 
     manager.applyTimelinePlan(createVideoPlan('start', 2000), true)
     await Promise.resolve()
@@ -366,6 +395,36 @@ describe('AudioManager video buffer audio', () => {
     const element = MockAudioElement.instances[0]
     expect(element).toBeDefined()
     expect(element?.playCalls).toBe(1)
+
+    manager.destroy()
+  })
+
+  it('plays reversed standalone audio through the decoded buffer path', async () => {
+    const startSpy = vi.spyOn(MockBufferSource.prototype, 'start')
+    const buffer = new MockAudioBuffer(2, 48000 * 10, 48000) as unknown as AudioBuffer
+    const loadAudioBuffer = vi.fn(async () => buffer)
+    const manager = new AudioManager(createReversedAudioProtocol(), { loadAudioBuffer })
+
+    // At timeline 2s the reversed source window points at source 8.5s. The
+    // reversed 0.5s..10.5s buffer therefore starts 2s into its data.
+    manager.applyTimelinePlan(createPlan('start', 8500, 2000), true)
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(loadAudioBuffer).toHaveBeenCalledTimes(1)
+    expect(loadAudioBuffer).toHaveBeenCalledWith(expect.objectContaining({ id: 'audio-1', reversed: true }))
+    expect(MockAudioElement.instances).toHaveLength(0)
+    expect(startSpy).toHaveBeenCalledWith(0, 2)
+
+    manager.destroy()
+  })
+
+  it('fails clearly when reversed standalone audio has no buffer loader', () => {
+    const manager = new AudioManager(createReversedAudioProtocol())
+
+    expect(() => manager.applyTimelinePlan(createPlan('start', 8500, 2000), true))
+      .toThrow(/reversed audio preview requires a decoded audio buffer loader/)
 
     manager.destroy()
   })

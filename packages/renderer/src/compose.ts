@@ -75,6 +75,8 @@ async function fetchBlob(url: string, timeoutMs: number = RESOURCE_TIMEOUT_MS): 
   const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs)
   try {
     const response = await fetch(url, { signal: controller.signal })
+    if (!response.ok)
+      throw new Error(`composeProtocol: failed to load resource (${response.status} ${response.statusText}): ${url}`)
     return await response.blob()
   }
   catch (err) {

@@ -20,6 +20,9 @@ export async function createApp(opts?: Partial<ApplicationOptions>) {
     resolution: globalThis.devicePixelRatio || 1,
     autoDensity: true,
     ...opts,
+    // Renderer core owns frame scheduling. Pixi's ticker rendering the same
+    // stage concurrently can observe children or filter effects mid-update.
+    autoStart: false,
   })
 
   if (import.meta.env.DEV) {

@@ -97,7 +97,7 @@ must be revisited:
 |---|------|------------------|
 | 1 | `renderer/src/timeline/evaluator.ts` | `mapRemappableSourceTimeMs` → shared `mapSourceTimeMs`; emits a **scalar** `rate` on audio plan events |
 | 2 | `renderer/src/timeline/visual-plan.ts` | `mapTransitionTargetSourceTimeMs` maps the transition B-side through the same shared helper |
-| 3 | `renderer/src/audio-manager.ts` | Scalar `rate` events set `AudioBufferSourceNode.playbackRate.value` / `el.playbackRate`; drift tracking (`currentVideoBufferOffsetSec`) assumes a constant rate since `startCtxTime` |
+| 3 | `renderer/src/audio-manager.ts` | Scalar `rate` events set `AudioBufferSourceNode.playbackRate.value` / `el.playbackRate`; drift tracking (`currentDecodedBufferOffsetSec`) assumes a constant rate since `startCtxTime` |
 | 4 | `renderer/src/compose.ts` | `decodeInputAudioSlice` decodes `[fromTime, fromTime + sourceSpanMs]` and plays it back at one `source.playbackRate.value` |
 | 5 | `renderer/src/renderer-core.ts` | `updateVideoElementFrame({ playbackRate })` drives the `<video>` element at a single rate |
 | 6 | `protocol/src/manage/index.ts` — `resizeSegment` | Start-edge remap `fromTime += delta * rate`, and the extend-left clamp `-fromTime / rate` |
@@ -174,11 +174,9 @@ curved `sourceSpanMs`. Semantics to preserve:
 - The reversed split re-slicing rule (left half takes the window tail) applies
   unchanged, with `span` replaced by the integral.
 
-**Known preview limitation inherited from P8:** reversed *plain audio*
-segments are silent in preview (the `<audio>` element path cannot play
-backwards and no buffer path exists for them yet); compose reverses them
-correctly. Strategy B in §6 gives such segments a buffer path and would
-remove this limitation.
+Reversed plain-audio segments already use the same decoded-buffer preview path
+as reversed video audio. Curved audio can extend that path with the scheduling
+strategy selected in §6.
 
 ## 9. v1 scope proposal
 

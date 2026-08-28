@@ -33,15 +33,15 @@ type AudioElementSegment = IAudioSegment | IVideoFramesSegment
 interface AudioManagerOptions {
   resolveMediaElementUrl?: (segment: AudioElementSegment) => string | undefined
   /**
-   * When provided, video segment audio is decoded into an AudioBuffer and
-   * scheduled on the WebAudio clock (single clock with the mix bus) instead of
-   * being played through a hidden <audio> element.
+   * Decode a segment's source window into an AudioBuffer. Video audio always
+   * uses this path when available; standalone audio uses it when reversed.
    */
-  loadVideoAudioBuffer?: (segment: IVideoFramesSegment) => Promise<AudioBuffer | undefined>
+  loadAudioBuffer?: (segment: AudioElementSegment) => Promise<AudioBuffer | undefined>
 }
 
-interface VideoBufferVoice {
+interface DecodedBufferVoice {
   segmentId: string
+  segmentKind: 'audio' | 'video'
   /** Invalidation key over the fields that change the decoded window. */
   cacheKey: string
   /** Source time (ms) represented by buffer position 0. */
@@ -50,7 +50,7 @@ interface VideoBufferVoice {
   buffer?: AudioBuffer
   loading?: Promise<AudioBuffer | undefined>
   pendingStart?: { offsetSec: number, requestedAtCtxTime: number }
-  /** Decode yielded no buffer; fall back to the <audio> element path. */
+  /** Decode yielded no buffer. Forward video can fall back to an element. */
   failed?: boolean
   source?: AudioBufferSourceNode
   startCtxTime: number
@@ -67,9 +67,7 @@ export class AudioManager {
   private plannedVideoAudioRates = new Map<string, number>()
   private plannedVoices = new Map<string, PlannedVoiceRuntime>()
   private audioElements = new Map<string, AudioElementState>()
-  /** Segment ids already warned about unsupported reversed preview playback. */
-  private reversedPreviewWarnedIds = new Set<string>()
-  private videoBufferVoices = new Map<string, VideoBufferVoice>()
+  private decodedBufferVoices = new Map<string, DecodedBufferVoice>()
   private ctx: AudioContext
 
   constructor(protocol: IVideoProtocol, options: AudioManagerOptions = {}) {
@@ -186,8 +184,8 @@ export class AudioManager {
 
   public destroy() {
     this.stopAll()
-    for (const key of [...this.videoBufferVoices.keys()])
-      this.stopVideoBufferVoice(key)
+    for (const key of [...this.decodedBufferVoices.keys()])
+      this.stopDecodedBufferVoice(key)
     for (const state of this.audioElements.values())
       this.destroyAudioElement(state.el)
     this.audioElements.clear()
@@ -198,8 +196,8 @@ export class AudioManager {
       this.pauseAudioElementState(state)
     }
 
-    for (const key of [...this.videoBufferVoices.keys()])
-      this.stopVideoBufferVoice(key, { keepVoice: true })
+    for (const key of [...this.decodedBufferVoices.keys()])
+      this.stopDecodedBufferVoice(key, { keepVoice: true })
 
     for (const state of this.mp4States.values()) {
       for (const source of state.sources) {
@@ -231,32 +229,53 @@ export class AudioManager {
 
   private applyAudioPlanEvent(event: AudioPlanEvent) {
     if (event.segmentKind === 'audio') {
+      const key = this.audioKey(event.segmentId)
+      const segment = this.findAudioSegment(event.segmentId)
+      if (segment?.reversed === true && !this.options.loadAudioBuffer) {
+        throw new Error('[renderer] reversed audio preview requires a decoded audio buffer loader')
+      }
+      if (this.decodedBufferVoices.has(key) || segment?.reversed === true) {
+        this.applyDecodedBufferAudioEvent(event)
+        return
+      }
       this.applySegmentAudioEvent(event)
       return
     }
-    if (this.options.loadVideoAudioBuffer) {
-      this.applyVideoBufferAudioEvent(event)
+    const segment = this.findVideoSegment(event.segmentId)
+    if (segment?.reversed === true && !this.options.loadAudioBuffer) {
+      throw new Error('[renderer] reversed video audio preview requires a decoded audio buffer loader')
+    }
+    if (this.options.loadAudioBuffer) {
+      this.applyDecodedBufferAudioEvent(event)
       return
     }
     this.applyVideoAudioEvent(event)
   }
 
-  private applyVideoBufferAudioEvent(event: AudioPlanEvent) {
-    const key = this.videoKey(event.segmentId)
+  private applyDecodedBufferAudioEvent(event: AudioPlanEvent) {
+    const key = event.segmentKind === 'audio'
+      ? this.audioKey(event.segmentId)
+      : this.videoKey(event.segmentId)
     const voice = this.getOrCreatePlannedVoice(event)
 
     if (event.action === 'stop') {
-      this.stopVideoBufferVoice(key)
+      this.stopDecodedBufferVoice(key)
       voice.phase = 'ended'
       this.plannedVoices.delete(event.voiceId)
       return
     }
 
-    const segment = this.findVideoSegment(event.segmentId)
+    const segment = event.segmentKind === 'audio'
+      ? this.findAudioSegment(event.segmentId)
+      : this.findVideoSegment(event.segmentId)
     if (!segment)
       return
-    const state = this.getOrCreateVideoBufferVoice(key, segment)
+    const state = this.getOrCreateDecodedBufferVoice(key, event.segmentKind, segment)
     if (state.failed) {
+      if (segment.reversed === true) {
+        voice.phase = 'ended'
+        return
+      }
       this.applyVideoAudioEvent(event)
       return
     }
@@ -269,7 +288,7 @@ export class AudioManager {
         state.rate = normalizedRate
         if (state.source) {
           // Rebase the drift tracking before changing the live playback rate.
-          state.startOffsetSec = this.currentVideoBufferOffsetSec(state)
+          state.startOffsetSec = this.currentDecodedBufferOffsetSec(state)
           state.startCtxTime = this.ctx.currentTime
           state.source.playbackRate.value = normalizedRate
         }
@@ -293,7 +312,7 @@ export class AudioManager {
         ? normalizedSourceSec <= (fromTimeMs / 1000) + 0.01
         : normalizedSourceSec >= maxSourceSec - 0.01
       if (exhausted) {
-        this.stopVideoBufferVoice(key, { keepVoice: true })
+        this.stopDecodedBufferVoice(key, { keepVoice: true })
         voice.lastSourceSec = normalizedSourceSec
         voice.phase = 'ended'
         return
@@ -302,13 +321,17 @@ export class AudioManager {
       const offsetSec = reversed
         ? Math.max(0, maxSourceSec - normalizedSourceSec)
         : Math.max(0, normalizedSourceSec - state.bufferStartMs / 1000)
-      this.startVideoBufferVoice(state, offsetSec, event.action === 'seek')
+      this.startDecodedBufferVoice(state, offsetSec, event.action === 'seek')
       voice.lastSourceSec = normalizedSourceSec
       voice.phase = 'playing'
     }
   }
 
-  private getOrCreateVideoBufferVoice(key: string, segment: IVideoFramesSegment): VideoBufferVoice {
+  private getOrCreateDecodedBufferVoice(
+    key: string,
+    segmentKind: 'audio' | 'video',
+    segment: AudioElementSegment,
+  ): DecodedBufferVoice {
     const cacheKey = [
       segment.url,
       segment.fromTime ?? 0,
@@ -316,17 +339,18 @@ export class AudioManager {
       segment.playRate ?? 1,
       segment.reversed === true ? 'reversed' : 'forward',
     ].join('::')
-    const existing = this.videoBufferVoices.get(key)
+    const existing = this.decodedBufferVoices.get(key)
     if (existing && existing.cacheKey === cacheKey)
       return existing
     if (existing)
-      this.stopVideoBufferVoice(key)
+      this.stopDecodedBufferVoice(key)
 
     const gainNode = this.ctx.createGain()
     gainNode.gain.value = this.normalizeVolume(segment.volume)
     gainNode.connect(this.ctx.destination)
-    const state: VideoBufferVoice = {
+    const state: DecodedBufferVoice = {
       segmentId: segment.id,
+      segmentKind,
       cacheKey,
       bufferStartMs: Math.max(0, segment.fromTime ?? 0),
       gainNode,
@@ -334,30 +358,39 @@ export class AudioManager {
       startOffsetSec: 0,
       rate: this.normalizePlayRate(segment.playRate),
     }
-    this.videoBufferVoices.set(key, state)
+    this.decodedBufferVoices.set(key, state)
     return state
   }
 
-  private startVideoBufferVoice(state: VideoBufferVoice, offsetSec: number, forceSeek: boolean) {
+  private startDecodedBufferVoice(state: DecodedBufferVoice, offsetSec: number, forceSeek: boolean) {
     if (!state.buffer) {
       state.pendingStart = { offsetSec, requestedAtCtxTime: this.ctx.currentTime }
       if (!state.loading) {
-        const segment = this.findVideoSegment(state.segmentId)
-        if (!segment || !this.options.loadVideoAudioBuffer)
+        const segment = state.segmentKind === 'audio'
+          ? this.findAudioSegment(state.segmentId)
+          : this.findVideoSegment(state.segmentId)
+        if (!segment || !this.options.loadAudioBuffer)
           return
-        state.loading = this.options.loadVideoAudioBuffer(segment)
+        state.loading = this.options.loadAudioBuffer(segment)
           .catch(() => undefined)
           .then((buffer) => {
             state.loading = undefined
             state.buffer = buffer ?? undefined
-            if (!buffer)
+            if (!buffer) {
               state.failed = true
+              if (segment.reversed === true) {
+                console.error(
+                  `[renderer] unable to decode reversed ${state.segmentKind} audio for preview`,
+                  segment.url,
+                )
+              }
+            }
             const pending = state.pendingStart
             state.pendingStart = undefined
             if (buffer && pending) {
               // Compensate for the time the decode took.
               const elapsedSec = Math.max(0, this.ctx.currentTime - pending.requestedAtCtxTime)
-              this.startVideoBufferVoice(state, pending.offsetSec + elapsedSec * state.rate, true)
+              this.startDecodedBufferVoice(state, pending.offsetSec + elapsedSec * state.rate, true)
             }
             return buffer ?? undefined
           })
@@ -366,10 +399,10 @@ export class AudioManager {
     }
 
     if (state.source) {
-      const currentOffsetSec = this.currentVideoBufferOffsetSec(state)
+      const currentOffsetSec = this.currentDecodedBufferOffsetSec(state)
       if (!forceSeek && Math.abs(currentOffsetSec - offsetSec) <= 0.05)
         return
-      this.stopVideoBufferSource(state)
+      this.stopDecodedBufferSource(state)
     }
 
     const clampedOffsetSec = Math.max(0, Math.min(offsetSec, state.buffer.duration))
@@ -389,13 +422,13 @@ export class AudioManager {
     state.startOffsetSec = clampedOffsetSec
   }
 
-  private currentVideoBufferOffsetSec(state: VideoBufferVoice) {
+  private currentDecodedBufferOffsetSec(state: DecodedBufferVoice) {
     if (!state.source)
       return state.startOffsetSec
     return state.startOffsetSec + Math.max(0, this.ctx.currentTime - state.startCtxTime) * state.rate
   }
 
-  private stopVideoBufferSource(state: VideoBufferVoice) {
+  private stopDecodedBufferSource(state: DecodedBufferVoice) {
     const source = state.source
     if (!source)
       return
@@ -410,11 +443,11 @@ export class AudioManager {
     }
   }
 
-  private stopVideoBufferVoice(key: string, options: { keepVoice?: boolean } = {}) {
-    const state = this.videoBufferVoices.get(key)
+  private stopDecodedBufferVoice(key: string, options: { keepVoice?: boolean } = {}) {
+    const state = this.decodedBufferVoices.get(key)
     if (!state)
       return
-    this.stopVideoBufferSource(state)
+    this.stopDecodedBufferSource(state)
     state.pendingStart = undefined
     if (options.keepVoice)
       return
@@ -424,7 +457,7 @@ export class AudioManager {
     catch {
       // Gain may already be disconnected.
     }
-    this.videoBufferVoices.delete(key)
+    this.decodedBufferVoices.delete(key)
   }
 
   private applySegmentAudioEvent(event: AudioPlanEvent) {
@@ -445,8 +478,6 @@ export class AudioManager {
 
     const segment = this.findAudioSegment(event.segmentId)
     if (!segment)
-      return
-    if (this.skipReversedElementPlayback(segment, key, voice))
       return
     const state = this.getOrCreateAudioElementState(key, segment)
 
@@ -535,8 +566,6 @@ export class AudioManager {
 
     const segment = this.findVideoSegment(event.segmentId)
     if (!segment)
-      return
-    if (this.skipReversedElementPlayback(segment, key, voice))
       return
     const state = this.getOrCreateAudioElementState(key, segment)
 
@@ -772,28 +801,6 @@ export class AudioManager {
       // Metadata not ready or browser rejected out-of-range seek.
       return false
     }
-  }
-
-  /**
-   * The <audio> element can only play forwards, so a reversed segment routed to
-   * the element path is rendered silent in preview. Export still reverses it.
-   */
-  private skipReversedElementPlayback(
-    segment: AudioElementSegment,
-    key: string,
-    voice: PlannedVoiceRuntime,
-  ): boolean {
-    if (segment.reversed !== true)
-      return false
-    if (!this.reversedPreviewWarnedIds.has(segment.id)) {
-      this.reversedPreviewWarnedIds.add(segment.id)
-      console.warn('[renderer] reversed audio preview not supported yet', segment.id)
-    }
-    const state = this.audioElements.get(key)
-    if (state)
-      this.pauseAudioElementState(state)
-    voice.phase = 'ended'
-    return true
   }
 
   private normalizePlayRate(playRate?: number): number {

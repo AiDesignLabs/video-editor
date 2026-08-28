@@ -1,4 +1,4 @@
-import type { IKeyframeProperty, ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { IAudioSegment, IKeyframeProperty, ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { VisualBox } from './gizmo-math'
 import type { ComputedRef, Ref, ShallowRef } from '@vue/reactivity'
 import type { Application, ApplicationOptions, Filter as PixiFilter } from 'pixi.js'
@@ -47,6 +47,28 @@ import {
 const DEFAULT_RES_DIR = '/video-editor-res'
 const VIDEO_PRELOAD_LOOKAHEAD_MS = 1500
 const VIDEO_PRELOAD_LIMIT = 2
+
+class MediaResourceHttpError extends Error {
+  constructor(public readonly url: string, public readonly status: number, statusText: string) {
+    super(`[renderer] failed to load media resource (${status} ${statusText}): ${url}`)
+    this.name = 'MediaResourceHttpError'
+  }
+}
+
+async function fetchMediaBlob(url: string): Promise<Blob> {
+  const response = await fetch(url)
+  if (!response.ok)
+    throw new MediaResourceHttpError(url, response.status, response.statusText)
+  return await response.blob()
+}
+
+function isMediaResourceHttpError(err: unknown): err is MediaResourceHttpError {
+  return err instanceof MediaResourceHttpError
+}
+
+function isInputDisposedError(err: unknown) {
+  return err instanceof Error && err.name === 'InputDisposedError'
+}
 
 export interface RendererOptions {
   protocol: MaybeRef<IVideoProtocol>
@@ -106,6 +128,9 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   )
 
   const app = opts.app ?? await create2dApp(opts.appOptions)
+  // All renders go through queueRender. Keep Pixi's application ticker from
+  // rendering while the queue replaces children or rebuilds filter effects.
+  app.ticker.stop()
   const layer = new Container()
   app.stage.addChild(layer)
 
@@ -154,7 +179,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const mediaElementObjectUrlLoading = new Map<string, Promise<string | undefined>>()
   const audioManager: AudioManagerApi = new AudioManager(validatedProtocol.value, {
     resolveMediaElementUrl,
-    loadVideoAudioBuffer,
+    loadAudioBuffer,
   }) as unknown as AudioManagerApi
   const transport = createTimelineTransport({
     initialTimelineMs: currentTime.value,
@@ -587,13 +612,17 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
     candidates.sort((left, right) => left.startTime - right.startTime)
     for (const segment of candidates.slice(0, availableSlots))
-      void preloadVideoDisplay(segment)
+      void preloadVideoDisplay(segment, renderGeneration)
   }
 
-  async function preloadVideoDisplay(segment: IVideoFramesSegment) {
+  async function preloadVideoDisplay(segment: IVideoFramesSegment, generation: number) {
     videoDisplayPreloading.add(segment.id)
     try {
       const display = await loadDisplay(segment)
+      if (generation !== renderGeneration) {
+        discardStalePreloadedDisplay(segment.id, display)
+        return
+      }
       if (display && !displayCache.has(segment.id))
         displayCache.set(segment.id, display)
       await updateVideoFrame(segment, Math.max(segment.fromTime ?? 0, 0))
@@ -604,6 +633,18 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     finally {
       videoDisplayPreloading.delete(segment.id)
     }
+  }
+
+  function discardStalePreloadedDisplay(segmentId: string, display: PixiDisplayObject | undefined) {
+    const entry = videoEntries.get(segmentId)
+    if (entry && entry.sprite === display) {
+      destroyVideoEntry(entry)
+      videoEntries.delete(segmentId)
+    }
+    if (displayCache.get(segmentId) === display)
+      displayCache.delete(segmentId)
+    if (display && !(display as { destroyed?: boolean }).destroyed)
+      display.destroy()
   }
 
   async function loadDisplay(segment: SegmentUnion): Promise<PixiDisplayObject | undefined> {
@@ -728,7 +769,9 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     }
 
     if (allowDecoder) {
+      let decoderLoadError: unknown
       const spriteFromDecoder = await loadVideoSpriteViaDecoder(segment.url).catch((err) => {
+        decoderLoadError = err
         if (!urlKey || !decoderErrorLoggedKeys.has(urlKey)) {
           if (urlKey)
             decoderErrorLoggedKeys.add(urlKey)
@@ -740,6 +783,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         videoEntries.set(segment.id, spriteFromDecoder)
         return spriteFromDecoder.sprite
       }
+      if (isMediaResourceHttpError(decoderLoadError))
+        return undefined
     }
 
     const spriteFromElement = await loadVideoSpriteViaElement(segment.url).catch((err) => {
@@ -785,6 +830,19 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
           return
         }
         catch (err) {
+          if (videoEntries.get(segment.id) !== entry)
+            return
+          if (isInputDisposedError(err)) {
+            entry.handle.dispose()
+            videoEntries.set(segment.id, {
+              kind: 'frozen',
+              canvas: entry.canvas,
+              texture: entry.texture,
+              sprite: entry.sprite,
+              meta: entry.meta,
+            })
+            return
+          }
           const urlKey = getResourceKey(segment.url)
           // Reversed segments cannot fall back to the <video> element.
           if (urlKey && segment.reversed !== true) {
@@ -836,9 +894,15 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       return decoderOnly ? undefined : await loadVideoSpriteViaElement(url, reuse).catch(() => undefined)
 
     if (allowDecoder) {
-      const fromDecoder = await loadVideoSpriteViaDecoder(url, reuse).catch(() => undefined)
+      let decoderLoadError: unknown
+      const fromDecoder = await loadVideoSpriteViaDecoder(url, reuse).catch((err) => {
+        decoderLoadError = err
+        return undefined
+      })
       if (fromDecoder)
         return fromDecoder
+      if (isMediaResourceHttpError(decoderLoadError))
+        throw decoderLoadError
     }
 
     if (decoderOnly)
@@ -880,7 +944,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     return undefined
   }
 
-  async function loadVideoAudioBuffer(segment: IVideoFramesSegment): Promise<AudioBuffer | undefined> {
+  async function loadAudioBuffer(segment: IAudioSegment | IVideoFramesSegment): Promise<AudioBuffer | undefined> {
     if (!segment.url)
       return undefined
     let file: ReturnType<typeof opfsFile> | undefined
@@ -889,7 +953,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       file = await getOpfsFile(segment.url)
     }
     const originFile = file ? await file.getOriginFile() : undefined
-    const source = originFile ?? await (await fetch(segment.url)).blob()
+    const source = originFile ?? await fetchMediaBlob(segment.url)
     const handle = openMediaInput(source)
     try {
       if (!(await handle.canDecodeAudio()))
@@ -1045,7 +1109,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     }
 
     const originFile = file ? await file.getOriginFile() : undefined
-    const source = originFile ?? await (await fetch(url)).blob()
+    const source = originFile ?? await fetchMediaBlob(url)
     const handle = openMediaInput(source)
     try {
       if (!(await handle.canDecodeVideo())) {

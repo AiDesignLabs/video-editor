@@ -17,6 +17,7 @@ import { describe, expect, it, vi } from 'vitest'
 const { audioManagerInstances, mediaInputHandles, mediaMockState, opfsState } = vi.hoisted(() => ({
   mediaMockState: {
     openError: false,
+    drawFrameErrorName: undefined as string | undefined,
   },
   audioManagerInstances: [] as Array<{
     protocol: IVideoProtocol
@@ -72,7 +73,14 @@ vi.mock('@video-editor/media', () => ({
       })),
       canDecodeVideo: vi.fn(async () => true),
       canDecodeAudio: vi.fn(async () => true),
-      drawFrame: vi.fn(async () => true),
+      drawFrame: vi.fn(async () => {
+        if (mediaMockState.drawFrameErrorName) {
+          const err = new Error('mock draw frame failure')
+          err.name = mediaMockState.drawFrameErrorName
+          throw err
+        }
+        return true
+      }),
       thumbnails: vi.fn(async () => []),
       decodeAudioSlice: vi.fn(async () => undefined),
       dispose: vi.fn(),
@@ -295,11 +303,12 @@ function createMockApp() {
   return {
     stage: { addChild: vi.fn() },
     renderer: { width: 1280, height: 720 },
+    ticker: { stop: vi.fn() },
     render: vi.fn(),
   }
 }
 
-function stubVideoRenderGlobals(options?: { pendingFetchUrls?: Set<string> }) {
+function stubVideoRenderGlobals(options?: { pendingFetchUrls?: Set<string>, failedFetchUrls?: Set<string> }) {
   const originalDocument = globalThis.document
   const originalFetch = globalThis.fetch
 
@@ -321,7 +330,19 @@ function stubVideoRenderGlobals(options?: { pendingFetchUrls?: Set<string> }) {
     if (options?.pendingFetchUrls?.has(url))
       return new Promise<Response>(() => {})
 
+    if (options?.failedFetchUrls?.has(url)) {
+      return Promise.resolve({
+        ok: false,
+        status: 403,
+        statusText: 'Forbidden',
+        blob: vi.fn(async () => new Blob()),
+      } as unknown as Response)
+    }
+
     return Promise.resolve({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
       body: new ReadableStream<Uint8Array>({
         start(controller) {
           controller.close()
@@ -333,6 +354,7 @@ function stubVideoRenderGlobals(options?: { pendingFetchUrls?: Set<string> }) {
   ;(globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch
 
   return {
+    createElement,
     fetchMock,
     restore: () => {
       ;(globalThis as unknown as { document: typeof originalDocument }).document = originalDocument
@@ -382,6 +404,26 @@ async function flushReactivity() {
   await Promise.resolve()
   await Promise.resolve()
 }
+
+describe('createRenderer render ownership', () => {
+  it('stops the Pixi application ticker before managing the stage', async () => {
+    audioManagerInstances.length = 0
+    const app = createMockApp()
+    const renderer = await createRenderer({
+      protocol: createProtocol([]),
+      app: app as any,
+      manualRender: true,
+      warmUpResources: false,
+    })
+
+    try {
+      expect(app.ticker.stop).toHaveBeenCalledTimes(1)
+    }
+    finally {
+      renderer.destroy()
+    }
+  })
+})
 
 describe('createRenderer video segment preloading', () => {
   it('resolves video segment audio from an OPFS object URL', async () => {
@@ -474,6 +516,101 @@ describe('createRenderer video segment preloading', () => {
       expect(mediaInputHandles[0]?.decodeAudioSlice).not.toHaveBeenCalled()
     }
     finally {
+      restore()
+      renderer.destroy()
+    }
+  })
+
+  it('does not fall back to a video element when a decoder task was disposed', async () => {
+    audioManagerInstances.length = 0
+    mediaInputHandles.length = 0
+    mediaMockState.drawFrameErrorName = 'InputDisposedError'
+    const { createElement, restore } = stubVideoRenderGlobals()
+    const protocol = ref<IVideoProtocol>({
+      id: 'renderer-disposed-decoder',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [
+        {
+          trackId: 'frames-track',
+          trackType: 'frames',
+          isMain: true,
+          children: [createVideoSegment('video-1', 0, 1000)],
+        },
+      ],
+    })
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as any,
+      manualRender: true,
+      warmUpResources: false,
+      videoSourceMode: 'auto',
+    })
+
+    try {
+      await renderer.renderAt(100)
+
+      expect(mediaInputHandles[0]?.dispose).toHaveBeenCalledTimes(1)
+      expect(createElement.mock.calls.some(([tagName]) => tagName === 'video')).toBe(false)
+
+      mediaMockState.drawFrameErrorName = undefined
+      await renderer.renderAt(150)
+      expect(mediaInputHandles).toHaveLength(2)
+      expect(mediaInputHandles[1]?.drawFrame).toHaveBeenCalled()
+    }
+    finally {
+      mediaMockState.drawFrameErrorName = undefined
+      restore()
+      renderer.destroy()
+    }
+  })
+
+  it('does not parse or fall back for an HTTP error response', async () => {
+    audioManagerInstances.length = 0
+    mediaInputHandles.length = 0
+    const videoUrl = 'https://example.com/video-1.mp4'
+    const { createElement, restore } = stubVideoRenderGlobals({ failedFetchUrls: new Set([videoUrl]) })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const protocol = ref<IVideoProtocol>({
+      id: 'renderer-http-media-error',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [
+        {
+          trackId: 'frames-track',
+          trackType: 'frames',
+          isMain: true,
+          children: [createVideoSegment('video-1', 0, 1000)],
+        },
+      ],
+    })
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as any,
+      manualRender: true,
+      warmUpResources: false,
+      videoSourceMode: 'auto',
+    })
+
+    try {
+      await renderer.renderAt(100)
+
+      expect(mediaInputHandles).toHaveLength(0)
+      expect(createElement.mock.calls.some(([tagName]) => tagName === 'video')).toBe(false)
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[renderer] failed to load video via decoder',
+        videoUrl,
+        expect.objectContaining({ name: 'MediaResourceHttpError', status: 403 }),
+      )
+    }
+    finally {
+      errorSpy.mockRestore()
       restore()
       renderer.destroy()
     }
