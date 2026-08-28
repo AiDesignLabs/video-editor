@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import type { AssetMeta } from '@video-editor/protocol'
+import type { AssetMeta, ProjectMeta } from '@video-editor/protocol'
 import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageFramesSegment, IStickerSegment, ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
 import type { Ref } from 'vue'
 import { createEditorCore } from '@video-editor/editor-core'
-import { generateThumbnails } from '@video-editor/protocol'
+import { createProjectStore, generateThumbnails } from '@video-editor/protocol'
 import { composeProtocol, createRenderer, listTransitionDefinitions, type Renderer } from '@video-editor/renderer'
 import type { SegmentUpdater, TransitionEditPayload } from '@video-editor/ui'
 import { PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 import type { IKeyframeProperty, ITransform } from '@video-editor/shared'
 import type { GizmoTransformPatch } from './gizmo/types'
+import type { ExportSettings } from './export-options'
 import CanvasGizmo from './gizmo/CanvasGizmo.vue'
 import AssetPanel from './AssetPanel.vue'
+import ExportDialog from './ExportDialog.vue'
+import ProjectMenu from './ProjectMenu.vue'
+import { toComposeOptions } from './export-options'
+import { clearBootCache, readBootCache, writeBootCache } from './project-boot'
 
 const swatches = {
   primary: 'https://dummyimage.com/1280x720/6aa7ff/ffffff.png&text=Clip+A',
@@ -141,7 +146,33 @@ const initialProtocol: IVideoProtocol = {
   ],
 }
 
-const editor = createEditorCore({ protocol: initialProtocol })
+const DEFAULT_PROJECT_ID = 'default'
+const DEFAULT_PROJECT_NAME = '未命名项目'
+
+/**
+ * Boot straight into the last edited project.
+ *
+ * `createEditorCore` runs synchronously and offers no bulk protocol
+ * replacement, while the OPFS project store is async — so the synchronous
+ * localStorage boot cache (see `project-boot.ts`) decides the initial
+ * protocol. A cached protocol that no longer validates is discarded.
+ */
+function bootstrapEditor() {
+  const cached = readBootCache()
+  if (cached) {
+    try {
+      return { editor: createEditorCore({ protocol: cached.protocol }), id: cached.id, name: cached.name }
+    }
+    catch (err) {
+      console.error('[playground] cached project is invalid, falling back to the demo protocol', err)
+      clearBootCache()
+    }
+  }
+  return { editor: createEditorCore({ protocol: initialProtocol }), id: DEFAULT_PROJECT_ID, name: DEFAULT_PROJECT_NAME }
+}
+
+const boot = bootstrapEditor()
+const editor = boot.editor
 const { state, commands } = editor
 const protocol = state.protocol
 const scrub = state.currentTime
@@ -173,6 +204,7 @@ const composeState = reactive({
   blobUrl: null as string | null,
   size: 0,
   durationMs: 0,
+  fileName: 'export.mp4',
 })
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -191,6 +223,152 @@ function openDrawer(tab: DrawerTab) {
   drawerTab.value = tab
   drawerOpen.value = true
 }
+
+// --- Project persistence ---------------------------------------------------
+
+const projectStore = createProjectStore()
+const currentProjectId = ref(boot.id)
+const currentProjectName = ref(boot.name)
+const projects = ref<ProjectMeta[]>([])
+const lastSavedAt = ref<number | null>(null)
+const AUTOSAVE_DELAY_MS = 2000
+let autosaveTimer: number | undefined
+
+async function refreshProjects() {
+  try {
+    projects.value = await projectStore.listProjects()
+  }
+  catch (err) {
+    console.error('[playground] failed to list projects', err)
+  }
+}
+
+function cancelScheduledSave() {
+  if (autosaveTimer !== undefined) {
+    window.clearTimeout(autosaveTimer)
+    autosaveTimer = undefined
+  }
+}
+
+/** Writes the active project to OPFS and mirrors it into the boot cache. */
+async function persistProject() {
+  cancelScheduledSave()
+  const payload = {
+    id: currentProjectId.value,
+    name: currentProjectName.value,
+    protocol: commands.exportProtocol(),
+  }
+  try {
+    await projectStore.saveProject(payload)
+    writeBootCache(payload)
+    lastSavedAt.value = Date.now()
+    await refreshProjects()
+  }
+  catch (err) {
+    console.error('[playground] failed to save the project', err)
+  }
+}
+
+function scheduleAutosave() {
+  cancelScheduledSave()
+  autosaveTimer = window.setTimeout(() => {
+    autosaveTimer = undefined
+    void persistProject()
+  }, AUTOSAVE_DELAY_MS)
+}
+
+/**
+ * Switching projects reloads the page: the boot cache carries the target
+ * protocol across, which is the simplest correct swap while `editor-core`
+ * exposes no bulk protocol replacement command.
+ */
+function rebootInto(project: { id: string, name: string, protocol: IVideoProtocol }) {
+  writeBootCache(project)
+  location.reload()
+}
+
+async function switchProject(id: string) {
+  if (id === currentProjectId.value)
+    return
+  await persistProject()
+  try {
+    const stored = await projectStore.loadProject(id)
+    if (!stored) {
+      await refreshProjects()
+      return
+    }
+    rebootInto({ id: stored.id, name: stored.name, protocol: stored.protocol })
+  }
+  catch (err) {
+    console.error('[playground] failed to load the project', err)
+  }
+}
+
+async function createProject() {
+  await persistProject()
+  const id = `p-${Date.now()}`
+  const protocol = JSON.parse(JSON.stringify(initialProtocol)) as IVideoProtocol
+  protocol.id = id
+  const project = { id, name: DEFAULT_PROJECT_NAME, protocol }
+  try {
+    await projectStore.saveProject(project)
+  }
+  catch (err) {
+    console.error('[playground] failed to create the project', err)
+    return
+  }
+  rebootInto(project)
+}
+
+async function renameProject(name: string) {
+  currentProjectName.value = name
+  await persistProject()
+}
+
+async function deleteProject(id: string) {
+  cancelScheduledSave()
+  try {
+    await projectStore.deleteProject(id)
+  }
+  catch (err) {
+    console.error('[playground] failed to delete the project', err)
+    return
+  }
+  await refreshProjects()
+
+  if (id !== currentProjectId.value)
+    return
+
+  // The active project is gone: fall back to the newest survivor, or to a
+  // fresh demo protocol when nothing is left.
+  const next = projects.value[0]
+  if (next) {
+    const stored = await projectStore.loadProject(next.id)
+    if (stored) {
+      rebootInto({ id: stored.id, name: stored.name, protocol: stored.protocol })
+      return
+    }
+  }
+  clearBootCache()
+  location.reload()
+}
+
+/** Adopts the newest stored project on a cold boot, or seeds the store. */
+async function initProjects() {
+  await refreshProjects()
+  const newest = projects.value[0]
+  if (!readBootCache() && newest) {
+    const stored = await projectStore.loadProject(newest.id).catch(() => undefined)
+    if (stored) {
+      rebootInto({ id: stored.id, name: stored.name, protocol: stored.protocol })
+      return
+    }
+  }
+  if (!projects.value.some(project => project.id === currentProjectId.value))
+    await persistProject()
+}
+
+watch(protocol, () => scheduleAutosave(), { deep: true })
 
 const protocolDuration = computed(() => {
   const endTimes = protocol.value.tracks.flatMap(track => track.children.map(seg => seg.endTime))
@@ -268,6 +446,7 @@ function observeCanvasHostResize(host: HTMLElement, instance: Renderer) {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown)
+  void initProjects()
   try {
     await mountRendererInstance({})
   }
@@ -281,6 +460,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  cancelScheduledSave()
   hostResizeObserver?.disconnect()
   hostResizeObserver = undefined
   renderer.value?.destroy()
@@ -693,8 +873,18 @@ async function runThumbnailDemo() {
   }
 }
 
-async function runComposeDemo() {
-  openDrawer('compose')
+const exportDialogOpen = ref(false)
+
+/** `20260828-153012`, stable and file-system friendly. */
+function exportTimestamp() {
+  const now = new Date()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+}
+
+async function runCompose(settings: ExportSettings) {
+  exportDialogOpen.value = false
+  drawerTab.value = 'compose'
   drawerOpen.value = true
   composeState.error = null
   composeState.loading = true
@@ -702,7 +892,8 @@ async function runComposeDemo() {
   clearComposeOutput()
 
   try {
-    const { stream, durationMs } = await composeProtocol(protocol.value, {
+    const { stream, durationMs, fileExtension } = await composeProtocol(protocol.value, {
+      ...toComposeOptions(settings),
       onProgress: (progress) => {
         composeState.progress = progress
       },
@@ -711,6 +902,7 @@ async function runComposeDemo() {
     composeState.blobUrl = URL.createObjectURL(blob)
     composeState.size = blob.size
     composeState.durationMs = durationMs
+    composeState.fileName = `export-${exportTimestamp()}${fileExtension}`
   }
   catch (err) {
     composeState.error = err instanceof Error ? err.message : String(err)
@@ -878,6 +1070,17 @@ function handleAddSegmentClick(data: {
         <span class="topbar__tag">playground</span>
       </div>
 
+      <ProjectMenu
+        :projects="projects"
+        :current-id="currentProjectId"
+        :current-name="currentProjectName"
+        :saved-at="lastSavedAt"
+        @select="switchProject"
+        @create="createProject"
+        @rename="renameProject"
+        @delete="deleteProject"
+      />
+
       <div class="heartbeat" title="reactive protocol 实时状态">
         <span class="heartbeat__cell">
           <em>{{ protocol.tracks.length }}</em>tracks
@@ -913,7 +1116,7 @@ function handleAddSegmentClick(data: {
         <button class="tool" :class="{ 'tool--active': drawerOpen && drawerTab === 'demo' }" @click="openDrawer('demo')">
           演示
         </button>
-        <button class="export" :disabled="composeState.loading" @click="runComposeDemo">
+        <button class="export" :disabled="composeState.loading" @click="exportDialogOpen = true">
           {{ composeState.loading ? `导出中 ${Math.round(composeState.progress * 100)}%` : '导出视频' }}
         </button>
       </div>
@@ -997,6 +1200,15 @@ function handleAddSegmentClick(data: {
       />
     </section>
 
+    <ExportDialog
+      :open="exportDialogOpen"
+      :source-width="protocol.width"
+      :source-height="protocol.height"
+      :source-fps="protocol.fps"
+      @close="exportDialogOpen = false"
+      @confirm="runCompose"
+    />
+
     <div v-if="transitionDialog.open" class="transition-modal" @click.self="closeTransitionDialog">
       <div class="transition-card">
         <header class="transition-card__head">
@@ -1072,11 +1284,12 @@ function handleAddSegmentClick(data: {
             <div class="drawer__meta">
               <span class="mono">{{ formatTimecode(composeState.durationMs) }}</span>
               <span class="mono">{{ formatBytes(composeState.size) }}</span>
-              <a class="tool" :href="composeState.blobUrl" download="compose-output.mp4">下载 MP4</a>
+              <span class="drawer__hint mono">{{ composeState.fileName }}</span>
+              <a class="tool" :href="composeState.blobUrl" :download="composeState.fileName">下载文件</a>
             </div>
           </template>
           <p v-else class="drawer__empty">
-            点击右上角「导出视频」，把当前协议合成为 mp4 并在这里预览。
+            点击右上角「导出视频」，在弹窗中选择分辨率、帧率、格式与编码后开始合成，结果会在这里预览与下载。
           </p>
         </div>
 

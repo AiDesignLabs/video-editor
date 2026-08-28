@@ -577,3 +577,198 @@ body {
 .transition-card__spacer {
   flex: 1;
 }
+
+/* ---------- export dialog ---------- */
+
+.export-card {
+  width: 340px;
+  gap: 8px;
+}
+
+.export-card__pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.export-card__pair input {
+  width: 80px;
+}
+
+.export-card .transition-card__field select {
+  width: 150px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--shell-deep);
+  color: var(--ink);
+  font: inherit;
+}
+
+.export-card .transition-card__field input:disabled {
+  opacity: 0.4;
+}
+
+.export-card__check {
+  width: auto !important;
+  accent-color: var(--accent);
+}
+
+/* ---------- project menu ---------- */
+
+.project {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project__trigger {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.project__trigger:hover,
+.project__trigger--open {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.project__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project__caret {
+  color: var(--ink-muted);
+  font-size: 10px;
+}
+
+.project__saved {
+  font-size: 10px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.project__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.project__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 51;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+.project__section {
+  display: flex;
+  gap: 6px;
+}
+
+.project__action {
+  flex: 1;
+  text-align: center;
+}
+
+.project__input {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  background: var(--shell-deep);
+  color: var(--ink);
+  font: inherit;
+}
+
+.project__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.project__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 7px;
+}
+
+.project__item--active {
+  background: rgba(79, 125, 255, 0.12);
+}
+
+.project__pick {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.project__pick:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.project__item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project__item-time {
+  font-size: 10px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.project__delete {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.project__delete--armed {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.project__empty {
+  color: var(--ink-muted);
+  padding: 6px 8px;
+}
