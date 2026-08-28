@@ -7,6 +7,7 @@ import type {
   IStickerSegment,
   ITextSegment,
   ITrackType,
+  ITransitionEdge,
   IVideoFramesSegment,
   IVideoProtocol,
   SegmentUnion,
@@ -14,7 +15,8 @@ import type {
 } from '@video-editor/shared'
 import { getMp4Meta } from '@video-editor/protocol'
 import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
-import type { SegmentDragPayload, SegmentLayout, SegmentResizePayload, TimelineTrack } from '../VideoTimeline/types'
+import type { SegmentDragPayload, SegmentLayout, SegmentResizePayload, TimelineOverlaySlotProps, TimelineTrack } from '../VideoTimeline/types'
+import type { TransitionEditPayload, TransitionSeam } from './types'
 import { computed, reactive, ref, watch, watchEffect } from 'vue'
 import VideoTimeline from '../VideoTimeline/index.vue'
 import { AudioSegment, FramesSegment, KeyframeMarkers, SegmentBase, TextSegment } from './segments'
@@ -46,6 +48,7 @@ const emit = defineEmits<{
   (e: 'segmentResizeEnd', payload: SegmentResizePayload): void
   (e: 'videoSegmentMuteToggle', payload: { segment: IVideoFramesSegment, track: TrackUnion, muted: boolean }): void
   (e: 'add-segment', { track, startTime, endTime, event }: { track: TrackUnion, startTime: number, endTime?: number, event?: MouseEvent }): void
+  (e: 'transition-edit', payload: TransitionEditPayload): void
 }>()
 
 const innerSelectedId = ref<string | null>(props.selectedSegmentId ?? null)
@@ -217,6 +220,65 @@ function handleAddSegment({ track, startTime, endTime, event }: { track: Timelin
     emit('add-segment', { track: trackPayload, startTime, endTime, event })
 }
 
+const transitionEdges = computed<ITransitionEdge[]>(() => props.protocol?.transitions ?? [])
+
+function findTransitionEdge(fromSegmentId: string, toSegmentId: string) {
+  return transitionEdges.value.find(edge =>
+    edge.fromSegmentId === fromSegmentId && edge.toSegmentId === toSegmentId)
+}
+
+/**
+ * Seam chips live between adjacent main-track segments. The `#segment` slot
+ * renders *inside* a segment box, so a boundary marker cannot be drawn there;
+ * VideoTimeline's `overlay` slot shares the content coordinate box with the
+ * playhead and drag previews, which is exactly what boundary positions need.
+ */
+function buildTransitionSeams(overlay: TimelineOverlaySlotProps): TransitionSeam[] {
+  if (props.disableInteraction)
+    return []
+  const mainLayout = overlay.trackLayouts.find(layout => layout.track.isMain && layout.track.type === 'frames')
+  if (!mainLayout || mainLayout.segments.length < 2)
+    return []
+
+  const rowTop = overlay.rulerHeight + mainLayout.trackIndex * (overlay.trackHeight + overlay.trackGap) + overlay.trackGap
+  const top = rowTop + overlay.trackHeight / 2
+  const ordered = mainLayout.segments.slice().sort((a, b) => a.segment.start - b.segment.start)
+
+  const seams: TransitionSeam[] = []
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const from = ordered[i]
+    const to = ordered[i + 1]
+    if (!from || !to)
+      continue
+    // The main frames track has no gaps, so the boundary is a single point.
+    const boundaryTime = from.segment.end
+    seams.push({
+      key: `${from.segment.id}->${to.segment.id}`,
+      fromSegmentId: from.segment.id,
+      toSegmentId: to.segment.id,
+      boundaryTime,
+      existing: findTransitionEdge(from.segment.id, to.segment.id),
+      left: boundaryTime * overlay.pixelsPerMs,
+      top,
+    })
+  }
+  return seams
+}
+
+function formatSeamDuration(durationMs: number) {
+  return durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${Math.round(durationMs)}ms`
+}
+
+function handleTransitionSeamClick(seam: TransitionSeam) {
+  const payload: TransitionEditPayload = {
+    fromSegmentId: seam.fromSegmentId,
+    toSegmentId: seam.toSegmentId,
+    boundaryTime: seam.boundaryTime,
+    existing: seam.existing,
+  }
+  emit('transition-edit', payload)
+}
+
 function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: TrackUnion, payload: { segmentId: string, muted: boolean }) {
   if (segment.id !== payload.segmentId)
     return
@@ -257,6 +319,24 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
     <!-- Pass through playhead slot -->
     <template v-if="$slots.playhead" #playhead="slotProps">
       <slot name="playhead" v-bind="slotProps" />
+    </template>
+
+    <!-- Transition seams on the main frames track -->
+    <template #overlay="overlay">
+      <button
+        v-for="seam in buildTransitionSeams(overlay)"
+        :key="seam.key"
+        type="button"
+        class="ve-transition-seam"
+        :class="{ 've-transition-seam--active': !!seam.existing }"
+        :style="{ left: `${seam.left}px`, top: `${seam.top}px` }"
+        :title="seam.existing ? `${seam.existing.name} · ${formatSeamDuration(seam.existing.duration)}` : '添加转场'"
+        @click.stop="handleTransitionSeamClick(seam)"
+        @mousedown.stop
+      >
+        <span v-if="seam.existing" class="ve-transition-seam__label">{{ formatSeamDuration(seam.existing.duration) }}</span>
+        <span v-else class="ve-transition-seam__icon">⧉</span>
+      </button>
     </template>
 
     <template #segment="{ layout }">
@@ -316,5 +396,38 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
 
 :where(.ve-editor-segment .ve-editor-segment__preview) {
   --at-apply: flex items-stretch w-full min-h-14;
+}
+
+/* Transition seam chip, centred on the boundary between two main-track clips */
+.ve-transition-seam {
+  --at-apply: absolute z-40 flex items-center justify-center h-5 min-w-5 px-1 rounded-full cursor-pointer;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: rgba(15, 23, 42, 0.55);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.28;
+  transition: opacity 0.12s ease, background-color 0.12s ease;
+}
+
+.ve-transition-seam:hover {
+  opacity: 1;
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.ve-transition-seam--active {
+  opacity: 1;
+  background: #6366f1;
+  border-color: rgba(255, 255, 255, 0.85);
+}
+
+.ve-transition-seam--active:hover {
+  background: #4f46e5;
+}
+
+.ve-transition-seam__label {
+  --at-apply: font-mono;
+  white-space: nowrap;
 }
 </style>

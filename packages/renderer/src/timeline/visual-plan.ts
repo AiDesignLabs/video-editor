@@ -1,6 +1,17 @@
 import type { ITransform, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { TransitionRole } from './transition-registry'
 import type { VisualEffectParam, VisualPlanItem } from './types'
 import { isVideoFramesSegment } from '@video-editor/shared'
+import { getTransitionDefinition } from './transition-registry'
+
+/** Transition state attached to a render item, consumed by the filter cache. */
+export interface VisualRenderTransition {
+  role: TransitionRole
+  progress: number
+  durationMs: number
+  transitionId?: string
+  transitionName?: string
+}
 
 export interface VisualRenderItem {
   segment: SegmentUnion
@@ -9,6 +20,7 @@ export interface VisualRenderItem {
   transform?: ITransform
   includeAudio: boolean
   effects?: VisualEffectParam[]
+  transition?: VisualRenderTransition
 }
 
 export function createVisualRenderItems(
@@ -27,7 +39,12 @@ export function createVisualRenderItems(
       continue
 
     const progress = clamp01(visual.transition?.progress ?? 0)
-    const fromOpacity = clamp01(visual.opacity) * (visual.transition ? (1 - progress) : 1)
+    // A registered shader transition drives the blend itself, so the plan must
+    // emit both sides at their intrinsic opacity. Unresolved transitions keep
+    // the legacy opacity crossfade.
+    const shaderDriven = visual.transition ? Boolean(resolveTransitionDefinition(visual.transition)) : false
+    const fromOpacity = clamp01(visual.opacity) * (visual.transition && !shaderDriven ? (1 - progress) : 1)
+    const transitionDurationMs = normalizeTimeMs(visual.transition?.durationMs)
 
     items.push({
       segment,
@@ -36,6 +53,15 @@ export function createVisualRenderItems(
       transform: visual.transform,
       includeAudio: true,
       effects: visual.effects,
+      transition: visual.transition
+        ? {
+            role: 'from',
+            progress,
+            durationMs: transitionDurationMs,
+            transitionId: visual.transition.transitionId,
+            transitionName: visual.transition.transitionName,
+          }
+        : undefined,
     })
 
     if (!visual.transition || progress <= 0)
@@ -47,12 +73,11 @@ export function createVisualRenderItems(
     if (!targetSegment)
       continue
 
-    const transitionDurationMs = normalizeTimeMs(visual.transition.durationMs)
     if (transitionDurationMs <= 0)
       continue
     const elapsedTransitionMs = transitionDurationMs * progress
     const targetSourceTimeMs = mapTransitionTargetSourceTimeMs(targetSegment, elapsedTransitionMs)
-    const targetOpacity = readSegmentOpacity(targetSegment) * progress
+    const targetOpacity = readSegmentOpacity(targetSegment) * (shaderDriven ? 1 : progress)
 
     items.push({
       segment: targetSegment,
@@ -61,10 +86,23 @@ export function createVisualRenderItems(
       transform: 'transform' in targetSegment ? targetSegment.transform : undefined,
       includeAudio: false,
       effects: visual.effects,
+      transition: {
+        role: 'to',
+        progress,
+        durationMs: transitionDurationMs,
+        transitionId: visual.transition.transitionId,
+        transitionName: visual.transition.transitionName,
+      },
     })
   }
 
   return items
+}
+
+/** Resolve by protocol transition id, then by (case-insensitive) name. */
+function resolveTransitionDefinition(transition: NonNullable<VisualPlanItem['transition']>) {
+  return getTransitionDefinition(transition.transitionId)
+    ?? getTransitionDefinition(transition.transitionName)
 }
 
 function indexSegments(protocol: IVideoProtocol): Map<string, SegmentUnion> {

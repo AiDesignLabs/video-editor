@@ -2,7 +2,7 @@ import type { IKeyframeProperty, ITextSegment, IVideoFramesSegment, IVideoProtoc
 import type { VisualBox } from './gizmo-math'
 import type { ComputedRef, Ref, ShallowRef } from '@vue/reactivity'
 import type { Application, ApplicationOptions, Filter as PixiFilter } from 'pixi.js'
-import type { ShaderEffectContext, TimelinePlan } from './timeline'
+import type { ShaderEffectContext, TimelinePlan, VisualRenderItem } from './timeline'
 import type { MaybeRef, PixiDisplayObject } from './types'
 import { createResourceManager, createValidator, getResourceKey } from '@video-editor/protocol'
 import {
@@ -254,7 +254,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       applyVisualEffects(display, segment, visual.effects, {
         timeMs: renderTimelineMs,
         sourceTimeMs: visual.sourceTimeMs,
-      })
+      }, visual.transition)
       const { layout, baseWidth, baseHeight } = applyDisplayProps(display, segment, stageWidth, stageHeight, {
         opacity: visual.opacity,
         transform: visual.transform,
@@ -314,9 +314,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     segment: SegmentUnion,
     effects: TimelinePlan['visuals'][number]['effects'],
     ctx: ShaderEffectContext,
+    transition: VisualRenderItem['transition'],
   ) {
     const palette = 'palette' in segment ? segment.palette : undefined
-    const filters = segmentFilterCache.resolve(segment.id, effects, palette, ctx)
+    const filters = segmentFilterCache.resolve(segment.id, effects, palette, ctx, transition)
 
     ;(display as PixiDisplayObject & { filters?: PixiFilter[] | null }).filters
       = filters.length ? filters : null

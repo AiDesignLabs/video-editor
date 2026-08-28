@@ -4,8 +4,8 @@ import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageFramesSegment
 import type { Ref } from 'vue'
 import { createEditorCore } from '@video-editor/editor-core'
 import { generateThumbnails } from '@video-editor/protocol'
-import { composeProtocol, createRenderer, type Renderer } from '@video-editor/renderer'
-import type { SegmentUpdater } from '@video-editor/ui'
+import { composeProtocol, createRenderer, listTransitionDefinitions, type Renderer } from '@video-editor/renderer'
+import type { SegmentUpdater, TransitionEditPayload } from '@video-editor/ui'
 import { PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 import type { IKeyframeProperty, ITransform } from '@video-editor/shared'
@@ -682,6 +682,53 @@ function formatBytes(size: number) {
   return `${(size / 1024 ** power).toFixed(power === 0 ? 0 : 1)} ${units[power]}`
 }
 
+// --- Transition editor -----------------------------------------------------
+
+const DEFAULT_TRANSITION_DURATION_MS = 500
+// Shader transitions are registered by the renderer; the picker just lists them.
+const transitionOptions = listTransitionDefinitions().map(def => ({ id: def.id, label: def.label }))
+
+const transitionDialog = reactive({
+  open: false,
+  fromSegmentId: '',
+  toSegmentId: '',
+  boundaryTime: 0,
+  hasExisting: false,
+  transitionId: transitionOptions[0]?.id ?? 'crossfade',
+  durationMs: DEFAULT_TRANSITION_DURATION_MS,
+})
+
+function handleTransitionEdit(payload: TransitionEditPayload) {
+  transitionDialog.open = true
+  transitionDialog.fromSegmentId = payload.fromSegmentId
+  transitionDialog.toSegmentId = payload.toSegmentId
+  transitionDialog.boundaryTime = payload.boundaryTime
+  transitionDialog.hasExisting = Boolean(payload.existing)
+  transitionDialog.transitionId = payload.existing?.id ?? transitionOptions[0]?.id ?? 'crossfade'
+  transitionDialog.durationMs = payload.existing?.duration ?? DEFAULT_TRANSITION_DURATION_MS
+}
+
+function closeTransitionDialog() {
+  transitionDialog.open = false
+}
+
+function confirmTransition() {
+  const option = transitionOptions.find(item => item.id === transitionDialog.transitionId)
+  if (!option)
+    return
+  const duration = Math.max(1, Math.round(transitionDialog.durationMs) || DEFAULT_TRANSITION_DURATION_MS)
+  // Replace any existing edge on this boundary before adding the new one.
+  if (transitionDialog.hasExisting)
+    commands.removeTransition(transitionDialog.fromSegmentId)
+  commands.addTransition({ id: option.id, name: option.label, duration }, transitionDialog.boundaryTime)
+  closeTransitionDialog()
+}
+
+function removeTransitionEdge() {
+  commands.removeTransition(transitionDialog.fromSegmentId)
+  closeTransitionDialog()
+}
+
 function handleAddSegmentClick(data: {
   track: TrackUnion
   startTime: number
@@ -891,8 +938,48 @@ function handleAddSegmentClick(data: {
         @segment-resize-end="handleSegmentResizeEnd"
         @video-segment-mute-toggle="handleVideoSegmentMuteToggle"
         @add-segment="handleAddSegmentClick"
+        @transition-edit="handleTransitionEdit"
       />
     </section>
+
+    <div v-if="transitionDialog.open" class="transition-modal" @click.self="closeTransitionDialog">
+      <div class="transition-card">
+        <header class="transition-card__head">
+          <strong>转场设置</strong>
+          <span class="mono">{{ formatTimecode(transitionDialog.boundaryTime) }}</span>
+        </header>
+
+        <div class="transition-card__list">
+          <button
+            v-for="option in transitionOptions"
+            :key="option.id"
+            class="transition-option"
+            :class="{ 'transition-option--active': option.id === transitionDialog.transitionId }"
+            @click="transitionDialog.transitionId = option.id"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+
+        <label class="transition-card__field">
+          <span>时长 (ms)</span>
+          <input v-model.number="transitionDialog.durationMs" type="number" min="1" step="50">
+        </label>
+
+        <footer class="transition-card__foot">
+          <button v-if="transitionDialog.hasExisting" class="tool tool--danger" @click="removeTransitionEdge">
+            移除
+          </button>
+          <span class="transition-card__spacer" />
+          <button class="tool" @click="closeTransitionDialog">
+            取消
+          </button>
+          <button class="tool" @click="confirmTransition">
+            确定
+          </button>
+        </footer>
+      </div>
+    </div>
 
     <section v-if="drawerOpen" class="drawer">
       <nav class="drawer__tabs">

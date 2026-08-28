@@ -677,6 +677,16 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
           </TimelineTracks>
         </div>
 
+        <!-- 轨道之上的自定义覆盖层（如转场手柄），与拖拽预览共用坐标系 -->
+        <slot
+          name="overlay"
+          :track-layouts="segmentLayouts"
+          :pixels-per-ms="pixelsPerMs"
+          :ruler-height="rulerHeightPx"
+          :track-height="trackHeightPx"
+          :track-gap="trackGapPx"
+        />
+
         <!-- 拖拽中的 segment (提升到轨道外避免被 overflow 裁剪) -->
         <template v-if="draggingSegmentLayout">
           <div

@@ -1,6 +1,10 @@
 import type { IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import type { VisualPlanItem } from './types'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('pixi.js', async () => (await import('../../test/pixi-mock')).createPixiMock())
+
+import { registerTransition, unregisterTransition } from './transition-registry'
 import { createVisualRenderItems } from './visual-plan'
 
 function createVideoSegment(
@@ -35,6 +39,26 @@ function createProtocol(segments: IVideoFramesSegment[]): IVideoProtocol {
         children: segments,
       },
     ],
+  }
+}
+
+function transitionVisual(): VisualPlanItem {
+  return {
+    segmentId: 'video-1',
+    trackId: 'frames-main',
+    trackType: 'frames',
+    segmentType: 'frames',
+    zOrder: 1,
+    sourceTimeMs: 900,
+    opacity: 1,
+    transition: {
+      fromSegmentId: 'video-1',
+      toSegmentId: 'video-2',
+      progress: 0.5,
+      durationMs: 200,
+      transitionId: 'shader-plan-test',
+      transitionName: 'Shader Plan Test',
+    },
   }
 }
 
@@ -77,6 +101,56 @@ describe('createVisualRenderItems', () => {
     expect(items[1]?.sourceTimeMs).toBeCloseTo(250, 6)
     expect(items[1]?.opacity).toBeCloseTo(0.4, 6)
     expect(items[1]?.includeAudio).toBe(false)
+  })
+
+  it('tags both sides with transition metadata', () => {
+    const protocol = createProtocol([
+      createVideoSegment('video-1', 0, 1000),
+      createVideoSegment('video-2', 1000, 2000),
+    ])
+    const items = createVisualRenderItems(protocol, [transitionVisual()])
+
+    expect(items[0]?.transition).toEqual({
+      role: 'from',
+      progress: 0.5,
+      durationMs: 200,
+      transitionId: 'shader-plan-test',
+      transitionName: 'Shader Plan Test',
+    })
+    expect(items[1]?.transition).toMatchObject({ role: 'to', progress: 0.5, durationMs: 200 })
+  })
+
+  it('keeps intrinsic opacity when a shader transition definition resolves', () => {
+    registerTransition({
+      id: 'shader-plan-test',
+      label: 'Shader Plan Test',
+      fragment: 'precision highp float;\nvoid main(void) {}\n',
+    })
+    try {
+      const protocol = createProtocol([
+        createVideoSegment('video-1', 0, 1000),
+        createVideoSegment('video-2', 1000, 2000, { opacity: 0.8 }),
+      ])
+      const items = createVisualRenderItems(protocol, [transitionVisual()])
+
+      // No opacity pre-multiplication: the shader owns the blend.
+      expect(items[0]?.opacity).toBeCloseTo(1, 6)
+      expect(items[1]?.opacity).toBeCloseTo(0.8, 6)
+    }
+    finally {
+      unregisterTransition('shader-plan-test')
+    }
+  })
+
+  it('falls back to the opacity crossfade when the definition is unregistered', () => {
+    const protocol = createProtocol([
+      createVideoSegment('video-1', 0, 1000),
+      createVideoSegment('video-2', 1000, 2000, { opacity: 0.8 }),
+    ])
+    const items = createVisualRenderItems(protocol, [transitionVisual()])
+
+    expect(items[0]?.opacity).toBeCloseTo(0.5, 6)
+    expect(items[1]?.opacity).toBeCloseTo(0.4, 6)
   })
 
   it('does not duplicate transition target when already active in visuals', () => {

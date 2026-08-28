@@ -25,3 +25,6 @@ export type { GizmoBox, VisualBox } from './gizmo-math'
 
 export { listEffectDefinitions, registerEffect, unregisterEffect } from './timeline'
 export type { EffectDefinition, ShaderEffectContext, VisualEffectParam } from './timeline'
+
+export { listTransitionDefinitions, registerTransition, unregisterTransition } from './timeline'
+export type { TransitionDefinition, TransitionRenderContext } from './timeline'

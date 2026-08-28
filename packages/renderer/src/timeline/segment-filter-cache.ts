@@ -1,6 +1,7 @@
 import type { IPalette } from '@video-editor/shared'
 import type { ColorMatrixFilter, Filter } from 'pixi.js'
 import type { EffectDefinition, ShaderEffectContext } from './effect-registry'
+import type { TransitionDefinition, TransitionRole } from './transition-registry'
 import type { VisualEffectParam } from './types'
 import { buildEffectFilters, structuralKeyForEffect } from './effect-registry'
 import {
@@ -12,6 +13,20 @@ import {
   updatePalettePostFilter,
 } from './palette-filter'
 import { resolveEffectDefinition } from './pixi-effects'
+import {
+  buildTransitionFilters,
+  getTransitionDefinition,
+  transitionStructuralKey,
+  updateTransitionFilters,
+} from './transition-registry'
+
+/** Transition state for one segment occurrence in the current frame. */
+export interface SegmentTransitionInput {
+  role: TransitionRole
+  progress: number
+  transitionId?: string
+  transitionName?: string
+}
 
 interface BuiltEffect {
   definition: EffectDefinition | undefined
@@ -25,6 +40,9 @@ export interface SegmentFilterEntry {
   built: BuiltEffect[]
   paletteMatrixFilter?: ColorMatrixFilter
   palettePostFilter?: Filter
+  transitionDefinition?: TransitionDefinition
+  transitionRole?: TransitionRole
+  transitionFilters?: Filter[]
   /** Flattened chain in application order; the array identity is stable. */
   filters: Filter[]
 }
@@ -34,6 +52,8 @@ export interface SegmentFilterCacheDeps {
   buildFilters?: (definition: EffectDefinition, param: VisualEffectParam) => Filter[]
   createPaletteMatrixFilter?: (palette: IPalette) => ColorMatrixFilter | null
   createPalettePost?: (palette: IPalette) => Filter | null
+  resolveTransition?: (transition: SegmentTransitionInput) => TransitionDefinition | undefined
+  buildTransition?: (definition: TransitionDefinition, role: TransitionRole) => Filter[]
 }
 
 export interface SegmentFilterCache {
@@ -46,6 +66,7 @@ export interface SegmentFilterCache {
     effects: VisualEffectParam[] | undefined,
     palette: IPalette | undefined,
     ctx: ShaderEffectContext,
+    transition?: SegmentTransitionInput,
   ) => Filter[]
   /** Drop (and dispose) entries whose segment is no longer on screen. */
   evictInactive: (activeIds: Set<string>) => void
@@ -62,6 +83,8 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
   const createPaletteMatrixFilter = deps.createPaletteMatrixFilter ?? paletteToColorMatrix
   const createPalettePost = deps.createPalettePost
     ?? ((palette: IPalette) => (paletteNeedsPostShader(palette) ? createPalettePostFilter(palette) : null))
+  const resolveTransition = deps.resolveTransition ?? defaultResolveTransition
+  const buildTransition = deps.buildTransition ?? buildTransitionFilters
 
   const entries = new Map<string, SegmentFilterEntry>()
   // Only filters this cache allocated may be destroyed by it.
@@ -70,19 +93,28 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
   function computeStructuralKey(
     effects: VisualEffectParam[] | undefined,
     palette: IPalette | undefined,
+    transitionDefinition: TransitionDefinition | undefined,
+    transitionRole: TransitionRole | undefined,
   ): string {
     const parts: string[] = []
     for (const effect of effects ?? []) {
       const definition = resolveDefinition(effect)
       parts.push(definition ? structuralKeyForEffect(definition, effect) : '')
     }
-    return `${parts.join(KEY_SEPARATOR)}|${paletteStructuralKey(palette)}`
+    // A segment can be the `from` side one frame and the `to` side later, so
+    // the role is part of the structural identity.
+    const transitionKey = transitionDefinition && transitionRole
+      ? transitionStructuralKey(transitionDefinition, transitionRole)
+      : ''
+    return `${parts.join(KEY_SEPARATOR)}|${paletteStructuralKey(palette)}|${transitionKey}`
   }
 
   function build(
     structuralKey: string,
     effects: VisualEffectParam[] | undefined,
     palette: IPalette | undefined,
+    transitionDefinition: TransitionDefinition | undefined,
+    transitionRole: TransitionRole | undefined,
   ): SegmentFilterEntry {
     // One built record per effect (even when it produces no filters) so the
     // per-frame update pass can pair records with plan effects by index.
@@ -109,12 +141,24 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
       }
     }
 
+    if (transitionDefinition && transitionRole) {
+      const transitionFilters = buildTransition(transitionDefinition, transitionRole)
+      for (const filter of transitionFilters)
+        owned.add(filter)
+      entry.transitionDefinition = transitionDefinition
+      entry.transitionRole = transitionRole
+      entry.transitionFilters = transitionFilters
+    }
+
     for (const record of built)
       entry.filters.push(...record.filters)
     if (entry.paletteMatrixFilter)
       entry.filters.push(entry.paletteMatrixFilter)
     if (entry.palettePostFilter)
       entry.filters.push(entry.palettePostFilter)
+    // Transition filters run last: they blend the fully-graded segment.
+    if (entry.transitionFilters)
+      entry.filters.push(...entry.transitionFilters)
 
     return entry
   }
@@ -124,6 +168,7 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
     effects: VisualEffectParam[] | undefined,
     palette: IPalette | undefined,
     ctx: ShaderEffectContext,
+    transition: SegmentTransitionInput | undefined,
   ) {
     const list = effects ?? []
     for (let i = 0; i < entry.built.length; i++) {
@@ -138,6 +183,13 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
         updatePaletteColorMatrixFilter(entry.paletteMatrixFilter, palette)
       if (entry.palettePostFilter)
         updatePalettePostFilter(entry.palettePostFilter, palette, ctx.timeMs / 1000)
+    }
+    if (entry.transitionDefinition && entry.transitionFilters && entry.transitionRole && transition) {
+      updateTransitionFilters(entry.transitionDefinition, entry.transitionFilters, {
+        timeMs: ctx.timeMs,
+        progress: transition.progress,
+        role: entry.transitionRole,
+      })
     }
   }
 
@@ -154,6 +206,15 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
       destroyOwned(entry.paletteMatrixFilter)
     if (entry.palettePostFilter)
       destroyOwned(entry.palettePostFilter)
+    if (entry.transitionFilters) {
+      if (entry.transitionDefinition?.dispose) {
+        entry.transitionDefinition.dispose(entry.transitionFilters)
+      }
+      else {
+        for (const filter of entry.transitionFilters)
+          destroyOwned(filter)
+      }
+    }
   }
 
   function destroyOwned(filter: Filter) {
@@ -165,16 +226,18 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
   }
 
   return {
-    resolve(segmentId, effects, palette, ctx) {
-      const structuralKey = computeStructuralKey(effects, palette)
+    resolve(segmentId, effects, palette, ctx, transition) {
+      const transitionDefinition = transition ? resolveTransition(transition) : undefined
+      const transitionRole = transitionDefinition ? transition?.role : undefined
+      const structuralKey = computeStructuralKey(effects, palette, transitionDefinition, transitionRole)
       let entry = entries.get(segmentId)
       if (!entry || entry.structuralKey !== structuralKey) {
         if (entry)
           dispose(entry)
-        entry = build(structuralKey, effects, palette)
+        entry = build(structuralKey, effects, palette, transitionDefinition, transitionRole)
         entries.set(segmentId, entry)
       }
-      update(entry, effects, palette, ctx)
+      update(entry, effects, palette, ctx, transition)
       return entry.filters
     },
     evictInactive(activeIds) {
@@ -197,4 +260,10 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
       return entries.size
     },
   }
+}
+
+/** Registry lookup: protocol transition id first, then case-insensitive name. */
+function defaultResolveTransition(transition: SegmentTransitionInput): TransitionDefinition | undefined {
+  return getTransitionDefinition(transition.transitionId)
+    ?? getTransitionDefinition(transition.transitionName)
 }

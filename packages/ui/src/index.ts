@@ -7,6 +7,8 @@ export * from './VideoTimeline/types'
 
 export * from './VideoEditorTimeline/segments'
 
+export type { TransitionEditPayload, TransitionSeam } from './VideoEditorTimeline/types'
+
 export type { SegmentUpdater } from './PropertyInspector/types'
 
 // 导出单独组件

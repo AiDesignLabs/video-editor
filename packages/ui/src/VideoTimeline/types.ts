@@ -43,6 +43,22 @@ export interface SegmentLayout {
   isSelected: boolean
 }
 
+/** One rendered track row, as handed to the `overlay` slot. */
+export interface TrackLayout {
+  track: TimelineTrack
+  trackIndex: number
+  segments: SegmentLayout[]
+}
+
+/** Slot props of VideoTimeline's `overlay` slot (content-box coordinates). */
+export interface TimelineOverlaySlotProps {
+  trackLayouts: TrackLayout[]
+  pixelsPerMs: number
+  rulerHeight: number
+  trackHeight: number
+  trackGap: number
+}
+
 export interface SegmentDragPayload {
   segment: TimelineSegment
   track: TimelineTrack

@@ -104,22 +104,49 @@ export function createShaderFilter(definition: EffectDefinition): Filter {
   if (!definition.fragment)
     throw new Error(`[renderer] effect "${definition.id}" has no GLSL fragment to build from`)
 
-  const resources = definition.uniforms
-    ? { [EFFECT_UNIFORM_GROUP]: cloneUniforms(definition.uniforms) }
+  return createShaderFilterFromSpec({
+    fragment: definition.fragment,
+    vertex: definition.vertex,
+    uniformGroup: EFFECT_UNIFORM_GROUP,
+    uniforms: definition.uniforms,
+    filterOptions: definition.filterOptions,
+  })
+}
+
+/** Generic GLSL-convenience filter spec, shared by effects and transitions. */
+export interface ShaderFilterSpec {
+  /** Fragment source; MUST start with `precision highp float;` (see palette-filter.ts). */
+  fragment: string
+  vertex?: string
+  /** Uniform group name the declarations are bound to. */
+  uniformGroup: string
+  uniforms?: Record<string, EffectUniformDeclaration>
+  filterOptions?: EffectFilterOptions
+}
+
+/**
+ * Build a WebGL-only filter from a fragment + uniform declarations.
+ *
+ * Shared by the effect and transition registries so both authoring paths get
+ * the same program caching and uniform cloning semantics.
+ */
+export function createShaderFilterFromSpec(spec: ShaderFilterSpec): Filter {
+  const resources = spec.uniforms
+    ? { [spec.uniformGroup]: cloneUniforms(spec.uniforms) }
     : {}
 
   return PixiFilter.from({
-    ...definition.filterOptions,
+    ...spec.filterOptions,
     gl: {
-      vertex: definition.vertex ?? defaultFilterVert,
-      fragment: definition.fragment,
+      vertex: spec.vertex ?? defaultFilterVert,
+      fragment: spec.fragment,
     },
     resources,
   })
 }
 
 /** Deep-copy uniform declarations so a definition can back many instances. */
-function cloneUniforms(uniforms: Record<string, EffectUniformDeclaration>): Record<string, EffectUniformDeclaration> {
+export function cloneUniforms(uniforms: Record<string, EffectUniformDeclaration>): Record<string, EffectUniformDeclaration> {
   const out: Record<string, EffectUniformDeclaration> = {}
   for (const [name, declaration] of Object.entries(uniforms)) {
     const { value } = declaration

@@ -47,16 +47,33 @@ export {
 } from './palette-filter'
 export { createPixiFiltersFromVisualEffects, resolveEffectDefinition } from './pixi-effects'
 export { createSegmentFilterCache } from './segment-filter-cache'
-export type { SegmentFilterCache, SegmentFilterCacheDeps, SegmentFilterEntry } from './segment-filter-cache'
+export type { SegmentFilterCache, SegmentFilterCacheDeps, SegmentFilterEntry, SegmentTransitionInput } from './segment-filter-cache'
 export { createPreviewRunner } from './preview-runner'
 
 export type {
   CreatePreviewRunnerOptions,
   PreviewRunner,
 } from './preview-runner'
+export {
+  buildTransitionFilters,
+  getTransitionDefinition,
+  listTransitionDefinitions,
+  registerTransition,
+  TRANSITION_UNIFORM_GROUP,
+  transitionStructuralKey,
+  unregisterTransition,
+  updateTransitionFilters,
+} from './transition-registry'
+export type {
+  TransitionDefinition,
+  TransitionRenderContext,
+  TransitionRole,
+} from './transition-registry'
 export { collectTransitionByFromSegmentId } from './transition-resolver'
 
 export type { ResolvedTransitionEdge } from './transition-resolver'
+// Side-effect import: registers the built-in shader transitions.
+export { BUILT_IN_TRANSITIONS } from './transitions'
 export { createTimelineTransport } from './transport'
 export type {
   CreateTimelineTransportOptions,
@@ -78,4 +95,4 @@ export type {
 } from './types'
 export { createVisualRenderItems } from './visual-plan'
 
-export type { VisualRenderItem } from './visual-plan'
+export type { VisualRenderItem, VisualRenderTransition } from './visual-plan'
