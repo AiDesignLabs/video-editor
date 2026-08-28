@@ -25,6 +25,7 @@ import {
   cloneProtocol,
   collectResourceUrls,
   computeDuration,
+  isPlaceholderDisplay,
   placeholder,
 } from './helpers'
 import type { TextRun } from './text'
@@ -163,6 +164,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   let rafId: number | undefined
   let lastTickAt = 0
   let renderGeneration = 0
+  let lastPlaceholderDisplays: PixiDisplayObject[] = []
 
   interface RenderTask {
     app: Application
@@ -251,7 +253,11 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       return
     evictInactiveSegmentFilters(activeFilterSegmentIds)
     layer.removeChildren()
+    // Placeholders are not cached; destroy last frame's before rendering new ones.
+    for (const display of lastPlaceholderDisplays)
+      display.destroy()
     const cleaned = renders.filter(Boolean) as PixiDisplayObject[]
+    lastPlaceholderDisplays = cleaned.filter(display => isPlaceholderDisplay(display))
     if (cleaned.length)
       layer.addChild(...cleaned)
     if (generation !== renderGeneration)
@@ -536,7 +542,9 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     displayLoading.set(segment.id, promise)
 
     const display = await promise
-    if (display)
+    // Placeholders mark a failed load: show them this frame but do not cache,
+    // so the next render retries the real resource.
+    if (display && !isPlaceholderDisplay(display))
       displayCache.set(segment.id, display)
 
     displayLoading.delete(segment.id)

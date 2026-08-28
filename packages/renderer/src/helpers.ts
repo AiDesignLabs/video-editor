@@ -57,10 +57,21 @@ export function applyDisplayProps(
   display.alpha = opacity
 }
 
+const placeholderDisplays = new WeakSet<object>()
+
 export function placeholder(key: string, url?: string) {
   const g = new Graphics()
   g.rect(0, 0, 10, 10).fill({ color: stringToColor(url ?? key), alpha: 1 })
+  placeholderDisplays.add(g)
   return g
+}
+
+/**
+ * Placeholders stand in for a display whose real resource failed to load;
+ * they must never be cached so the next render retries the real load.
+ */
+export function isPlaceholderDisplay(display: object) {
+  return placeholderDisplays.has(display)
 }
 
 export function placeholderTexture(width: number, height: number, color?: string) {

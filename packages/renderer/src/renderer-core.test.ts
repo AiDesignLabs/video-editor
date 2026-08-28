@@ -14,7 +14,10 @@ import type {
 import { ref } from '@vue/reactivity'
 import { describe, expect, it, vi } from 'vitest'
 
-const { audioManagerInstances, mediaInputHandles, opfsState } = vi.hoisted(() => ({
+const { audioManagerInstances, mediaInputHandles, mediaMockState, opfsState } = vi.hoisted(() => ({
+  mediaMockState: {
+    openError: false,
+  },
   audioManagerInstances: [] as Array<{
     protocol: IVideoProtocol
     options?: {
@@ -54,6 +57,8 @@ vi.mock('@video-editor/protocol', () => ({
 
 vi.mock('@video-editor/media', () => ({
   openMediaInput: (source: unknown) => {
+    if (mediaMockState.openError)
+      throw new Error('mock media open failure')
     const handle = {
       source,
       meta: vi.fn(async () => ({
@@ -127,6 +132,20 @@ vi.mock('pixi.js', () => {
     }
   }
 
+  class Graphics {
+    public destroyed = false
+    rect() { return this }
+    fill() { return this }
+    clear() { return this }
+    pivot = { set: vi.fn() }
+    position = { set: vi.fn() }
+    rotation = 0
+    alpha = 1
+    destroy() {
+      this.destroyed = true
+    }
+  }
+
   class Sprite {
     public destroyed = false
     public texture: unknown
@@ -165,7 +184,7 @@ vi.mock('pixi.js', () => {
     constructor(public options?: unknown) {}
   }
 
-  return { BlurFilter, ColorMatrixFilter, Container, Filter, ImageSource, Sprite, Texture }
+  return { BlurFilter, ColorMatrixFilter, Container, Filter, Graphics, ImageSource, Sprite, Texture }
 })
 
 vi.mock('./audio-manager', () => {
@@ -936,6 +955,59 @@ describe('createRenderer segment operations across types', () => {
       expect(moved?.endTime).toBe(2400)
     }
     finally {
+      renderer.destroy()
+    }
+  })
+})
+
+describe('createRenderer failed display retry', () => {
+  it('does not cache the placeholder and retries the real load on the next render', async () => {
+    audioManagerInstances.length = 0
+    mediaInputHandles.length = 0
+    mediaMockState.openError = true
+    const { restore } = stubVideoRenderGlobals()
+    const protocol = ref<IVideoProtocol>({
+      id: 'renderer-video-retry',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [
+        {
+          trackId: 'frames-track',
+          trackType: 'frames',
+          isMain: true,
+          children: [
+            createVideoSegment('video-1', 0, 1000),
+          ],
+        },
+      ],
+    })
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as unknown as Parameters<typeof createRenderer>[0]['app'],
+      manualRender: true,
+      warmUpResources: false,
+      videoSourceMode: 'auto',
+    })
+
+    try {
+      // First render: media open fails, <video> element is unavailable in the
+      // stubbed DOM, so the frame falls back to a placeholder.
+      await renderer.renderAt(100)
+      expect(mediaInputHandles).toHaveLength(0)
+
+      // The failure heals: the next render must retry instead of reusing a
+      // cached placeholder.
+      mediaMockState.openError = false
+      await renderer.renderAt(150)
+      expect(mediaInputHandles.length).toBeGreaterThan(0)
+      expect(mediaInputHandles[0]?.drawFrame).toHaveBeenCalled()
+    }
+    finally {
+      mediaMockState.openError = false
+      restore()
       renderer.destroy()
     }
   })
