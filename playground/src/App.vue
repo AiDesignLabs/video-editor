@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageFramesSegment, IStickerSegment, ITextSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
+import type { AssetMeta } from '@video-editor/protocol'
+import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageFramesSegment, IStickerSegment, ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
 import type { Ref } from 'vue'
 import { createEditorCore } from '@video-editor/editor-core'
 import { generateThumbnails } from '@video-editor/protocol'
@@ -10,6 +11,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref,
 import type { IKeyframeProperty, ITransform } from '@video-editor/shared'
 import type { GizmoTransformPatch } from './gizmo/types'
 import CanvasGizmo from './gizmo/CanvasGizmo.vue'
+import AssetPanel from './AssetPanel.vue'
 
 const swatches = {
   primary: 'https://dummyimage.com/1280x720/6aa7ff/ffffff.png&text=Clip+A',
@@ -177,9 +179,9 @@ const error = ref<string | null>(null)
 const captionShifted = ref(false)
 const timelineZoom = ref<number | undefined>(undefined)
 
-type DrawerTab = 'compose' | 'thumbnails' | 'protocol' | 'demo'
+type DrawerTab = 'assets' | 'compose' | 'thumbnails' | 'protocol' | 'demo'
 const drawerOpen = ref(false)
-const drawerTab = ref<DrawerTab>('compose')
+const drawerTab = ref<DrawerTab>('assets')
 
 function openDrawer(tab: DrawerTab) {
   if (drawerOpen.value && drawerTab.value === tab) {
@@ -544,6 +546,58 @@ function appendClip() {
   commands.addSegment(seg)
 }
 
+/** Insert an imported asset at the playhead and select the created segment. */
+function handleAssetAdd(asset: AssetMeta) {
+  // addSegment always re-anchors startTime to the current time, so pin it first.
+  commands.setCurrentTime(currentTimeMs.value)
+
+  const label = asset.name
+
+  if (asset.kind === 'audio') {
+    const segment: Omit<IAudioSegment, 'id'> = {
+      segmentType: 'audio',
+      url: asset.url,
+      startTime: 0,
+      endTime: asset.durationMs ?? 5000,
+      volume: 1,
+      extra: { label },
+    }
+    const result = commands.addSegment(segment, 'audio-track')
+    commands.setSelectedSegment(result.id)
+    return
+  }
+
+  const framesTrackId = mainFramesTrack.value?.trackId
+
+  if (asset.kind === 'image') {
+    const segment: Omit<IImageFramesSegment, 'id'> = {
+      segmentType: 'frames',
+      type: 'image',
+      format: 'img',
+      url: asset.url,
+      startTime: 0,
+      endTime: 4000,
+      extra: { label },
+    }
+    const result = commands.addSegment(segment, framesTrackId)
+    commands.setSelectedSegment(result.id)
+    return
+  }
+
+  const segment: Omit<IVideoFramesSegment, 'id'> = {
+    segmentType: 'frames',
+    type: 'video',
+    url: asset.url,
+    startTime: 0,
+    endTime: asset.durationMs ?? 5000,
+    fromTime: 0,
+    volume: 1,
+    extra: { label },
+  }
+  const result = commands.addSegment(segment, framesTrackId)
+  commands.setSelectedSegment(result.id)
+}
+
 function clearThumbnails() {
   // Release object URLs before replacing them to avoid leaking memory in the demo.
   thumbnailsState.items.forEach(thumb => URL.revokeObjectURL(thumb.url))
@@ -746,6 +800,9 @@ function handleAddSegmentClick(data: {
           重做
         </button>
         <span class="topbar__divider" />
+        <button class="tool" :class="{ 'tool--active': drawerOpen && drawerTab === 'assets' }" @click="openDrawer('assets')">
+          素材
+        </button>
         <button class="tool" :class="{ 'tool--active': drawerOpen && drawerTab === 'thumbnails' }" @click="openDrawer('thumbnails')">
           缩略图
         </button>
@@ -840,7 +897,7 @@ function handleAddSegmentClick(data: {
     <section v-if="drawerOpen" class="drawer">
       <nav class="drawer__tabs">
         <button
-          v-for="tab in ([['compose', '合成输出'], ['thumbnails', '缩略图'], ['protocol', '协议 JSON'], ['demo', '演示操作']] as Array<[DrawerTab, string]>)"
+          v-for="tab in ([['assets', '素材库'], ['compose', '合成输出'], ['thumbnails', '缩略图'], ['protocol', '协议 JSON'], ['demo', '演示操作']] as Array<[DrawerTab, string]>)"
           :key="tab[0]"
           class="drawer__tab"
           :class="{ 'drawer__tab--active': drawerTab === tab[0] }"
@@ -854,7 +911,11 @@ function handleAddSegmentClick(data: {
       </nav>
 
       <div class="drawer__body">
-        <div v-if="drawerTab === 'compose'" class="drawer__pane">
+        <div v-if="drawerTab === 'assets'" class="drawer__pane">
+          <AssetPanel @add="handleAssetAdd" />
+        </div>
+
+        <div v-else-if="drawerTab === 'compose'" class="drawer__pane">
           <div v-if="composeState.loading" class="compose-progress">
             <div class="compose-progress__bar">
               <div class="compose-progress__fill" :style="{ width: `${composeState.progress * 100}%` }" />
