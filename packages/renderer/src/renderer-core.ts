@@ -5,6 +5,7 @@ import type { Application, ApplicationOptions, Filter as PixiFilter } from 'pixi
 import type { ShaderEffectContext, TimelinePlan, VisualRenderItem } from './timeline'
 import type { MaybeRef, PixiDisplayObject } from './types'
 import { createResourceManager, createValidator, getResourceKey } from '@video-editor/protocol'
+import { sourceSpanMs } from '@video-editor/shared'
 import {
   computed,
   effectScope,
@@ -28,6 +29,7 @@ import {
   computeDuration,
   isPlaceholderDisplay,
   placeholder,
+  reverseAudioBufferInPlace,
 } from './helpers'
 import type { TextRun } from './text'
 import { buildTextRuns, renderTextBitmap } from './text'
@@ -687,14 +689,32 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     return await loadImageTexture(url)
   }
 
-  async function loadVideoSprite(segment: SegmentUnion & { type: 'video', url: string }): Promise<Sprite | undefined> {
+  async function loadVideoSprite(segment: SegmentUnion & { type: 'video', url: string, reversed?: boolean }): Promise<Sprite | undefined> {
     const existing = videoEntries.get(segment.id)
     if (existing)
       return existing.sprite
 
-    void ensureMediaElementObjectUrl(segment.url)
     const urlKey = getResourceKey(segment.url)
     const allowDecoder = videoSourceMode !== 'element'
+    // Reversed playback needs random frame access, which the <video> element
+    // cannot provide. Such segments are decoder-only; without a decoder they
+    // stay unrendered rather than playing forwards by accident.
+    if (segment.reversed === true) {
+      if (!allowDecoder || (urlKey && decoderUnsupportedKeys.has(urlKey))) {
+        console.warn('[renderer] reversed video requires the decoder path', segment.url)
+        return undefined
+      }
+      const reversedEntry = await loadVideoSpriteViaDecoder(segment.url).catch((err) => {
+        console.error('[renderer] failed to load reversed video via decoder', segment.url, err)
+        return undefined
+      })
+      if (!reversedEntry)
+        return undefined
+      videoEntries.set(segment.id, reversedEntry)
+      return reversedEntry.sprite
+    }
+
+    void ensureMediaElementObjectUrl(segment.url)
     if (urlKey && decoderUnsupportedKeys.has(urlKey)) {
       const spriteFromElement = await loadVideoSpriteViaElement(segment.url).catch((err) => {
         console.error('[renderer] failed to load video via <video>', segment.url, err)
@@ -748,7 +768,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         const urlKey = getResourceKey(segment.url)
         if (!urlKey)
           return
-        const revived = await loadVideoEntry(segment.url, urlKey, { sprite: entry.sprite, oldTexture: entry.texture })
+        const revived = await loadVideoEntry(segment.url, urlKey, { sprite: entry.sprite, oldTexture: entry.texture }, segment.reversed === true)
         if (!revived)
           return
         videoEntries.set(segment.id, revived)
@@ -766,7 +786,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         }
         catch (err) {
           const urlKey = getResourceKey(segment.url)
-          if (urlKey) {
+          // Reversed segments cannot fall back to the <video> element.
+          if (urlKey && segment.reversed !== true) {
             decoderUnsupportedKeys.add(urlKey)
             entry.handle.dispose()
             const replacement = await loadVideoSpriteViaElement(segment.url, { sprite: entry.sprite, oldTexture: entry.texture }).catch((elementErr) => {
@@ -791,6 +812,9 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         return
       if (entry.kind !== 'element')
         return
+      // The element path always plays forwards; never drive it for a reversed segment.
+      if (segment.reversed === true)
+        return
       await updateVideoElementFrame(entry, {
         targetSec: relativeSec,
         playbackRate: segment.playRate ?? 1,
@@ -801,10 +825,15 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     }
   }
 
-  async function loadVideoEntry(url: string, urlKey: string, reuse: { sprite: Sprite, oldTexture?: Texture }) {
+  async function loadVideoEntry(
+    url: string,
+    urlKey: string,
+    reuse: { sprite: Sprite, oldTexture?: Texture },
+    decoderOnly = false,
+  ) {
     const allowDecoder = videoSourceMode !== 'element'
     if (decoderUnsupportedKeys.has(urlKey))
-      return await loadVideoSpriteViaElement(url, reuse).catch(() => undefined)
+      return decoderOnly ? undefined : await loadVideoSpriteViaElement(url, reuse).catch(() => undefined)
 
     if (allowDecoder) {
       const fromDecoder = await loadVideoSpriteViaDecoder(url, reuse).catch(() => undefined)
@@ -812,6 +841,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         return fromDecoder
     }
 
+    if (decoderOnly)
+      return undefined
     return await loadVideoSpriteViaElement(url, reuse).catch(() => undefined)
   }
 
@@ -864,11 +895,13 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       if (!(await handle.canDecodeAudio()))
         return undefined
       const fromTimeMs = Math.max(0, segment.fromTime ?? 0)
-      const playRate = Math.max(0.1, segment.playRate ?? 1)
-      const spanMs = Math.max(0, segment.endTime - segment.startTime) * playRate
+      const spanMs = sourceSpanMs(segment)
       if (spanMs <= 0)
         return undefined
-      return await handle.decodeAudioSlice(fromTimeMs, fromTimeMs + spanMs)
+      const buffer = await handle.decodeAudioSlice(fromTimeMs, fromTimeMs + spanMs)
+      if (buffer && segment.reversed === true)
+        reverseAudioBufferInPlace(buffer)
+      return buffer
     }
     catch {
       return undefined

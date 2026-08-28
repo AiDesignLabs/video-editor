@@ -3,6 +3,7 @@ import type {
   ITransform,
   IVideoProtocol,
   SegmentUnion,
+  SourceTimedSegment,
   TrackUnion,
 } from '@video-editor/shared'
 import type { ResolvedTransitionEdge } from './transition-resolver'
@@ -16,7 +17,7 @@ import type {
   VisualEffectParam,
   VisualPlanItem,
 } from './types'
-import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
+import { isAudioSegment, isVideoFramesSegment, mapSourceTimeMs as mapSharedSourceTimeMs, normalizePlayRate } from '@video-editor/shared'
 import { collectTransitionByFromSegmentId } from './transition-resolver'
 
 interface ActiveVoiceMeta extends ActiveVoiceRef {
@@ -246,14 +247,8 @@ function mapSourceTimeMs(segment: SegmentUnion, atMs: number): number {
   return Math.max(0, atMs - segment.startTime)
 }
 
-function mapRemappableSourceTimeMs(
-  segment: { startTime: number, fromTime?: number, playRate?: number },
-  atMs: number,
-): number {
-  const relativeMs = Math.max(0, atMs - segment.startTime)
-  const fromTime = normalizeTimeMs(segment.fromTime ?? 0)
-  const playRate = normalizePlayRate(segment.playRate)
-  return Math.max(0, fromTime + relativeMs * playRate)
+function mapRemappableSourceTimeMs(segment: SourceTimedSegment, atMs: number): number {
+  return mapSharedSourceTimeMs(segment, atMs)
 }
 
 function computeTransition(
@@ -374,12 +369,6 @@ function normalizeVolume(volume: number | undefined): number {
   if (typeof volume !== 'number' || !Number.isFinite(volume))
     return 1
   return clamp(volume, 0, 1)
-}
-
-function normalizePlayRate(playRate: number | undefined): number {
-  if (typeof playRate !== 'number' || !Number.isFinite(playRate))
-    return 1
-  return clamp(playRate, 0.1, 100)
 }
 
 function clamp(value: number, min: number, max: number): number {

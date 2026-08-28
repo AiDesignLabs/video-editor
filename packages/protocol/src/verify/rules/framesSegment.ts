@@ -29,6 +29,7 @@ export const framesSegmentRule: JSONSchemaType<IFramesSegmentUnion> = {
     url: { type: 'string', format: 'uri' },
     segmentType: { type: 'string', const: 'frames' },
     fromTime: { type: 'number', minimum: 0, nullable: true },
+    reversed: { type: 'boolean', nullable: true },
     transform: { $ref: '#/definitions/ITransform' },
     opacity: { type: 'number', minimum: 0, maximum: 1, nullable: true },
     fillMode: { type: 'string', enum: ['none', 'contain', 'cover', 'stretch'], nullable: true },

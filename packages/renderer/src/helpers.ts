@@ -144,3 +144,19 @@ function normalizeOpacity(opacity: number) {
     return 1
   return Math.min(Math.max(opacity, 0), 1)
 }
+
+/**
+ * Reverse every channel of an AudioBuffer in place.
+ * Used for reversed segments so the decoded source window plays backwards.
+ */
+export function reverseAudioBufferInPlace(buffer: AudioBuffer) {
+  for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+    const data = buffer.getChannelData(channel)
+    // Copy out, reverse, and write back: getChannelData may return a view that
+    // some implementations only sync on set.
+    const reversed = new Float32Array(data)
+    reversed.reverse()
+    buffer.copyToChannel(reversed, channel)
+  }
+  return buffer
+}

@@ -17,6 +17,7 @@ export const audioSegmentRule: JSONSchemaType<IAudioSegment> = {
     fromTime: { type: 'number', minimum: 0, nullable: true },
     volume: { type: 'number', minimum: 0, maximum: 1, nullable: true },
     playRate: { type: 'number', minimum: 0.1, maximum: 100, nullable: true },
+    reversed: { type: 'boolean', nullable: true },
     fadeInDuration: { type: 'number', minimum: 0, nullable: true },
     fadeOutDuration: { type: 'number', minimum: 0, nullable: true },
     keyframes: commonKeyframesProperty as JSONSchemaType<IAudioSegment>['properties']['keyframes'],

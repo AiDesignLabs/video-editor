@@ -1,5 +1,6 @@
 import type { IAudioSegment, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import type { AudioPlanEvent, TimelinePlan } from './timeline'
+import { mapSourceTimeMs, normalizePlayRate, sourceSpanMs } from '@video-editor/shared'
 import { createAudioContext } from './audio-context'
 
 interface Mp4State {
@@ -66,6 +67,8 @@ export class AudioManager {
   private plannedVideoAudioRates = new Map<string, number>()
   private plannedVoices = new Map<string, PlannedVoiceRuntime>()
   private audioElements = new Map<string, AudioElementState>()
+  /** Segment ids already warned about unsupported reversed preview playback. */
+  private reversedPreviewWarnedIds = new Set<string>()
   private videoBufferVoices = new Map<string, VideoBufferVoice>()
   private ctx: AudioContext
 
@@ -279,19 +282,26 @@ export class AudioManager {
         event.atTimelineMs,
         event.sourceTimeMs,
       )
-      const playRate = this.normalizePlayRate(segment.playRate)
       const fromTimeMs = Math.max(0, segment.fromTime ?? 0)
-      const segmentDurationMs = Math.max(0, segment.endTime - segment.startTime)
-      const maxSourceSec = (fromTimeMs + segmentDurationMs * playRate) / 1000
+      const maxSourceSec = (fromTimeMs + sourceSpanMs(segment)) / 1000
       const normalizedSourceSec = Math.max(0, sourceOffsetMs / 1000)
-      if (normalizedSourceSec >= maxSourceSec - 0.01) {
+      // The decoded buffer of a reversed segment is stored back-to-front, so
+      // source time `maxSourceSec` sits at buffer offset 0 and the window is
+      // exhausted once the source time walks back down to `fromTime`.
+      const reversed = segment.reversed === true
+      const exhausted = reversed
+        ? normalizedSourceSec <= (fromTimeMs / 1000) + 0.01
+        : normalizedSourceSec >= maxSourceSec - 0.01
+      if (exhausted) {
         this.stopVideoBufferVoice(key, { keepVoice: true })
         voice.lastSourceSec = normalizedSourceSec
         voice.phase = 'ended'
         return
       }
 
-      const offsetSec = Math.max(0, normalizedSourceSec - state.bufferStartMs / 1000)
+      const offsetSec = reversed
+        ? Math.max(0, maxSourceSec - normalizedSourceSec)
+        : Math.max(0, normalizedSourceSec - state.bufferStartMs / 1000)
       this.startVideoBufferVoice(state, offsetSec, event.action === 'seek')
       voice.lastSourceSec = normalizedSourceSec
       voice.phase = 'playing'
@@ -304,6 +314,7 @@ export class AudioManager {
       segment.fromTime ?? 0,
       segment.endTime - segment.startTime,
       segment.playRate ?? 1,
+      segment.reversed === true ? 'reversed' : 'forward',
     ].join('::')
     const existing = this.videoBufferVoices.get(key)
     if (existing && existing.cacheKey === cacheKey)
@@ -435,6 +446,8 @@ export class AudioManager {
     const segment = this.findAudioSegment(event.segmentId)
     if (!segment)
       return
+    if (this.skipReversedElementPlayback(segment, key, voice))
+      return
     const state = this.getOrCreateAudioElementState(key, segment)
 
     if (event.action === 'start' || event.action === 'seek') {
@@ -522,6 +535,8 @@ export class AudioManager {
 
     const segment = this.findVideoSegment(event.segmentId)
     if (!segment)
+      return
+    if (this.skipReversedElementPlayback(segment, key, voice))
       return
     const state = this.getOrCreateAudioElementState(key, segment)
 
@@ -759,10 +774,30 @@ export class AudioManager {
     }
   }
 
+  /**
+   * The <audio> element can only play forwards, so a reversed segment routed to
+   * the element path is rendered silent in preview. Export still reverses it.
+   */
+  private skipReversedElementPlayback(
+    segment: AudioElementSegment,
+    key: string,
+    voice: PlannedVoiceRuntime,
+  ): boolean {
+    if (segment.reversed !== true)
+      return false
+    if (!this.reversedPreviewWarnedIds.has(segment.id)) {
+      this.reversedPreviewWarnedIds.add(segment.id)
+      console.warn('[renderer] reversed audio preview not supported yet', segment.id)
+    }
+    const state = this.audioElements.get(key)
+    if (state)
+      this.pauseAudioElementState(state)
+    voice.phase = 'ended'
+    return true
+  }
+
   private normalizePlayRate(playRate?: number): number {
-    if (typeof playRate !== 'number' || !Number.isFinite(playRate))
-      return 1
-    return Math.max(0.1, Math.min(100, playRate))
+    return normalizePlayRate(playRate)
   }
 
   private normalizeVolume(volume?: number): number {
@@ -778,10 +813,7 @@ export class AudioManager {
   ): number {
     if (typeof sourceTimeMs === 'number' && Number.isFinite(sourceTimeMs))
       return Math.max(0, sourceTimeMs)
-    const relativeMs = Math.max(0, timelineMs - segment.startTime)
-    const fromTimeMs = Math.max(0, segment.fromTime ?? 0)
-    const playRate = this.normalizePlayRate(segment.playRate)
-    return Math.max(0, fromTimeMs + relativeMs * playRate)
+    return mapSourceTimeMs(segment, timelineMs)
   }
 
   private resolveAudioElementSourceWindow(
@@ -789,10 +821,8 @@ export class AudioManager {
     segment: AudioElementSegment,
     sourceOffsetMs: number,
   ): { targetSourceSec: number, isSourceExhausted: boolean } {
-    const playRate = this.normalizePlayRate(segment.playRate)
     const fromTimeMs = Math.max(0, segment.fromTime ?? 0)
-    const segmentDurationMs = Math.max(0, segment.endTime - segment.startTime)
-    const segmentSourceDurationMs = segmentDurationMs * playRate
+    const segmentSourceDurationMs = sourceSpanMs(segment)
     const segmentMaxSourceSec = Math.max(0, fromTimeMs + segmentSourceDurationMs) / 1000
     const mediaDurationSec = Number.isFinite(state.el.duration) ? Math.max(0, state.el.duration) : undefined
     const effectiveMaxSourceSec = mediaDurationSec === undefined

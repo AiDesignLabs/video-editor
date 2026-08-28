@@ -20,6 +20,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "vite build --config vite.config.ts"
+    "build": "vite build --config vite.config.ts",
+    "test": "vitest run --config ./vitest.config.ts"
   }
 }

@@ -53,6 +53,7 @@ const isVideo = computed(() => segment.value?.segmentType === 'frames'
 const opacityValue = computed(() => (segment.value as { opacity?: number } | null)?.opacity ?? 1)
 const volumeValue = computed(() => (segment.value as { volume?: number } | null)?.volume ?? 1)
 const playRateValue = computed(() => (segment.value as { playRate?: number } | null)?.playRate ?? 1)
+const reversedValue = computed(() => (segment.value as { reversed?: boolean } | null)?.reversed === true)
 const fillModeValue = computed(() => (segment.value as { fillMode?: IFillMode } | null)?.fillMode ?? 'contain')
 const transformValue = computed(() => (segment.value as { transform?: DeepReadonly<ITransform> } | null)?.transform)
 const paletteValue = computed(() => (segment.value as { palette?: DeepReadonly<IPalette> } | null)?.palette)
@@ -92,6 +93,14 @@ function setPlayRate(value: number | undefined) {
   update((draft) => {
     if (draft.segmentType === 'audio' || (draft.segmentType === 'frames' && draft.type === 'video'))
       draft.playRate = value === undefined ? undefined : Math.max(0.1, Math.min(100, value))
+  })
+}
+
+function setReversed(event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  update((draft) => {
+    if (draft.segmentType === 'audio' || (draft.segmentType === 'frames' && draft.type === 'video'))
+      draft.reversed = checked ? true : undefined
   })
 }
 
@@ -287,6 +296,15 @@ function removeTextLine(index: number) {
             :min="0.1" :max="4" :step="0.1" slider
             @update:model-value="setPlayRate"
           />
+          <label class="property-inspector__row">
+            <span class="property-inspector__label">倒放</span>
+            <input
+              class="property-inspector__checkbox"
+              type="checkbox"
+              :checked="reversedValue"
+              @change="setReversed"
+            >
+          </label>
         </template>
 
         <label v-if="segment.segmentType === 'frames' || segment.segmentType === 'sticker'" class="property-inspector__row">
@@ -443,6 +461,11 @@ function removeTextLine(index: number) {
   --at-apply: px-1.5 py-1 rounded-4px text-[12px];
   border: 1px solid rgba(15, 23, 42, 0.15);
   background: #fff;
+}
+
+:where(.property-inspector .property-inspector__checkbox) {
+  --at-apply: cursor-pointer;
+  accent-color: #2563eb;
 }
 
 :where(.property-inspector .property-inspector__hint) {

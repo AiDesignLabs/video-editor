@@ -59,6 +59,47 @@ function createProtocol(): IVideoProtocol {
 }
 
 describe('createComposeAudioInputs', () => {
+  it('slices a reversed voice from the source time of its last frame', () => {
+    const protocol: IVideoProtocol = {
+      id: 'compose-audio-plan-reversed',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [
+        {
+          trackId: 'audio-track',
+          trackType: 'audio',
+          children: [
+            {
+              id: 'audio-reversed',
+              segmentType: 'audio',
+              url: 'https://example.com/audio-reversed.mp3',
+              startTime: 0,
+              endTime: 1000,
+              fromTime: 500,
+              playRate: 2,
+              reversed: true,
+            },
+          ],
+        },
+      ],
+    }
+
+    const inputs = createComposeAudioInputs(protocol)
+    expect(inputs).toHaveLength(1)
+    // Window is [500, 2500]; the decode slice starts at its head and the
+    // buffer is reversed at decode time.
+    expect(inputs[0]).toMatchObject({
+      segmentId: 'audio-reversed',
+      startTime: 0,
+      endTime: 1000,
+      fromTime: 500,
+      playRate: 2,
+      reversed: true,
+    })
+  })
+
   it('builds compose audio inputs from evaluator voice events', () => {
     const protocol = createProtocol()
     const inputs = createComposeAudioInputs(protocol)

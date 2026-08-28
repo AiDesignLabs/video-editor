@@ -99,6 +99,11 @@ export interface IVideoFramesSegment extends IFramesSegment {
   fromTime?: number // from time in video where to start, default 0
   volume?: number // volume of the video, value between [0, 1], default 1
   playRate?: number // play rate of the video, value between [0.1, 100], default 1
+  /**
+   * Play the same source window [fromTime, fromTime + (endTime - startTime) * playRate]
+   * backwards. `fromTime` still anchors the window start. Default false.
+   */
+  reversed?: boolean
 }
 
 export interface IImageFramesSegment extends IFramesSegment {
@@ -138,6 +143,11 @@ interface AudioSegment<T extends ITrackType> extends ISegment<T> {
   fadeInDuration?: number // in ms, range [0, (endTime - startTime) / 2]
   fadeOutDuration?: number // in ms, range [0, (endTime - startTime) / 2]
   playRate?: number // play rate of the audio, value between [0.1, 100], default 1
+  /**
+   * Play the same source window [fromTime, fromTime + (endTime - startTime) * playRate]
+   * backwards. `fromTime` still anchors the window start. Default false.
+   */
+  reversed?: boolean
 }
 
 interface EffectSegment<T extends ITrackType> extends ISegment<T> {

@@ -161,6 +161,32 @@ describe('timeline evaluator', () => {
     expect(startEvent?.rate).toBe(2)
   })
 
+  it('maps source time backwards for reversed segments', () => {
+    const protocol = createProtocol({
+      audio: [
+        createAudioSegment({
+          startTime: 0,
+          endTime: 1000,
+          fromTime: 500,
+          playRate: 2,
+          reversed: true,
+        }),
+      ],
+    })
+
+    const output = evaluateTimelinePlan(protocol, {
+      atMs: 250,
+      windowStartMs: 200,
+      windowEndMs: 300,
+      fps: 30,
+    }, createEmptyEvaluatorState())
+
+    const startEvent = output.plan.audioEvents.find(event => event.action === 'start')
+    // Window is [500, 500 + 1000 * 2] = [500, 2500]; at 25% it reads 2500 - 500 = 2000.
+    expect(startEvent?.sourceTimeMs).toBeCloseTo(2000, 6)
+    expect(startEvent?.rate).toBe(2)
+  })
+
   it('emits seek event for active voices on discontinuity', () => {
     const protocol = createProtocol({
       audio: [createAudioSegment()],

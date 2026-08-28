@@ -782,7 +782,12 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       // When resizing the start edge, keep the media content aligned by updating fromTime.
       // - Trimming in (startTime increases) => fromTime increases
       // - Extending left (startTime decreases) => fromTime decreases (clamped at 0)
-      if (segmentWithFromTime && nextStartTime !== originalStartTime) {
+      // Reversed segments consume their source window from its END, so trimming
+      // the start edge shortens the window tail instead of moving `fromTime`.
+      // `fromTime` stays put and the shorter duration shrinks the span implicitly.
+      const remapsFromTimeOnStartEdge = segmentWithFromTime !== null && segmentWithFromTime.reversed !== true
+
+      if (segmentWithFromTime && remapsFromTimeOnStartEdge && nextStartTime !== originalStartTime) {
         const originalFromTime = segmentWithFromTime.fromTime ?? 0
         // Timeline deltas map to source time scaled by playRate (see evaluator sourceMs formula).
         const playRate = normalizeSegmentPlayRate(segmentWithFromTime)
@@ -859,7 +864,19 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       // Timeline deltas map to source time scaled by playRate (evaluator sourceMs formula).
       if (isSegmentWithFromTime(left) && isSegmentWithFromTime(right)) {
         const playRate = normalizeSegmentPlayRate(left)
-        right.fromTime = Math.max(0, (left.fromTime ?? 0) + (timelineMs - left.startTime) * playRate)
+        const originalFromTime = left.fromTime ?? 0
+        const cutSourceMs = (timelineMs - left.startTime) * playRate
+        if (left.reversed === true) {
+          // A reversed segment reads [fromTime, fromTime + span] backwards, so the
+          // LEFT half plays the tail of the window and the RIGHT half its head.
+          // right.endTime still holds the original endTime here.
+          const originalSpanMs = (right.endTime - left.startTime) * playRate
+          left.fromTime = Math.max(0, originalFromTime + originalSpanMs - cutSourceMs)
+          right.fromTime = Math.max(0, originalFromTime)
+        }
+        else {
+          right.fromTime = Math.max(0, originalFromTime + cutSourceMs)
+        }
       }
 
       // A split must be audibly seamless: fade-in stays on the left half,

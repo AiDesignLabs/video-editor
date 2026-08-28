@@ -1,5 +1,6 @@
 import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageFramesSegment, IStickerSegment, ITextSegment, ITransition, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import type { TrackMutableFields } from './index'
+import { mapSourceTimeMs } from '@video-editor/shared'
 import { createVideoProtocolManager } from './index'
 
 const protocol: IVideoProtocol = {
@@ -2207,6 +2208,37 @@ describe('resizeSegment', () => {
     expect(seg.startTime).toBe(500)
   })
 
+  it('keeps fromTime anchored when trimming the start of a reversed segment', () => {
+    const { addSegment, resizeSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    curTime.value = 1000
+    const audioReversed: IAudioSegment = {
+      id: 'audio-reversed-resize',
+      segmentType: 'audio',
+      url: 'https://example.com/a.mp3',
+      startTime: 1000,
+      endTime: 5000,
+      fromTime: 1000,
+      playRate: 2,
+      reversed: true,
+    }
+    addSegment(audioReversed)
+    const track = exportProtocol().tracks[0]
+
+    // A reversed segment consumes its source window from the END, so trimming
+    // the start edge shortens the window tail: fromTime must not move.
+    resizeSegment({ segmentId: 'audio-reversed-resize', trackId: track.trackId, startTime: 1500, endTime: 5000 })
+    let seg = exportProtocol().tracks[0].children[0] as IAudioSegment
+    expect(seg.startTime).toBe(1500)
+    expect(seg.fromTime).toBe(1000)
+
+    // Extending left is not clamped by fromTime either.
+    resizeSegment({ segmentId: 'audio-reversed-resize', trackId: track.trackId, startTime: 0, endTime: 5000 })
+    seg = exportProtocol().tracks[0].children[0] as IAudioSegment
+    expect(seg.startTime).toBe(0)
+    expect(seg.fromTime).toBe(1000)
+  })
+
   it('should resize text segment', () => {
     const { addSegment, resizeSegment, exportProtocol } = createVideoProtocolManager(protocol)
 
@@ -3163,6 +3195,64 @@ describe('splitSegment', () => {
     // 1000ms of timeline at playRate 2 consumes 2000ms of source.
     expect(right.fromTime).toBe(2500)
     expect(right.playRate).toBe(2)
+  })
+
+  it('splits a reversed video segment by re-slicing the source window from its end', () => {
+    const { addSegment, splitSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    curTime.value = 0
+    const video: IVideoFramesSegment = {
+      id: 'video-reversed-split',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'http://example.com/video.mp4',
+      startTime: 0,
+      endTime: 4000,
+      fromTime: 500,
+      playRate: 2,
+      reversed: true,
+    }
+    addSegment(video)
+
+    const result = splitSegment('video-reversed-split', 1000)
+    expect(result.success).toBe(true)
+
+    const track = exportProtocol().tracks[0]
+    const [left, right] = track.children as IVideoFramesSegment[]
+    // Window is [500, 500 + 4000 * 2] = [500, 8500], played backwards.
+    // The cut consumes 1000 * 2 = 2000ms of source from the window END.
+    expect(left.fromTime).toBe(6500)
+    expect(left.reversed).toBe(true)
+    expect(right.fromTime).toBe(500)
+    expect(right.reversed).toBe(true)
+
+    // The cut must be seamless: both halves resolve to the same source time.
+    expect(mapSourceTimeMs(left, 1000)).toBe(mapSourceTimeMs(right, 1000))
+    // Endpoints still cover the original window.
+    expect(mapSourceTimeMs(left, 0)).toBe(8500)
+    expect(mapSourceTimeMs(right, 4000)).toBe(500)
+  })
+
+  it('splits a reversed audio segment the same way', () => {
+    const { addSegment, splitSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    curTime.value = 0
+    const audio: IAudioSegment = {
+      id: 'audio-reversed-split',
+      segmentType: 'audio',
+      url: 'https://example.com/a.mp3',
+      startTime: 0,
+      endTime: 2000,
+      fromTime: 0,
+      reversed: true,
+    }
+    addSegment(audio)
+
+    expect(splitSegment('audio-reversed-split', 500).success).toBe(true)
+    const [left, right] = exportProtocol().tracks[0].children as IAudioSegment[]
+    expect(left.fromTime).toBe(1500)
+    expect(right.fromTime).toBe(0)
+    expect(mapSourceTimeMs(left, 500)).toBe(mapSourceTimeMs(right, 500))
   })
 
   it('splits a text segment with a pure timeline cut', () => {

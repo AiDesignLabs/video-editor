@@ -1,7 +1,7 @@
 import type { ITransform, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { TransitionRole } from './transition-registry'
 import type { VisualEffectParam, VisualPlanItem } from './types'
-import { isVideoFramesSegment } from '@video-editor/shared'
+import { isVideoFramesSegment, mapSourceTimeMs } from '@video-editor/shared'
 import { getTransitionDefinition } from './transition-registry'
 
 /** Transition state attached to a render item, consumed by the filter cache. */
@@ -119,9 +119,9 @@ function indexSegments(protocol: IVideoProtocol): Map<string, SegmentUnion> {
 
 function mapTransitionTargetSourceTimeMs(segment: SegmentUnion, elapsedTransitionMs: number): number {
   if (isVideoFramesSegment(segment)) {
-    const fromTime = normalizeTimeMs(segment.fromTime)
-    const playRate = normalizePlayRate(segment.playRate)
-    return Math.max(0, fromTime + elapsedTransitionMs * playRate)
+    // The transition target is played from its own start, so the elapsed
+    // transition time is exactly the segment-relative timeline offset.
+    return mapSourceTimeMs(segment, segment.startTime + normalizeTimeMs(elapsedTransitionMs))
   }
   return Math.max(0, elapsedTransitionMs)
 }
@@ -136,12 +136,6 @@ function normalizeTimeMs(value: number | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value))
     return 0
   return Math.max(0, value)
-}
-
-function normalizePlayRate(playRate: number | undefined): number {
-  if (typeof playRate !== 'number' || !Number.isFinite(playRate))
-    return 1
-  return Math.min(Math.max(playRate, 0.1), 100)
 }
 
 function clamp01(value: number): number {

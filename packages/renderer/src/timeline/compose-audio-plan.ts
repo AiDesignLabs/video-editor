@@ -1,5 +1,6 @@
 import type { IAudioSegment, IKeyframe, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import type { AudioPlanEvent } from './types'
+import { mapSourceTimeMs, normalizePlayRate } from '@video-editor/shared'
 import { createComposeRunner } from './compose-runner'
 
 export interface ComposeAudioInput {
@@ -17,6 +18,8 @@ export interface ComposeAudioInput {
   volumeKeyframes?: IKeyframe[]
   /** Original segment start, needed to rebase the curve onto the voice window. */
   segmentStartTime?: number
+  /** Decode the source slice and play it backwards. */
+  reversed?: boolean
 }
 
 interface SegmentLookup {
@@ -123,8 +126,13 @@ function finalizeVoice(
     url: segment.url,
     startTime,
     endTime,
-    fromTime: runtime.fromTime,
+    // A reversed voice walks its source window backwards, so the slice to
+    // decode starts at the source time of the voice's LAST timeline frame.
+    fromTime: segment.reversed === true
+      ? mapSourceTimeMs(segment, endTime)
+      : runtime.fromTime,
     playRate: runtime.playRate,
+    reversed: segment.reversed === true ? true : undefined,
     volume: readSegmentVolume(segment),
     volumeKeyframes: volumeTrack ? [...volumeTrack.frames] : undefined,
     segmentStartTime: segment.startTime,
@@ -214,12 +222,6 @@ function normalizeFadeDuration(durationMs: number | undefined, maxDurationMs: nu
   if (typeof durationMs !== 'number' || !Number.isFinite(durationMs))
     return 0
   return Math.max(0, Math.min(durationMs, maxDurationMs))
-}
-
-function normalizePlayRate(playRate: number | undefined): number {
-  if (typeof playRate !== 'number' || !Number.isFinite(playRate))
-    return 1
-  return Math.max(0.1, Math.min(100, playRate))
 }
 
 function normalizeVolume(volume: number | undefined): number {

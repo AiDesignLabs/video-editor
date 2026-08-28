@@ -4,7 +4,9 @@ import type { ApplicationOptions } from 'pixi.js'
 import type { RendererOptions } from './renderer-core'
 import type { ComposeAudioInput } from './timeline'
 import { createEncoder, openMediaInput } from '@video-editor/media'
+import { normalizePlayRate, sourceSpanMs } from '@video-editor/shared'
 import { Application } from 'pixi.js'
+import { reverseAudioBufferInPlace } from './helpers'
 import { createRenderer } from './renderer-core'
 import { createComposeAudioInputs, sampleFrames } from './timeline'
 
@@ -68,12 +70,6 @@ function normalizeVolume(volume?: number): number {
   return Math.max(0, Math.min(1, volume))
 }
 
-function normalizePlayRate(playRate?: number): number {
-  if (typeof playRate !== 'number' || !Number.isFinite(playRate))
-    return 1
-  return Math.max(0.1, Math.min(100, playRate))
-}
-
 async function fetchBlob(url: string, timeoutMs: number = RESOURCE_TIMEOUT_MS): Promise<Blob> {
   const controller = new AbortController()
   const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs)
@@ -97,16 +93,18 @@ async function decodeInputAudioSlice(input: ComposeAudioInput): Promise<AudioBuf
   try {
     if (!(await handle.canDecodeAudio()))
       return undefined
-    const playRate = normalizePlayRate(input.playRate)
     const fromTimeMs = Math.max(0, input.fromTime ?? 0)
-    const spanMs = Math.max(0, input.endTime - input.startTime) * playRate
+    const spanMs = sourceSpanMs(input)
     if (spanMs <= 0)
       return undefined
-    return await withTimeout(
+    const buffer = await withTimeout(
       handle.decodeAudioSlice(fromTimeMs, fromTimeMs + spanMs),
       RESOURCE_TIMEOUT_MS,
       `decode audio: ${input.url}`,
     )
+    if (buffer && input.reversed === true)
+      reverseAudioBufferInPlace(buffer)
+    return buffer
   }
   finally {
     handle.dispose()
