@@ -1,3 +1,13 @@
+export {
+  createAssetLibrary,
+  DEFAULT_ASSET_MANIFEST_DIR,
+} from './assets'
+export type {
+  AssetKind,
+  AssetLibrary,
+  AssetLibraryOptions,
+  AssetMeta,
+} from './assets'
 export { createVideoProtocolManager } from './manage'
 export { parse } from './parse'
 export {
