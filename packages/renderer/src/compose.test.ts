@@ -25,9 +25,11 @@ vi.mock('@video-editor/media', () => ({
     decodeAudioSlice: vi.fn(async () => undefined),
     dispose: vi.fn(),
   }),
-  createMp4Encoder: (options: Record<string, unknown>) => {
+  createEncoder: (options: Record<string, unknown>) => {
     encoderCalls.options = options
     return {
+      mimeType: options.format === 'webm' ? 'video/webm' : 'video/mp4',
+      fileExtension: options.format === 'webm' ? '.webm' : '.mp4',
       stream: new ReadableStream<Uint8Array>({
         start(controller) {
           controller.close()
@@ -106,6 +108,36 @@ describe('composeProtocol', () => {
     expect([...progress].sort((a, b) => a - b)).toEqual(progress)
     expect(result.durationMs).toBe(100)
     expect(rendererCalls.destroyed).toBe(true)
+  })
+
+  it('passes container format and bitrates through to the encoder', async () => {
+    const result = await composeProtocol(createProtocol(), {
+      audio: false,
+      format: 'webm',
+      videoCodec: 'vp9',
+      bitrate: 4_000_000,
+      audioBitrate: 128_000,
+    })
+
+    await waitForEncoding()
+
+    expect(encoderCalls.options).toMatchObject({
+      format: 'webm',
+      videoCodec: 'vp9',
+      videoBitrate: 4_000_000,
+      audioBitrate: 128_000,
+    })
+    expect(result.mimeType).toBe('video/webm')
+    expect(result.fileExtension).toBe('.webm')
+  })
+
+  it('reports the mp4 container by default', async () => {
+    const result = await composeProtocol(createProtocol(), { audio: false })
+    await waitForEncoding()
+
+    expect(encoderCalls.options).toMatchObject({ format: undefined })
+    expect(result.mimeType).toBe('video/mp4')
+    expect(result.fileExtension).toBe('.mp4')
   })
 
   it('destroy cancels the encoder', async () => {

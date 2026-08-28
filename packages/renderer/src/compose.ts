@@ -1,9 +1,9 @@
-import type { Mp4VideoCodec } from '@video-editor/media'
+import type { EncoderFormat, Mp4VideoCodec } from '@video-editor/media'
 import type { IVideoProtocol } from '@video-editor/shared'
 import type { ApplicationOptions } from 'pixi.js'
 import type { RendererOptions } from './renderer-core'
 import type { ComposeAudioInput } from './timeline'
-import { createMp4Encoder, openMediaInput } from '@video-editor/media'
+import { createEncoder, openMediaInput } from '@video-editor/media'
 import { Application } from 'pixi.js'
 import { createRenderer } from './renderer-core'
 import { createComposeAudioInputs, sampleFrames } from './timeline'
@@ -19,9 +19,13 @@ export interface ComposeProtocolOptions {
   fps?: number
   onProgress?: (progress: number) => void
   clipOptions?: ComposeClipOptions
+  /** Container format; defaults to `'mp4'`. */
+  format?: EncoderFormat
   videoCodec?: Mp4VideoCodec
   /** Target video bitrate in bits per second. */
   bitrate?: number
+  /** Target audio bitrate in bits per second. */
+  audioBitrate?: number
   /** Pass `false` to skip the audio track entirely. */
   audio?: false
 }
@@ -31,6 +35,10 @@ export interface ComposeProtocolResult {
   width: number
   height: number
   durationMs: number
+  /** Container mime type of `stream`, e.g. `video/mp4`. */
+  mimeType: string
+  /** Container file extension including the dot, e.g. `.mp4`. */
+  fileExtension: string
   destroy: () => void
 }
 
@@ -245,11 +253,13 @@ export async function composeProtocol(
           return undefined
         })
 
-    const encoder = createMp4Encoder({
+    const encoder = createEncoder({
+      format: opts.format,
       canvas: app.canvas,
       videoCodec: opts.videoCodec,
       videoBitrate: opts.bitrate,
       withAudio: !!audioBuffer,
+      audioBitrate: opts.audioBitrate,
     })
 
     let cancelled = false
@@ -295,6 +305,8 @@ export async function composeProtocol(
       width,
       height,
       durationMs,
+      mimeType: encoder.mimeType,
+      fileExtension: encoder.fileExtension,
       destroy,
     }
   }

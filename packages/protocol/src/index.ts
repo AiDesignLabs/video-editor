@@ -12,6 +12,16 @@ export { createVideoProtocolManager } from './manage'
 export type { TrackMutableFields } from './manage'
 export { parse } from './parse'
 export {
+  createProjectStore,
+  DEFAULT_PROJECT_DIR,
+} from './project'
+export type {
+  ProjectMeta,
+  ProjectStore,
+  ProjectStoreOptions,
+  StoredProject,
+} from './project'
+export {
   createResourceManager,
   DEFAULT_RESOURCE_DIR,
   generateThumbnails,

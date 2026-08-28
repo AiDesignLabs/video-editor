@@ -1,9 +1,12 @@
 export type {
+  EncoderFormat,
+  EncoderHandle,
+  EncoderOptions,
   Mp4EncoderHandle,
   Mp4EncoderOptions,
   Mp4VideoCodec,
 } from './encoder'
-export { createMp4Encoder } from './encoder'
+export { createEncoder, createMp4Encoder } from './encoder'
 export type {
   MediaInputHandle,
   MediaMeta,
