@@ -1,4 +1,4 @@
-import type { IAnimation, IBackground, IDropShadow, IFramesSegmentUnion, IPalette, IStroke, ITextBasic, ITransform, ITransition } from '@video-editor/shared'
+import type { IAnimation, IBackground, IChromaKey, IDropShadow, IFramesSegmentUnion, IMask, IPalette, IStroke, ITextBasic, ITransform, ITransition } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
 import { INVALID_RGBA } from './common'
 
@@ -105,6 +105,43 @@ export const commonPaletteDefs: GDefinition<IPalette> = {
     grain: { type: 'number', minimum: 0, maximum: 1 },
   },
   required: ['temperature', 'hue', 'saturation', 'brightness', 'contrast', 'shine', 'highlight', 'shadow', 'sharpness', 'vignette', 'fade', 'grain'],
+}
+
+export const INVALID_MASK_SHAPE = 'shape must be a string and one of ["rect", "ellipse"]'
+export const INVALID_CHROMA_KEY_COLOR = 'color must be a hex string like "#00ff00"'
+
+export const commonMaskDefs: GDefinition<IMask> = {
+  type: 'object',
+  properties: {
+    shape: { type: 'string', enum: ['rect', 'ellipse'] },
+    center: { type: 'array', items: { type: 'number', minimum: -1, maximum: 1 }, minItems: 2, maxItems: 2 },
+    size: { type: 'array', items: { type: 'number', minimum: 0, maximum: 1 }, minItems: 2, maxItems: 2 },
+    feather: { type: 'number', minimum: 0, maximum: 1 },
+    rotation: { type: 'number', minimum: 0, maximum: 360 },
+    inverse: { type: 'boolean' },
+  },
+  required: ['shape', 'center', 'size'],
+  errorMessage: {
+    properties: {
+      shape: INVALID_MASK_SHAPE,
+    },
+  },
+}
+
+export const commonChromaKeyDefs: GDefinition<IChromaKey> = {
+  type: 'object',
+  properties: {
+    color: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' },
+    similarity: { type: 'number', minimum: 0, maximum: 1 },
+    smoothness: { type: 'number', minimum: 0, maximum: 1 },
+    spillSuppress: { type: 'number', minimum: 0, maximum: 1 },
+  },
+  required: ['color', 'similarity'],
+  errorMessage: {
+    properties: {
+      color: INVALID_CHROMA_KEY_COLOR,
+    },
+  },
 }
 
 export const commonDropShadowDefs: GDefinition<IDropShadow> = {

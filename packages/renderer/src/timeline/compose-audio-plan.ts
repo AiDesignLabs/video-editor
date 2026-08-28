@@ -147,6 +147,9 @@ function createSegmentLookup(protocol: IVideoProtocol): SegmentLookup {
   const videoById = new Map<string, IVideoFramesSegment>()
 
   for (const track of protocol.tracks) {
+    // Muted tracks are silent in export, mirroring the preview evaluator.
+    if (track.muted === true)
+      continue
     for (const segment of track.children) {
       if (segment.segmentType === 'audio')
         audioById.set(segment.id, segment)

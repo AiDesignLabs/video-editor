@@ -1,9 +1,16 @@
-import type { IPalette } from '@video-editor/shared'
+import type { IChromaKey, IMask, IPalette } from '@video-editor/shared'
 import type { ColorMatrixFilter, Filter } from 'pixi.js'
 import type { EffectDefinition, ShaderEffectContext } from './effect-registry'
 import type { TransitionDefinition, TransitionRole } from './transition-registry'
 import type { VisualEffectParam } from './types'
 import { buildEffectFilters, structuralKeyForEffect } from './effect-registry'
+import {
+  createChromaKeyFilter,
+  createMaskFilter,
+  maskChromaStructuralKey,
+  updateChromaKeyFilter,
+  updateMaskFilter,
+} from './mask-chroma'
 import {
   createPalettePostFilter,
   paletteNeedsPostShader,
@@ -28,6 +35,15 @@ export interface SegmentTransitionInput {
   transitionName?: string
 }
 
+/**
+ * Per-segment appearance inputs that are not effects: the shape mask and the
+ * chroma key. Both are optional and read straight off the segment.
+ */
+export interface SegmentAppearanceInput {
+  mask?: IMask
+  chromaKey?: IChromaKey
+}
+
 interface BuiltEffect {
   definition: EffectDefinition | undefined
   param: VisualEffectParam
@@ -38,6 +54,8 @@ export interface SegmentFilterEntry {
   /** Identity of the filter *chain*; animated params are deliberately excluded. */
   structuralKey: string
   built: BuiltEffect[]
+  chromaKeyFilter?: Filter
+  maskFilter?: Filter
   paletteMatrixFilter?: ColorMatrixFilter
   palettePostFilter?: Filter
   transitionDefinition?: TransitionDefinition
@@ -52,6 +70,8 @@ export interface SegmentFilterCacheDeps {
   buildFilters?: (definition: EffectDefinition, param: VisualEffectParam) => Filter[]
   createPaletteMatrixFilter?: (palette: IPalette) => ColorMatrixFilter | null
   createPalettePost?: (palette: IPalette) => Filter | null
+  createMask?: () => Filter
+  createChromaKey?: () => Filter
   resolveTransition?: (transition: SegmentTransitionInput) => TransitionDefinition | undefined
   buildTransition?: (definition: TransitionDefinition, role: TransitionRole) => Filter[]
 }
@@ -67,6 +87,7 @@ export interface SegmentFilterCache {
     palette: IPalette | undefined,
     ctx: ShaderEffectContext,
     transition?: SegmentTransitionInput,
+    appearance?: SegmentAppearanceInput,
   ) => Filter[]
   /** Drop (and dispose) entries whose segment is no longer on screen. */
   evictInactive: (activeIds: Set<string>) => void
@@ -83,6 +104,8 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
   const createPaletteMatrixFilter = deps.createPaletteMatrixFilter ?? paletteToColorMatrix
   const createPalettePost = deps.createPalettePost
     ?? ((palette: IPalette) => (paletteNeedsPostShader(palette) ? createPalettePostFilter(palette) : null))
+  const createMask = deps.createMask ?? createMaskFilter
+  const createChromaKey = deps.createChromaKey ?? createChromaKeyFilter
   const resolveTransition = deps.resolveTransition ?? defaultResolveTransition
   const buildTransition = deps.buildTransition ?? buildTransitionFilters
 
@@ -95,6 +118,7 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
     palette: IPalette | undefined,
     transitionDefinition: TransitionDefinition | undefined,
     transitionRole: TransitionRole | undefined,
+    appearance: SegmentAppearanceInput | undefined,
   ): string {
     const parts: string[] = []
     for (const effect of effects ?? []) {
@@ -106,7 +130,8 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
     const transitionKey = transitionDefinition && transitionRole
       ? transitionStructuralKey(transitionDefinition, transitionRole)
       : ''
-    return `${parts.join(KEY_SEPARATOR)}|${paletteStructuralKey(palette)}|${transitionKey}`
+    const appearanceKey = appearance ? maskChromaStructuralKey(appearance) : ''
+    return `${parts.join(KEY_SEPARATOR)}|${paletteStructuralKey(palette)}|${transitionKey}|${appearanceKey}`
   }
 
   function build(
@@ -115,6 +140,7 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
     palette: IPalette | undefined,
     transitionDefinition: TransitionDefinition | undefined,
     transitionRole: TransitionRole | undefined,
+    appearance: SegmentAppearanceInput | undefined,
   ): SegmentFilterEntry {
     // One built record per effect (even when it produces no filters) so the
     // per-frame update pass can pair records with plan effects by index.
@@ -127,6 +153,18 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
     })
 
     const entry: SegmentFilterEntry = { structuralKey, built, filters: [] }
+
+    if (appearance?.chromaKey) {
+      const filter = createChromaKey()
+      owned.add(filter)
+      entry.chromaKeyFilter = filter
+    }
+
+    if (appearance?.mask) {
+      const filter = createMask()
+      owned.add(filter)
+      entry.maskFilter = filter
+    }
 
     if (palette) {
       const matrixFilter = createPaletteMatrixFilter(palette)
@@ -150,12 +188,20 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
       entry.transitionFilters = transitionFilters
     }
 
+    // Chain order: chroma key first (keying works on the untouched source
+    // colors, before any grading shifts them), then effects and the palette,
+    // then the shape mask (a geometric cut that must not be re-graded), and
+    // finally the transition.
+    if (entry.chromaKeyFilter)
+      entry.filters.push(entry.chromaKeyFilter)
     for (const record of built)
       entry.filters.push(...record.filters)
     if (entry.paletteMatrixFilter)
       entry.filters.push(entry.paletteMatrixFilter)
     if (entry.palettePostFilter)
       entry.filters.push(entry.palettePostFilter)
+    if (entry.maskFilter)
+      entry.filters.push(entry.maskFilter)
     // Transition filters run last: they blend the fully-graded segment.
     if (entry.transitionFilters)
       entry.filters.push(...entry.transitionFilters)
@@ -169,6 +215,7 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
     palette: IPalette | undefined,
     ctx: ShaderEffectContext,
     transition: SegmentTransitionInput | undefined,
+    appearance: SegmentAppearanceInput | undefined,
   ) {
     const list = effects ?? []
     for (let i = 0; i < entry.built.length; i++) {
@@ -184,6 +231,10 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
       if (entry.palettePostFilter)
         updatePalettePostFilter(entry.palettePostFilter, palette, ctx.timeMs / 1000)
     }
+    if (entry.chromaKeyFilter && appearance?.chromaKey)
+      updateChromaKeyFilter(entry.chromaKeyFilter, appearance.chromaKey)
+    if (entry.maskFilter && appearance?.mask)
+      updateMaskFilter(entry.maskFilter, appearance.mask)
     if (entry.transitionDefinition && entry.transitionFilters && entry.transitionRole && transition) {
       updateTransitionFilters(entry.transitionDefinition, entry.transitionFilters, {
         timeMs: ctx.timeMs,
@@ -202,6 +253,10 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
       for (const filter of record.filters)
         destroyOwned(filter)
     }
+    if (entry.chromaKeyFilter)
+      destroyOwned(entry.chromaKeyFilter)
+    if (entry.maskFilter)
+      destroyOwned(entry.maskFilter)
     if (entry.paletteMatrixFilter)
       destroyOwned(entry.paletteMatrixFilter)
     if (entry.palettePostFilter)
@@ -226,18 +281,18 @@ export function createSegmentFilterCache(deps: SegmentFilterCacheDeps = {}): Seg
   }
 
   return {
-    resolve(segmentId, effects, palette, ctx, transition) {
+    resolve(segmentId, effects, palette, ctx, transition, appearance) {
       const transitionDefinition = transition ? resolveTransition(transition) : undefined
       const transitionRole = transitionDefinition ? transition?.role : undefined
-      const structuralKey = computeStructuralKey(effects, palette, transitionDefinition, transitionRole)
+      const structuralKey = computeStructuralKey(effects, palette, transitionDefinition, transitionRole, appearance)
       let entry = entries.get(segmentId)
       if (!entry || entry.structuralKey !== structuralKey) {
         if (entry)
           dispose(entry)
-        entry = build(structuralKey, effects, palette, transitionDefinition, transitionRole)
+        entry = build(structuralKey, effects, palette, transitionDefinition, transitionRole, appearance)
         entries.set(segmentId, entry)
       }
-      update(entry, effects, palette, ctx, transition)
+      update(entry, effects, palette, ctx, transition, appearance)
       return entry.filters
     },
     evictInactive(activeIds) {

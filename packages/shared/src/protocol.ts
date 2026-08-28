@@ -89,6 +89,8 @@ interface IFramesSegment extends ISegment<'frames'> {
   fillMode?: IFillMode
   animation?: IAnimation
   palette?: IPalette
+  mask?: IMask
+  chromaKey?: IChromaKey
   background?: `rgba(${number},${number},${number},${number})`
 }
 
@@ -124,6 +126,8 @@ interface StickerSegment<T extends ITrackType> extends ISegment<T> {
   animation?: IAnimation
   transform?: ITransform
   palette?: IPalette
+  mask?: IMask
+  chromaKey?: IChromaKey
 }
 
 interface AudioSegment<T extends ITrackType> extends ISegment<T> {
@@ -227,6 +231,28 @@ export interface IPalette {
   vignette: number // 暗角 [0, 1]，默认 0
   fade: number // 褪色 [0, 1]，默认 0
   grain: number // 颗粒 [0, 1]，默认 0
+}
+
+/**
+ * Shape mask applied to a visual segment. The mask lives in the segment's own
+ * display box: `center` is normalized to [-1, 1] with the origin at the box
+ * center (+x right, +y up), `size` is the box-relative full extent in [0, 1].
+ */
+export interface IMask {
+  shape: 'rect' | 'ellipse'
+  center: [number, number] // [x, y] in [-1, 1], default [0, 0]
+  size: [number, number] // [width, height] in [0, 1], relative to the display box
+  feather?: number // edge softness [0, 1], default 0
+  rotation?: number // degrees [0, 360], default 0
+  inverse?: boolean // keep the outside instead of the inside, default false
+}
+
+/** Chroma key (green/blue screen) removal for a visual segment. */
+export interface IChromaKey {
+  color: string // key color, `#rrggbb`
+  similarity: number // chroma distance threshold [0, 1]
+  smoothness?: number // soft edge width above the threshold [0, 1], default 0
+  spillSuppress?: number // desaturation of leftover key spill [0, 1], default 0
 }
 
 export interface ITextBasic {

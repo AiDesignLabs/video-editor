@@ -85,4 +85,16 @@ describe('createComposeAudioInputs', () => {
       volume: 0.8,
     })
   })
+
+  it('excludes segments of a muted track', () => {
+    const protocol = createProtocol()
+    const audioTrack = protocol.tracks.find(track => track.trackId === 'audio-track')
+    if (!audioTrack)
+      throw new Error('audio track not found')
+    audioTrack.muted = true
+
+    const inputs = createComposeAudioInputs(protocol)
+
+    expect(inputs.map(input => input.segmentId)).toEqual(['video-1'])
+  })
 })

@@ -45,9 +45,22 @@ export {
   updatePaletteColorMatrixFilter,
   updatePalettePostFilter,
 } from './palette-filter'
+export {
+  CHROMA_KEY_UNIFORM_GROUP,
+  computeChromaKeyUniforms,
+  computeMaskUniforms,
+  createChromaKeyFilter,
+  createMaskFilter,
+  hexToRgb01,
+  MASK_UNIFORM_GROUP,
+  maskChromaStructuralKey,
+  updateChromaKeyFilter,
+  updateMaskFilter,
+} from './mask-chroma'
+export type { ChromaKeyUniforms, MaskUniforms } from './mask-chroma'
 export { createPixiFiltersFromVisualEffects, resolveEffectDefinition } from './pixi-effects'
 export { createSegmentFilterCache } from './segment-filter-cache'
-export type { SegmentFilterCache, SegmentFilterCacheDeps, SegmentFilterEntry, SegmentTransitionInput } from './segment-filter-cache'
+export type { SegmentAppearanceInput, SegmentFilterCache, SegmentFilterCacheDeps, SegmentFilterEntry, SegmentTransitionInput } from './segment-filter-cache'
 export { createPreviewRunner } from './preview-runner'
 
 export type {

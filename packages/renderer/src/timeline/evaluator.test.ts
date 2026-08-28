@@ -101,6 +101,14 @@ function createProtocol(input: {
   }
 }
 
+/** Flip a presentation-only track flag on a protocol built by `createProtocol`. */
+function setTrackFlag(protocol: IVideoProtocol, trackId: string, field: 'hidden' | 'muted', value: boolean) {
+  const track = protocol.tracks.find(item => item.trackId === trackId)
+  if (!track)
+    throw new Error(`track not found: ${trackId}`)
+  track[field] = value
+}
+
 describe('timeline evaluator', () => {
   it('emits start/gain/rate on activation and stop on deactivation', () => {
     const protocol = createProtocol({
@@ -352,5 +360,76 @@ describe('timeline evaluator', () => {
     expect(effects[1]?.segmentType).toBe('filter')
     const filter = effects.find(effect => effect.segmentType === 'filter')
     expect(filter?.intensity).toBeCloseTo(0.6, 6)
+  })
+
+  it('skips visuals of a hidden track while keeping its audio', () => {
+    const protocol = createProtocol({
+      frames: [createVideoSegment('video-1', 0, 1000, { volume: 1 })],
+    })
+    setTrackFlag(protocol, 'frames-main', 'hidden', true)
+
+    const output = evaluateTimelinePlan(protocol, {
+      atMs: 500,
+      windowStartMs: 450,
+      windowEndMs: 550,
+      fps: 30,
+    })
+
+    expect(output.plan.visuals).toHaveLength(0)
+    expect(output.state.activeVoices.map(voice => voice.voiceId)).toEqual(['video:video-1'])
+  })
+
+  it('silences a muted track while keeping its visuals', () => {
+    const protocol = createProtocol({
+      frames: [createVideoSegment('video-1', 0, 1000, { volume: 1 })],
+      audio: [createAudioSegment()],
+    })
+    setTrackFlag(protocol, 'frames-main', 'muted', true)
+    setTrackFlag(protocol, 'audio-track', 'muted', true)
+
+    const output = evaluateTimelinePlan(protocol, {
+      atMs: 500,
+      windowStartMs: 450,
+      windowEndMs: 550,
+      fps: 30,
+    })
+
+    expect(output.plan.visuals.map(visual => visual.segmentId)).toEqual(['video-1'])
+    expect(output.state.activeVoices).toEqual([])
+    expect(output.plan.audioEvents).toEqual([])
+  })
+
+  it('drops effects and filters contributed by a hidden track', () => {
+    const protocol = createProtocol({
+      frames: [createVideoSegment('video-1', 0, 1000)],
+      effects: [{
+        id: 'effect-1',
+        segmentType: 'effect',
+        effectId: 'eff-1',
+        name: 'glow',
+        startTime: 100,
+        endTime: 900,
+      }],
+      filters: [{
+        id: 'filter-1',
+        segmentType: 'filter',
+        filterId: 'flt-1',
+        name: 'warm',
+        intensity: 0.6,
+        startTime: 100,
+        endTime: 900,
+      }],
+    })
+    setTrackFlag(protocol, 'effect-track', 'hidden', true)
+
+    const output = evaluateTimelinePlan(protocol, {
+      atMs: 500,
+      windowStartMs: 450,
+      windowEndMs: 550,
+      fps: 30,
+    })
+
+    const effects = output.plan.visuals[0]?.effects ?? []
+    expect(effects.map(effect => effect.segmentType)).toEqual(['filter'])
   })
 })

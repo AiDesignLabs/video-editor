@@ -317,7 +317,11 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     transition: VisualRenderItem['transition'],
   ) {
     const palette = 'palette' in segment ? segment.palette : undefined
-    const filters = segmentFilterCache.resolve(segment.id, effects, palette, ctx, transition)
+    // Mask/chroma key exist on frames and sticker segments only.
+    const appearance = 'mask' in segment || 'chromaKey' in segment
+      ? { mask: segment.mask, chromaKey: segment.chromaKey }
+      : undefined
+    const filters = segmentFilterCache.resolve(segment.id, effects, palette, ctx, transition, appearance)
 
     ;(display as PixiDisplayObject & { filters?: PixiFilter[] | null }).filters
       = filters.length ? filters : null

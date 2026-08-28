@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import type { IFillMode, IKeyframeProperty, IPalette, ITextBasic, ITransform, SegmentUnion } from '@video-editor/shared'
+import type { IChromaKey, IFillMode, IKeyframeProperty, IMask, IPalette, ITextBasic, ITransform, SegmentUnion } from '@video-editor/shared'
 import type { DeepReadonly } from 'vue'
 import type { SegmentUpdater } from './types'
 import { computed } from 'vue'
 import NumberField from './NumberField.vue'
+import ChromaKeySection from './sections/ChromaKeySection.vue'
+import MaskSection from './sections/MaskSection.vue'
 import PaletteSection from './sections/PaletteSection.vue'
 import TextSection from './sections/TextSection.vue'
 import TransformSection from './sections/TransformSection.vue'
@@ -38,6 +40,12 @@ const hasPalette = computed(() => {
   return type === 'frames' || type === 'sticker'
 })
 
+// Mask and chroma key live on frames and sticker segments only.
+const hasMasking = computed(() => {
+  const type = segment.value?.segmentType
+  return type === 'frames' || type === 'sticker'
+})
+
 const isVideo = computed(() => segment.value?.segmentType === 'frames'
   && (segment.value as DeepReadonly<SegmentUnion> & { type?: string }).type === 'video')
 
@@ -48,6 +56,8 @@ const playRateValue = computed(() => (segment.value as { playRate?: number } | n
 const fillModeValue = computed(() => (segment.value as { fillMode?: IFillMode } | null)?.fillMode ?? 'contain')
 const transformValue = computed(() => (segment.value as { transform?: DeepReadonly<ITransform> } | null)?.transform)
 const paletteValue = computed(() => (segment.value as { palette?: DeepReadonly<IPalette> } | null)?.palette)
+const maskValue = computed(() => (segment.value as { mask?: DeepReadonly<IMask> } | null)?.mask)
+const chromaKeyValue = computed(() => (segment.value as { chromaKey?: DeepReadonly<IChromaKey> } | null)?.chromaKey)
 
 function formatMs(value: number) {
   return `${(value / 1000).toFixed(2)}s`
@@ -114,6 +124,28 @@ function setPalette(palette: IPalette | undefined) {
         draft.palette = palette
       else
         delete draft.palette
+    }
+  })
+}
+
+function setMask(mask: IMask | undefined) {
+  update((draft) => {
+    if (draft.segmentType === 'frames' || draft.segmentType === 'sticker') {
+      if (mask)
+        draft.mask = mask
+      else
+        delete draft.mask
+    }
+  })
+}
+
+function setChromaKey(chromaKey: IChromaKey | undefined) {
+  update((draft) => {
+    if (draft.segmentType === 'frames' || draft.segmentType === 'sticker') {
+      if (chromaKey)
+        draft.chromaKey = chromaKey
+      else
+        delete draft.chromaKey
     }
   })
 }
@@ -321,6 +353,20 @@ function removeTextLine(index: number) {
         class="property-inspector__section"
         :palette="paletteValue"
         @change="setPalette"
+      />
+
+      <ChromaKeySection
+        v-if="hasMasking"
+        class="property-inspector__section"
+        :chroma-key="chromaKeyValue"
+        @change="setChromaKey"
+      />
+
+      <MaskSection
+        v-if="hasMasking"
+        class="property-inspector__section"
+        :mask="maskValue"
+        @change="setMask"
       />
 
       <div v-if="keyframeProps.length && props.currentTimeMs !== undefined" class="property-inspector__section">

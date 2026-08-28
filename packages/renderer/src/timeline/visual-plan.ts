@@ -108,6 +108,9 @@ function resolveTransitionDefinition(transition: NonNullable<VisualPlanItem['tra
 function indexSegments(protocol: IVideoProtocol): Map<string, SegmentUnion> {
   const segmentById = new Map<string, SegmentUnion>()
   for (const track of protocol.tracks) {
+    // Hidden tracks render nothing, including as a transition target.
+    if (track.hidden === true)
+      continue
     for (const segment of track.children)
       segmentById.set(segment.id, segment)
   }

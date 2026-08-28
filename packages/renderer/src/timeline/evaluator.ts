@@ -48,6 +48,12 @@ export function evaluateTimelinePlan(
   for (let trackIndex = 0; trackIndex < protocol.tracks.length; trackIndex++) {
     const track = protocol.tracks[trackIndex]!
     const trackOrder = getTrackOrder(protocol.tracks.length, trackIndex, track)
+    // Presentation gates are independent: a hidden track still plays its audio,
+    // a muted track still renders its visuals.
+    const skipVisuals = track.hidden === true
+    const skipAudio = track.muted === true
+    if (skipVisuals && skipAudio)
+      continue
 
     for (let childIndex = 0; childIndex < track.children.length; childIndex++) {
       const segment = track.children[childIndex]!
@@ -57,7 +63,7 @@ export function evaluateTimelinePlan(
       if (segment.segmentType === 'effect' || segment.segmentType === 'filter')
         continue
 
-      if (segment.segmentType !== 'audio') {
+      if (segment.segmentType !== 'audio' && !skipVisuals) {
         visuals.push(buildVisualPlanItem({
           segment,
           track,
@@ -68,6 +74,9 @@ export function evaluateTimelinePlan(
           effects: activeEffects,
         }))
       }
+
+      if (skipAudio)
+        continue
 
       const voice = toActiveVoiceMeta(segment, track, atMs)
       if (voice)
@@ -324,6 +333,9 @@ function getTrackOrder(trackCount: number, trackIndex: number, track: TrackUnion
 function collectActiveEffects(protocol: IVideoProtocol, atMs: number): VisualEffectParam[] {
   const effects: VisualEffectParam[] = []
   for (const track of protocol.tracks) {
+    // A hidden effect/filter track contributes nothing to the visual pipeline.
+    if (track.hidden === true)
+      continue
     for (const segment of track.children) {
       if (!isActiveAt(segment, atMs))
         continue
