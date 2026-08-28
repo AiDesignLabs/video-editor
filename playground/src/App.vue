@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { IAudioSegment, IImageFramesSegment, ITextSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
+import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageFramesSegment, IStickerSegment, ITextSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
 import type { Ref } from 'vue'
 import { createEditorCore } from '@video-editor/editor-core'
 import { generateThumbnails } from '@video-editor/protocol'
@@ -24,6 +24,55 @@ const initialProtocol: IVideoProtocol = {
   fps: 30,
   extra: { projectName: 'Playground Demo' },
   tracks: [
+    {
+      trackId: 'filter-track',
+      trackType: 'filter',
+      children: [
+        {
+          id: 'filter-1',
+          segmentType: 'filter',
+          filterId: 'cool',
+          name: '冷色调',
+          intensity: 0.6,
+          startTime: 5000,
+          endTime: 9000,
+        },
+      ],
+    },
+    {
+      trackId: 'effect-track',
+      trackType: 'effect',
+      children: [
+        {
+          id: 'effect-1',
+          segmentType: 'effect',
+          effectId: 'blur',
+          name: '模糊',
+          startTime: 13000,
+          endTime: 16000,
+        },
+      ],
+    },
+    {
+      trackId: 'text-track',
+      trackType: 'text',
+      children: [
+        {
+          id: 'caption-1',
+          segmentType: 'text',
+          startTime: 0,
+          endTime: 16000,
+          opacity: 0.9,
+          texts: [{ content: '你好，随便拖动时间轴', fontSize: 24, fill: 'rgba(248,250,252,1)' }],
+          transform: {
+            position: [0, 0.65, 0],
+            rotation: [0, 0, 0],
+            scale: [1, 1, 1],
+          },
+          extra: { author: 'demo-bot' },
+        },
+      ],
+    },
     {
       trackId: 'frames-track',
       trackType: 'frames',
@@ -67,26 +116,6 @@ const initialProtocol: IVideoProtocol = {
       ],
     },
     {
-      trackId: 'text-track',
-      trackType: 'text',
-      children: [
-        {
-          id: 'caption-1',
-          segmentType: 'text',
-          startTime: 0,
-          endTime: 16000,
-          opacity: 0.9,
-          texts: [{ content: '你好，随便拖动时间轴', fontSize: 24, fill: 'rgba(248,250,252,1)' }],
-          transform: {
-            position: [0, 0.65, 0],
-            rotation: [0, 0, 0],
-            scale: [1, 1, 1],
-          },
-          extra: { author: 'demo-bot' },
-        },
-      ],
-    },
-    {
       trackId: 'audio-track',
       trackType: 'audio',
       children: [
@@ -125,8 +154,6 @@ const firstFrameSegment = computed(() => {
   return mainFramesTrack.value?.children[0]
 })
 
-const firstFrameLabel = computed(() => firstFrameSegment.value?.extra?.label)
-
 const canvasHost = ref<HTMLDivElement | null>(null)
 const renderer = shallowRef<Renderer | null>(null)
 const thumbnailsState = reactive({
@@ -147,6 +174,19 @@ const error = ref<string | null>(null)
 const captionShifted = ref(false)
 const timelineZoom = ref<number | undefined>(undefined)
 
+type DrawerTab = 'compose' | 'thumbnails' | 'protocol' | 'demo'
+const drawerOpen = ref(false)
+const drawerTab = ref<DrawerTab>('compose')
+
+function openDrawer(tab: DrawerTab) {
+  if (drawerOpen.value && drawerTab.value === tab) {
+    drawerOpen.value = false
+    return
+  }
+  drawerTab.value = tab
+  drawerOpen.value = true
+}
+
 const protocolDuration = computed(() => {
   const endTimes = protocol.value.tracks.flatMap(track => track.children.map(seg => seg.endTime))
   return endTimes.length ? Math.max(...endTimes) : 0
@@ -156,30 +196,15 @@ const durationMs = computed(() => renderer.value?.duration.value ?? protocolDura
 const currentTimeMs = computed(() => renderer.value?.currentTime.value ?? scrub.value)
 const isPlaying = computed(() => renderer.value?.isPlaying.value ?? false)
 const clipCount = computed(() => protocol.value.tracks.reduce((acc, track) => acc + track.children.length, 0))
-const protocolPreview = computed(() => {
-  return JSON.stringify({
-    tracks: protocol.value.tracks.map(track => ({
-      type: track.trackType,
-      children: track.children.map(child => ({
-        id: child.id,
-        start: child.startTime,
-        end: child.endTime,
-        url: 'url' in child ? child.url : undefined,
-      })),
-    })),
-  }, null, 2)
-})
+const selectedSegment = computed(() => state.selectedSegment.value ?? null)
+const undoCount = computed(() => state.undoCount.value)
+const redoCount = computed(() => state.redoCount.value)
+
+const protocolPreview = computed(() => JSON.stringify(protocol.value, null, 2))
 
 const thumbnailSourceUrl = computed(() => {
   const videoSegment = mainFramesTrack.value?.children.find(segment => segment.segmentType === 'frames' && segment.type === 'video')
   return videoSegment && 'url' in videoSegment ? videoSegment.url : swatches.video
-})
-
-const composeSourcePreview = computed(() => {
-  const summary = protocol.value.tracks
-    .map(track => `${track.trackType}:${track.children.length}`)
-    .join(' | ')
-  return summary || '无片段'
 })
 
 async function mountRendererInstance(options: {
@@ -194,7 +219,7 @@ async function mountRendererInstance(options: {
     appOptions: {
       width: host?.clientWidth || 1280,
       height: host?.clientHeight || 720,
-      background: '#0f172a',
+      background: '#101116',
     },
   }
   const instance = await createRenderer(rendererOptions)
@@ -262,13 +287,13 @@ watch(renderer, (instance, _, onCleanup) => {
   if (!instance)
     return
 
-    const stop = watch(
-      () => instance.currentTime.value,
-      (val) => {
-        commands.setCurrentTime(val)
-      },
-      { immediate: true },
-    )
+  const stop = watch(
+    () => instance.currentTime.value,
+    (val) => {
+      commands.setCurrentTime(val)
+    },
+    { immediate: true },
+  )
 
   onCleanup(() => stop())
 })
@@ -329,15 +354,32 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   if (isEditable)
     return
 
+  const withMod = event.metaKey || event.ctrlKey
+
   if ((event.key === 'Delete' || event.key === 'Backspace') && selectedSegmentId.value) {
     event.preventDefault()
     removeSelectedSegment()
     return
   }
 
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b' && selectedSegmentId.value) {
+  if (withMod && event.key.toLowerCase() === 'b' && selectedSegmentId.value) {
     event.preventDefault()
     splitSelectedSegment()
+    return
+  }
+
+  if (withMod && event.key.toLowerCase() === 'z') {
+    event.preventDefault()
+    if (event.shiftKey)
+      commands.redo()
+    else
+      commands.undo()
+    return
+  }
+
+  if (event.key === ' ') {
+    event.preventDefault()
+    togglePlay()
   }
 }
 
@@ -475,6 +517,8 @@ async function runThumbnailDemo() {
 }
 
 async function runComposeDemo() {
+  openDrawer('compose')
+  drawerOpen.value = true
   composeState.error = null
   composeState.loading = true
   composeState.progress = 0
@@ -499,7 +543,21 @@ async function runComposeDemo() {
   }
 }
 
-const formatMs = (val: number | Ref<number>) => `${(unref(val) / 1000).toFixed(2)}s`
+function formatTimecode(value: number | Ref<number>) {
+  const ms = Math.max(0, unref(value))
+  const totalSeconds = ms / 1000
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds - minutes * 60
+  return `${String(minutes).padStart(2, '0')}:${seconds.toFixed(2).padStart(5, '0')}`
+}
+
+function formatBytes(size: number) {
+  if (size <= 0)
+    return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const power = Math.min(units.length - 1, Math.floor(Math.log(size) / Math.log(1024)))
+  return `${(size / 1024 ** power).toFixed(power === 0 ? 0 : 1)} ${units[power]}`
+}
 
 function handleAddSegmentClick(data: {
   track: TrackUnion
@@ -549,179 +607,240 @@ function handleAddSegmentClick(data: {
       commands.addSegment(newSegment, track.trackId)
       break
     }
-    default:
-      console.warn(`Adding segments to track type "${track.trackType}" is not implemented.`)
-      return
+    case 'filter': {
+      const newSegment: Omit<IFilterSegment, 'id'> = {
+        segmentType: 'filter',
+        filterId: 'grayscale',
+        name: '灰度',
+        intensity: 0.8,
+        startTime: 0,
+        endTime: duration,
+      }
+      commands.addSegment(newSegment, track.trackId)
+      break
+    }
+    case 'effect': {
+      const newSegment: Omit<IEffectSegment, 'id'> = {
+        segmentType: 'effect',
+        effectId: 'blur',
+        name: '模糊',
+        startTime: 0,
+        endTime: duration,
+      }
+      commands.addSegment(newSegment, track.trackId)
+      break
+    }
+    case 'sticker': {
+      const newSegment: Omit<IStickerSegment, 'id'> = {
+        segmentType: 'sticker',
+        format: 'img',
+        url: swatches.extra,
+        startTime: 0,
+        endTime: duration,
+      }
+      commands.addSegment(newSegment, track.trackId)
+      break
+    }
   }
 }
 </script>
 
 <template>
-  <main class="page">
-    <section class="hero">
-      <div>
-        <p class="eyebrow">
-          @video-editor/renderer playground
-        </p>
-        <h1>用协议驱动的轻量播放器</h1>
-        <p class="lede">
-          修改 reactive protocol 就能看到画面更新。拖动时间轴、切换片段或追加新的 clip，Pixi 场景会自动响应。
-        </p>
-        <div class="pill-row">
-          <span class="pill">Tracks: {{ protocol.tracks.length }}</span>
-          <span class="pill">Clips: {{ clipCount }}</span>
-          <span class="pill">FPS: {{ protocol.fps }}</span>
-          <span class="pill">Frame label: {{ firstFrameLabel }}</span>
-          <span class="pill">Project: {{ protocol.extra?.projectName ?? '未命名' }}</span>
-        </div>
-      </div>
-      <div class="stat">
-        <div class="stat__label">
-          当前时间
-        </div>
-        <div class="stat__value">
-          {{ formatMs(currentTimeMs) }}
-        </div>
-        <div class="stat__sub">
-          / {{ formatMs(durationMs) }}
-        </div>
-      </div>
-    </section>
-
-    <section class="player-shell">
-      <div class="canvas">
-        <div ref="canvasHost" class="canvas-host" />
-        <div v-if="loading && !error" class="placeholder">
-          正在初始化 Pixi 应用…
-        </div>
-        <div v-else-if="error" class="placeholder error">
-          初始化失败: {{ error }}
-        </div>
+  <main class="studio">
+    <header class="topbar">
+      <div class="topbar__brand">
+        <span class="topbar__mark" aria-hidden="true" />
+        <span class="topbar__name">video-editor</span>
+        <span class="topbar__tag">playground</span>
       </div>
 
-      <div class="editor-body">
+      <div class="heartbeat" title="reactive protocol 实时状态">
+        <span class="heartbeat__cell">
+          <em>{{ protocol.tracks.length }}</em>tracks
+        </span>
+        <span class="heartbeat__cell">
+          <em>{{ clipCount }}</em>segments
+        </span>
+        <span class="heartbeat__cell">
+          <em>{{ undoCount }}</em>undo
+        </span>
+        <span class="heartbeat__cell heartbeat__cell--selection" :class="{ 'heartbeat__cell--empty': !selectedSegment }">
+          <em>{{ selectedSegment ? selectedSegment.id : '—' }}</em>selected
+        </span>
+      </div>
+
+      <div class="topbar__actions">
+        <button class="tool" :disabled="!undoCount" title="撤销 (Cmd/Ctrl+Z)" @click="commands.undo()">
+          撤销
+        </button>
+        <button class="tool" :disabled="!redoCount" title="重做 (Cmd/Ctrl+Shift+Z)" @click="commands.redo()">
+          重做
+        </button>
+        <span class="topbar__divider" />
+        <button class="tool" :class="{ 'tool--active': drawerOpen && drawerTab === 'thumbnails' }" @click="openDrawer('thumbnails')">
+          缩略图
+        </button>
+        <button class="tool" :class="{ 'tool--active': drawerOpen && drawerTab === 'protocol' }" @click="openDrawer('protocol')">
+          协议
+        </button>
+        <button class="tool" :class="{ 'tool--active': drawerOpen && drawerTab === 'demo' }" @click="openDrawer('demo')">
+          演示
+        </button>
+        <button class="export" :disabled="composeState.loading" @click="runComposeDemo">
+          {{ composeState.loading ? `导出中 ${Math.round(composeState.progress * 100)}%` : '导出视频' }}
+        </button>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <div class="stage">
+        <div class="stage__viewport">
+          <div ref="canvasHost" class="stage__canvas" />
+          <div v-if="loading" class="stage__placeholder">
+            正在初始化 Pixi 渲染器…
+          </div>
+          <div v-else-if="error" class="stage__placeholder stage__placeholder--error">
+            初始化失败：{{ error }}
+          </div>
+        </div>
+
+        <div class="transport">
+          <div class="transport__group">
+            <button class="tool" :disabled="!renderer" title="回到开头" @click="seekTo(0)">
+              ⏮
+            </button>
+            <button class="transport__play" :disabled="!renderer" :title="isPlaying ? '暂停 (空格)' : '播放 (空格)'" @click="togglePlay">
+              {{ isPlaying ? '⏸' : '▶' }}
+            </button>
+            <button class="tool" :disabled="!renderer" title="跳到末尾" @click="seekTo(durationMs)">
+              ⏭
+            </button>
+          </div>
+
+          <div class="transport__clock">
+            <span class="transport__now">{{ formatTimecode(currentTimeMs) }}</span>
+            <span class="transport__total">/ {{ formatTimecode(durationMs) }}</span>
+          </div>
+
+          <div class="transport__group">
+            <button class="tool" :disabled="!selectedSegmentId" title="在播放头处分割 (Cmd/Ctrl+B)" @click="splitSelectedSegment">
+              分割
+            </button>
+            <button class="tool tool--danger" :disabled="!selectedSegmentId" title="删除选中片段 (Delete)" @click="removeSelectedSegment">
+              删除
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <aside class="side">
         <PropertyInspector
-          class="inspector"
-          :segment="state.selectedSegment.value ?? null"
+          class="side__inspector"
+          :segment="selectedSegment"
           :current-time-ms="currentTimeMs"
           @update:segment="handleInspectorUpdate"
         />
-      </div>
-
-      <div class="timeline min-h-400px">
-        <VideoEditorTimeline
-          v-model:zoom="timelineZoom"
-          v-model:selected-segment-id="selectedSegmentId"
-          class="flex-1"
-          :protocol="protocol"
-          :current-time="currentTimeMs"
-          :track-types="['frames', 'text', 'audio']"
-          @update:current-time="handleTimelineCurrentTime"
-          @segment-click="handleTimelineSegmentClick"
-          @segment-drag-end="handleSegmentDragEnd"
-          @segment-resize-end="handleSegmentResizeEnd"
-          @video-segment-mute-toggle="handleVideoSegmentMuteToggle"
-          @add-segment="handleAddSegmentClick"
-        />
-        <div class="timeline-meta">
-          <div>时间轴使用 UI 包的默认 toolbar / ruler / playhead（主色 #222226）。</div>
-          <div class="muted">
-            点击 +/- 只会放大刻度与片段宽度，Pixi 预览画布不会缩放；需要自定义可通过 slots 覆盖。
-          </div>
-        </div>
-      </div>
-
-      <div class="controls">
-        <button class="btn" :disabled="!renderer" @click="togglePlay">
-          {{ isPlaying ? '暂停' : '播放' }}
-        </button>
-        <button class="btn ghost" :disabled="!renderer" @click="seekTo(0)">
-          回到开头
-        </button>
-        <button class="btn ghost" :disabled="!renderer" @click="seekTo(durationMs)">
-          跳到末尾
-        </button>
-        <button class="btn ghost" :disabled="!selectedSegmentId" @click="removeSelectedSegment">
-          删除选中片段
-        </button>
-        <button class="btn ghost" :disabled="!selectedSegmentId" title="Cmd/Ctrl+B" @click="splitSelectedSegment">
-          分割
-        </button>
-      </div>
+      </aside>
     </section>
 
-    <section class="panel">
-      <div class="actions">
-        <button class="btn" @click="swapMainClip">
-          切换主画面贴图
-        </button>
-        <button class="btn" @click="moveCaption">
-          移动字幕
-        </button>
-        <button class="btn" @click="appendClip">
-          追加新片段
-        </button>
-      </div>
+    <section class="rail">
+      <VideoEditorTimeline
+        v-model:zoom="timelineZoom"
+        v-model:selected-segment-id="selectedSegmentId"
+        class="rail__timeline"
+        :protocol="protocol"
+        :current-time="currentTimeMs"
+        :track-types="['sticker', 'effect', 'filter', 'text', 'frames', 'audio']"
+        @update:current-time="handleTimelineCurrentTime"
+        @segment-click="handleTimelineSegmentClick"
+        @segment-drag-end="handleSegmentDragEnd"
+        @segment-resize-end="handleSegmentResizeEnd"
+        @video-segment-mute-toggle="handleVideoSegmentMuteToggle"
+        @add-segment="handleAddSegmentClick"
+      />
+    </section>
 
-      <div class="thumbnails">
-        <div class="protocol__header">
-          <span>generateThumbnails 示例</span>
-          <span class="muted">基于 frames track 的视频片段</span>
-        </div>
-        <p class="muted">
-          源地址：<span class="mono">{{ thumbnailSourceUrl }}</span>
-        </p>
-        <div class="thumb-actions">
-          <button class="btn" :disabled="thumbnailsState.loading" @click="runThumbnailDemo">
-            {{ thumbnailsState.loading ? '生成中…' : '生成缩略图' }}
-          </button>
-          <span v-if="thumbnailsState.error" class="error-text">失败: {{ thumbnailsState.error }}</span>
-        </div>
-        <div v-if="thumbnailsState.items.length" class="thumbnail-grid">
-          <div v-for="thumb in thumbnailsState.items" :key="thumb.url" class="thumbnail-card">
-            <img :src="thumb.url" alt="thumbnail frame" loading="lazy">
-            <span>{{ (thumb.tsMs / 1000).toFixed(2) }}s</span>
+    <section v-if="drawerOpen" class="drawer">
+      <nav class="drawer__tabs">
+        <button
+          v-for="tab in ([['compose', '合成输出'], ['thumbnails', '缩略图'], ['protocol', '协议 JSON'], ['demo', '演示操作']] as Array<[DrawerTab, string]>)"
+          :key="tab[0]"
+          class="drawer__tab"
+          :class="{ 'drawer__tab--active': drawerTab === tab[0] }"
+          @click="drawerTab = tab[0]"
+        >
+          {{ tab[1] }}
+        </button>
+        <button class="drawer__close" title="收起面板" @click="drawerOpen = false">
+          收起 ▾
+        </button>
+      </nav>
+
+      <div class="drawer__body">
+        <div v-if="drawerTab === 'compose'" class="drawer__pane">
+          <div v-if="composeState.loading" class="compose-progress">
+            <div class="compose-progress__bar">
+              <div class="compose-progress__fill" :style="{ width: `${composeState.progress * 100}%` }" />
+            </div>
+            <span class="mono">{{ Math.round(composeState.progress * 100) }}%</span>
           </div>
+          <p v-else-if="composeState.error" class="drawer__error">
+            合成失败：{{ composeState.error }}
+          </p>
+          <template v-else-if="composeState.blobUrl">
+            <video class="compose-video" :src="composeState.blobUrl" controls />
+            <div class="drawer__meta">
+              <span class="mono">{{ formatTimecode(composeState.durationMs) }}</span>
+              <span class="mono">{{ formatBytes(composeState.size) }}</span>
+              <a class="tool" :href="composeState.blobUrl" download="compose-output.mp4">下载 MP4</a>
+            </div>
+          </template>
+          <p v-else class="drawer__empty">
+            点击右上角「导出视频」，把当前协议合成为 mp4 并在这里预览。
+          </p>
         </div>
-        <p v-else class="muted">
-          点击按钮调用 generateThumbnails，查看返回的 Blob 缩略图。
-        </p>
-      </div>
 
-      <div class="thumbnails compose">
-        <div class="protocol__header">
-          <span>composeProtocol 示例</span>
-          <span class="muted">基于当前协议合成</span>
-        </div>
-        <p class="muted">
-          轨道统计：<span class="mono">{{ composeSourcePreview }}</span>
-        </p>
-        <div class="thumb-actions">
-          <button class="btn" :disabled="composeState.loading" @click="runComposeDemo">
-            {{ composeState.loading ? '合成中…' : '合成视频' }}
-          </button>
-          <span v-if="composeState.error" class="error-text">失败: {{ composeState.error }}</span>
-          <span v-else class="muted">进度: {{ Math.round(composeState.progress * 100) }}%</span>
-        </div>
-        <progress v-if="composeState.loading || composeState.progress" :value="composeState.progress" max="1" />
-        <div v-if="composeState.blobUrl" class="compose-output">
-          <video class="compose-video" controls :src="composeState.blobUrl" />
-          <div class="muted">
-            时长 {{ formatMs(composeState.durationMs) }} · 大小 {{ (composeState.size / 1024 / 1024).toFixed(2) }} MB
+        <div v-else-if="drawerTab === 'thumbnails'" class="drawer__pane">
+          <div class="drawer__meta">
+            <button class="tool" :disabled="thumbnailsState.loading" @click="runThumbnailDemo">
+              {{ thumbnailsState.loading ? '生成中…' : '生成缩略图' }}
+            </button>
+            <span class="drawer__hint mono">{{ thumbnailSourceUrl }}</span>
           </div>
-          <a class="btn ghost" :href="composeState.blobUrl" download="compose-demo.mp4">下载文件</a>
+          <p v-if="thumbnailsState.error" class="drawer__error">
+            {{ thumbnailsState.error }}
+          </p>
+          <div v-else-if="thumbnailsState.items.length" class="thumb-grid">
+            <figure v-for="thumb in thumbnailsState.items" :key="thumb.tsMs" class="thumb-grid__item">
+              <img :src="thumb.url" :alt="`帧 ${formatTimecode(thumb.tsMs)}`">
+              <figcaption class="mono">{{ formatTimecode(thumb.tsMs) }}</figcaption>
+            </figure>
+          </div>
+          <p v-else class="drawer__empty">
+            对主轨视频调用 generateThumbnails，抽帧结果显示在这里（OPFS 缓存，二次生成走缓存）。
+          </p>
         </div>
-        <p v-else class="muted">
-          点击按钮触发 composeProtocol，完成后可直接预览和下载合成视频。
-        </p>
-      </div>
 
-      <div class="protocol">
-        <div class="protocol__header">
-          <span>协议快照</span>
-          <span class="muted">实时变化会驱动画面</span>
+        <div v-else-if="drawerTab === 'protocol'" class="drawer__pane">
+          <pre class="protocol-json mono">{{ protocolPreview }}</pre>
         </div>
-        <pre>{{ protocolPreview }}</pre>
+
+        <div v-else class="drawer__pane">
+          <div class="drawer__meta">
+            <button class="tool" @click="swapMainClip">
+              切换主画面贴图
+            </button>
+            <button class="tool" @click="moveCaption">
+              移动字幕
+            </button>
+            <button class="tool" @click="appendClip">
+              在播放头追加片段
+            </button>
+          </div>
+          <p class="drawer__empty">
+            这些按钮直接调用 editor-core commands 修改 reactive protocol，预览与时间轴会同步更新；全部可用 Cmd/Ctrl+Z 撤销。
+          </p>
+        </div>
       </div>
     </section>
   </main>
