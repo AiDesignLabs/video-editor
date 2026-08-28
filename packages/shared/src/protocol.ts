@@ -19,6 +19,18 @@ export type ITrack<T extends ITrackType> = {
   trackId: string
   trackType: T
   children: TrackTypeMapSegment[T][]
+  /**
+   * When true, the track's visual output is skipped (renderer draws nothing for
+   * its segments). Purely a presentation flag: the segments stay in the protocol
+   * and keep participating in timeline layout, duration and export.
+   */
+  hidden?: boolean
+  /**
+   * When true, the track's audio output is skipped (audio segments and the audio
+   * of video segments stay silent). Purely a presentation flag: it never mutates
+   * per-segment `volume`.
+   */
+  muted?: boolean
   extra?: TrackExtra<T> | null
 } & (T extends 'frames' ? {
   isMain?: boolean

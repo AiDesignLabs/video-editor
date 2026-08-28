@@ -14,6 +14,9 @@ export const trackRule: JSONSchemaType<TheTrack> = {
     trackType: { type: 'string', enum: ['frames', 'sticker', 'text', 'audio', 'effect', 'filter'] },
     children: { type: 'array', items: { type: 'object' } },
     isMain: { type: 'boolean', nullable: true },
+    // Presentation flags: skip the track's visuals / audio without touching its segments.
+    hidden: { type: 'boolean', nullable: true },
+    muted: { type: 'boolean', nullable: true },
     extra: { type: 'object', nullable: true, additionalProperties: true } as JSONSchemaType<TheTrack>['properties']['extra'],
   },
   required: ['trackId', 'trackType', 'children'],

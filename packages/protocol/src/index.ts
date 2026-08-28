@@ -9,6 +9,7 @@ export type {
   AssetMeta,
 } from './assets'
 export { createVideoProtocolManager } from './manage'
+export type { TrackMutableFields } from './manage'
 export { parse } from './parse'
 export {
   createResourceManager,

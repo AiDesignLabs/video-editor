@@ -182,6 +182,16 @@ function normalizeProtocolTransitions(protocol: IVideoProtocol) {
   syncProtocolTransitionEdges(protocol)
 }
 
+/** The subset of track fields that `updateTrack` is allowed to change. */
+export interface TrackMutableFields {
+  /** Skip the track's visual output. */
+  hidden?: boolean
+  /** Skip the track's audio output. */
+  muted?: boolean
+  /** Consumer-defined track metadata. */
+  extra?: TrackUnion['extra']
+}
+
 export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
   idFactory?: {
     segment?: () => string
@@ -462,7 +472,48 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     return { id, affectedSegments, affectedTracks, createdTracks, removedTrackIds }
   }
 
-  const removeSegment = (id: SegmentUnion['id']): {
+  /**
+   * Duplicate an existing segment and place the copy at the current playhead.
+   *
+   * The copy keeps every property of the source (keyframes included - they are
+   * segment-relative) except its id, which is regenerated. Transitions are not
+   * duplicated: edges are keyed by segment id and the transition sync drops any
+   * edge that is no longer between two adjacent main-track segments.
+   *
+   * Placement reuses `addSegment`, so the whole duplication is a single history
+   * entry.
+   */
+  const duplicateSegment = (segmentId: string): {
+    success: boolean
+    id: string
+    affectedSegments: SegmentUnion[]
+    affectedTracks: TrackUnion[]
+    createdTracks: TrackUnion[]
+    removedTrackIds: string[]
+  } => {
+    // Read from the exported (plain) state, never from an immer draft.
+    const currentProtocol = exportProtocol()
+    let source: SegmentUnion | undefined
+    for (const track of currentProtocol.tracks) {
+      const found = track.children.find(segment => segment.id === segmentId)
+      if (found) {
+        source = found
+        break
+      }
+    }
+
+    if (!source)
+      return { success: false, id: '', affectedSegments: [], affectedTracks: [], createdTracks: [], removedTrackIds: [] }
+
+    // Keep the source id on the copy on purpose: `normalizedSegment` detects the
+    // collision and generates a fresh id for us.
+    const copy = JSON.parse(JSON.stringify(source)) as SegmentUnion
+    const result = addSegment(copy)
+
+    return { success: true, ...result }
+  }
+
+  const removeSegment = (id: SegmentUnion['id'], removeOptions?: { ripple?: boolean }): {
     success: boolean
     affectedSegments: SegmentUnion[]
     affectedTracks: TrackUnion[]
@@ -479,14 +530,36 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         const track = protocol.tracks[i]
         const index = track.children.findIndex(segment => segment.id === id)
         if (index !== -1) {
+          const removedStartTime = track.children[index].startTime
+          const removedDuration = track.children[index].endTime - track.children[index].startTime
           track.children.splice(index, 1)
 
           // If track still has segments and it's a main frames track, rebuild timeline
           if (track.children.length > 0) {
             const isMainFramesTrack = track.trackType === 'frames' && (track as TrackTypeMapTrack['frames']).isMain
             if (isMainFramesTrack) {
+              // The main frames track always ripples (no gaps allowed), so the
+              // `ripple` option is meaningless there and is ignored.
               rebuildTrackTimeline(track, 0)
               // All remaining segments may be affected
+              affectedTrackId = track.trackId
+            }
+            else if (removeOptions?.ripple && removedDuration > 0) {
+              // Ripple delete on a gap-allowing track: pull every following
+              // segment left by the removed duration. A segment is clamped at 0
+              // when the shift would push it negative, which can shrink a gap
+              // that existed before the delete - an accepted edge case.
+              for (const segment of track.children) {
+                if (segment.startTime < removedStartTime)
+                  continue
+                const shift = Math.min(removedDuration, segment.startTime)
+                if (shift <= 0)
+                  continue
+                segment.startTime -= shift
+                segment.endTime -= shift
+              }
+              // Re-sort and fix any overlap the clamping may have introduced.
+              rebuildTrackTimeline(track, 0)
               affectedTrackId = track.trackId
             }
           }
@@ -998,6 +1071,48 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     })
   }
 
+  /**
+   * Update the mutable presentation fields of a track (`hidden`, `muted`, `extra`).
+   *
+   * The updater receives a detached patch object, never the draft track, so the
+   * structural fields (`trackId`, `trackType`, `children`, `isMain`) cannot be
+   * changed through this command. Use `replaceTrackId` / segment commands for those.
+   */
+  const updateTrack = (trackId: string, updater: (track: TrackMutableFields) => void): boolean => {
+    return updateProtocolWithTransitionSync((protocol) => {
+      const track = protocol.tracks.find(t => t.trackId === trackId)
+      if (!track)
+        return false
+
+      const patch: TrackMutableFields = {
+        hidden: track.hidden,
+        muted: track.muted,
+        extra: track.extra === undefined || track.extra === null
+          ? track.extra
+          : JSON.parse(JSON.stringify(track.extra)) as TrackUnion['extra'],
+      }
+      updater(patch)
+
+      if (patch.hidden === undefined)
+        delete track.hidden
+      else
+        track.hidden = patch.hidden
+
+      if (patch.muted === undefined)
+        delete track.muted
+      else
+        track.muted = patch.muted
+
+      const extraTarget = track as { extra?: TrackUnion['extra'] }
+      if (patch.extra === undefined)
+        delete extraTarget.extra
+      else
+        extraTarget.extra = patch.extra
+
+      return true
+    })
+  }
+
   const replaceTrackId = (oldTrackId: string, newTrackId: string) => {
     return updateProtocolWithTransitionSync((protocol) => {
       const track = protocol.tracks.find(t => t.trackId === oldTrackId)
@@ -1101,6 +1216,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     getSegment,
     addSegment,
     removeSegment,
+    duplicateSegment,
     updateSegment,
     moveSegment,
     resizeSegment,
@@ -1109,6 +1225,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     addTransition,
     removeTransition,
     updateTransition,
+    updateTrack,
     replaceTrackId,
     replaceSegmentId,
 

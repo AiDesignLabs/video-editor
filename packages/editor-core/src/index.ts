@@ -3,6 +3,7 @@ export { createPluginManager } from './plugin'
 export { createSegmentRegistry } from './segment'
 export type {
   AddSegmentResult,
+  DuplicateSegmentResult,
   EditorCore,
   EditorCoreCommands,
   EditorCoreContext,
@@ -14,6 +15,7 @@ export type {
   EditorCoreServices,
   EditorCoreState,
   MoveSegmentOptions,
+  RemoveSegmentOptions,
   ResizeSegmentOptions,
   SegmentInput,
   SegmentMutationResult,
@@ -21,4 +23,5 @@ export type {
   SegmentPluginOps,
   SegmentPluginUI,
   SegmentRegistry,
+  TrackMutableFields,
 } from './types'

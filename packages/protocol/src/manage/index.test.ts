@@ -1,4 +1,5 @@
 import type { IAudioSegment, IEffectSegment, IFilterSegment, IFramesSegmentUnion, IImageFramesSegment, IStickerSegment, ITextSegment, ITransition, IVideoFramesSegment, IVideoProtocol } from '@video-editor/shared'
+import type { TrackMutableFields } from './index'
 import { createVideoProtocolManager } from './index'
 
 const protocol: IVideoProtocol = {
@@ -3322,5 +3323,295 @@ describe('splitSegment keyframes rebase', () => {
       { timeMs: 0, value: 0.25 },
       { timeMs: 1500, value: 1 },
     ])
+  })
+})
+
+describe('duplicateSegment', () => {
+  it('duplicates a segment at the playhead with a fresh id and copied keyframes', () => {
+    const { addSegment, duplicateSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    const text: ITextSegment = {
+      id: 'dup-src',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'copy me' }],
+      keyframes: [
+        {
+          property: 'opacity',
+          frames: [
+            { timeMs: 0, value: 0 },
+            { timeMs: 1000, value: 1 },
+          ],
+        },
+      ],
+    }
+    curTime.value = 0
+    addSegment(text)
+
+    curTime.value = 2000
+    const result = duplicateSegment('dup-src')
+    expect(result.success).toBe(true)
+    expect(result.id).not.toBe('')
+    expect(result.id).not.toBe('dup-src')
+
+    const children = exportProtocol().tracks[0].children as ITextSegment[]
+    expect(children).toHaveLength(2)
+    const [source, copy] = children
+    expect(source.id).toBe('dup-src')
+    expect(copy.id).toBe(result.id)
+    // Placed at the playhead, keeping the source duration.
+    expect(copy.startTime).toBe(2000)
+    expect(copy.endTime).toBe(3000)
+    expect(copy.texts).toEqual([{ content: 'copy me' }])
+    // Keyframes are segment-relative, so they are copied verbatim.
+    expect(copy.keyframes).toEqual(source.keyframes)
+    expect(result.affectedSegments.some(segment => segment.id === result.id)).toBe(true)
+  })
+
+  it('records the duplication as a single undo entry', () => {
+    const { addSegment, duplicateSegment, exportProtocol, undo, redo, undoCount, curTime } = createVideoProtocolManager(protocol)
+
+    const text: ITextSegment = {
+      id: 'dup-undo',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'undo me' }],
+    }
+    curTime.value = 0
+    addSegment(text)
+    expect(undoCount.value).toBe(1)
+
+    curTime.value = 2000
+    const result = duplicateSegment('dup-undo')
+    expect(result.success).toBe(true)
+    expect(undoCount.value).toBe(2)
+    expect(exportProtocol().tracks[0].children).toHaveLength(2)
+
+    undo()
+    const afterUndo = exportProtocol().tracks[0].children
+    expect(afterUndo).toHaveLength(1)
+    expect(afterUndo[0].id).toBe('dup-undo')
+
+    redo()
+    expect(exportProtocol().tracks[0].children).toHaveLength(2)
+  })
+
+  it('does not duplicate transitions', () => {
+    const { addSegment, addTransition, duplicateSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    const video: IFramesSegmentUnion = {
+      id: 'dup-trans-a',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'http://example.com/video.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+    curTime.value = 0
+    const idA = addSegment(video).id
+    curTime.value = 1000
+    addSegment({ ...video, id: 'dup-trans-b' })
+    expect(addTransition({ id: 't-dup', name: 'fade', duration: 400 }, 1000)).toBe(true)
+
+    curTime.value = 5000
+    const result = duplicateSegment(idA)
+    expect(result.success).toBe(true)
+
+    const transitions = exportProtocol().transitions ?? []
+    expect(transitions).toHaveLength(1)
+    expect(transitions[0].fromSegmentId).toBe(idA)
+    expect(transitions.some(edge => edge.fromSegmentId === result.id || edge.toSegmentId === result.id)).toBe(false)
+  })
+
+  it('returns failure for an unknown segment id', () => {
+    const { duplicateSegment, undoCount } = createVideoProtocolManager(protocol)
+
+    const result = duplicateSegment('missing-segment')
+    expect(result.success).toBe(false)
+    expect(result.id).toBe('')
+    expect(result.affectedSegments).toEqual([])
+    expect(undoCount.value).toBe(0)
+  })
+})
+
+describe('removeSegment ripple', () => {
+  const buildTextTrack = () => {
+    const manager = createVideoProtocolManager(protocol)
+    const { addSegment, curTime } = manager
+
+    const base: ITextSegment = {
+      id: 'ripple-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'one' }],
+    }
+    curTime.value = 0
+    addSegment(base)
+    curTime.value = 2000
+    addSegment({ ...base, id: 'ripple-2', startTime: 2000, endTime: 3000 })
+    curTime.value = 4000
+    addSegment({ ...base, id: 'ripple-3', startTime: 4000, endTime: 5000 })
+
+    return manager
+  }
+
+  it('shifts later segments left by the removed duration', () => {
+    const { removeSegment, exportProtocol } = buildTextTrack()
+
+    const result = removeSegment('ripple-2', { ripple: true })
+    expect(result.success).toBe(true)
+
+    const children = exportProtocol().tracks[0].children
+    expect(children.map(segment => segment.id)).toEqual(['ripple-1', 'ripple-3'])
+    expect(children[0].startTime).toBe(0)
+    expect(children[0].endTime).toBe(1000)
+    // ripple-3 moves left by the 1000ms the removed segment occupied.
+    expect(children[1].startTime).toBe(3000)
+    expect(children[1].endTime).toBe(4000)
+    expect(result.affectedSegments.some(segment => segment.id === 'ripple-3')).toBe(true)
+  })
+
+  it('keeps the gap when ripple is not requested', () => {
+    const { removeSegment, exportProtocol } = buildTextTrack()
+
+    expect(removeSegment('ripple-2').success).toBe(true)
+
+    const children = exportProtocol().tracks[0].children
+    expect(children.map(segment => segment.id)).toEqual(['ripple-1', 'ripple-3'])
+    expect(children[1].startTime).toBe(4000)
+    expect(children[1].endTime).toBe(5000)
+  })
+
+  it('records a ripple delete as a single undo entry', () => {
+    const { removeSegment, exportProtocol, undo, undoCount } = buildTextTrack()
+
+    expect(undoCount.value).toBe(3)
+    expect(removeSegment('ripple-2', { ripple: true }).success).toBe(true)
+    expect(undoCount.value).toBe(4)
+
+    undo()
+    const children = exportProtocol().tracks[0].children
+    expect(children.map(segment => segment.id)).toEqual(['ripple-1', 'ripple-2', 'ripple-3'])
+    expect(children[2].startTime).toBe(4000)
+  })
+
+  it('leaves the main frames track behavior unchanged', () => {
+    const { addSegment, removeSegment, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    const video: IFramesSegmentUnion = {
+      id: 'main-1',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'http://example.com/video.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+    curTime.value = 0
+    addSegment(video)
+    curTime.value = 1000
+    addSegment({ ...video, id: 'main-2', startTime: 1000, endTime: 3000 })
+    curTime.value = 3000
+    addSegment({ ...video, id: 'main-3', startTime: 3000, endTime: 4000 })
+
+    // The main frames track always ripples, with or without the option.
+    expect(removeSegment('main-2').success).toBe(true)
+    const children = exportProtocol().tracks[0].children
+    expect(children.map(segment => segment.id)).toEqual(['main-1', 'main-3'])
+    expect(children[1].startTime).toBe(1000)
+    expect(children[1].endTime).toBe(2000)
+  })
+})
+
+describe('updateTrack', () => {
+  const textSegment: ITextSegment = {
+    id: 'track-flags',
+    segmentType: 'text',
+    startTime: 0,
+    endTime: 1000,
+    texts: [{ content: 'flags' }],
+  }
+
+  it('sets hidden and muted as a single undo entry', () => {
+    const { addSegment, updateTrack, exportProtocol, undo, undoCount, curTime } = createVideoProtocolManager(protocol)
+
+    curTime.value = 0
+    addSegment(textSegment)
+    const trackId = exportProtocol().tracks[0].trackId
+    expect(undoCount.value).toBe(1)
+
+    expect(updateTrack(trackId, (track) => {
+      track.hidden = true
+      track.muted = true
+    })).toBe(true)
+    expect(undoCount.value).toBe(2)
+
+    const track = exportProtocol().tracks[0]
+    expect(track.hidden).toBe(true)
+    expect(track.muted).toBe(true)
+
+    undo()
+    const afterUndo = exportProtocol().tracks[0]
+    expect(afterUndo.hidden).toBeUndefined()
+    expect(afterUndo.muted).toBeUndefined()
+  })
+
+  it('ignores attempts to change structural fields', () => {
+    const { addSegment, updateTrack, exportProtocol, curTime } = createVideoProtocolManager(protocol)
+
+    curTime.value = 0
+    addSegment(textSegment)
+    const trackId = exportProtocol().tracks[0].trackId
+
+    expect(updateTrack(trackId, (track) => {
+      const mutable = track as TrackMutableFields & { trackId?: string, trackType?: string, children?: unknown[], isMain?: boolean }
+      mutable.trackId = 'hacked-track'
+      mutable.trackType = 'audio'
+      mutable.children = []
+      mutable.isMain = true
+      mutable.hidden = true
+    })).toBe(true)
+
+    const track = exportProtocol().tracks[0]
+    expect(track.trackId).toBe(trackId)
+    expect(track.trackType).toBe('text')
+    expect(track.children).toHaveLength(1)
+    expect(track.hidden).toBe(true)
+  })
+
+  it('returns false for an unknown track id', () => {
+    const { updateTrack, exportProtocol } = createVideoProtocolManager(protocol)
+
+    expect(updateTrack('missing-track', (track) => {
+      track.hidden = true
+    })).toBe(false)
+    expect(exportProtocol().tracks).toEqual([])
+  })
+
+  it('accepts a protocol that already carries hidden/muted tracks', () => {
+    const flagged: IVideoProtocol = {
+      id: 'protocol-flags',
+      version: '1.0.0',
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      transitions: [],
+      tracks: [
+        {
+          trackId: 'flagged-track',
+          trackType: 'text',
+          hidden: true,
+          muted: true,
+          children: [textSegment],
+        },
+      ],
+    }
+
+    const { exportProtocol } = createVideoProtocolManager(flagged)
+    const track = exportProtocol().tracks[0]
+    expect(track.hidden).toBe(true)
+    expect(track.muted).toBe(true)
   })
 })

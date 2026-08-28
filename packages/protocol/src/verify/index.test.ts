@@ -903,6 +903,22 @@ describe('verify track', () => {
         const o = { ...track, isMain: 'invalid' }
         expect(() => verifyTrack(o)).toThrowError(generateTypeErrorPrefixReg('/isMain', 'boolean'))
       })
+
+      it('invalid hidden', () => {
+        const o = { ...track, hidden: 'invalid' }
+        expect(() => verifyTrack(o)).toThrowError(generateTypeErrorPrefixReg('/hidden', 'boolean'))
+      })
+
+      it('invalid muted', () => {
+        const o = { ...track, muted: 'invalid' }
+        expect(() => verifyTrack(o)).toThrowError(generateTypeErrorPrefixReg('/muted', 'boolean'))
+      })
+    })
+
+    describe('presentation flags', () => {
+      it('accepts hidden and muted booleans', () => {
+        expect(() => verifyTrack({ ...track, hidden: true, muted: false })).not.toThrowError()
+      })
     })
   })
 })

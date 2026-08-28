@@ -14,6 +14,15 @@ export type AddSegmentResult = ReturnType<ProtocolManager['addSegment']>
 /** Result payload returned by segment mutation commands. */
 export type SegmentMutationResult = ReturnType<ProtocolManager['removeSegment']>
 
+/** Result payload returned by duplicateSegment. */
+export type DuplicateSegmentResult = ReturnType<ProtocolManager['duplicateSegment']>
+
+/** Optional flags accepted by removeSegment (e.g. ripple delete). */
+export type RemoveSegmentOptions = Parameters<ProtocolManager['removeSegment']>[1]
+
+/** The mutable track fields exposed to an updateTrack updater. */
+export type TrackMutableFields = Parameters<Parameters<ProtocolManager['updateTrack']>[1]>[0]
+
 /** Options for moving a segment between tracks or within a track. */
 export type MoveSegmentOptions = Parameters<ProtocolManager['moveSegment']>[0]
 
@@ -57,8 +66,10 @@ export interface EditorCoreCommands {
   setSelectedSegment: ProtocolManager['setSelectedSegment']
   /** Insert a segment into the timeline. */
   addSegment: ProtocolManager['addSegment']
-  /** Remove a segment by id. */
+  /** Remove a segment by id, optionally rippling later segments on the track left. */
   removeSegment: ProtocolManager['removeSegment']
+  /** Duplicate a segment and place the copy at the current playhead (single undo step). */
+  duplicateSegment: ProtocolManager['duplicateSegment']
   /** Mutate a segment (by id or current selection). */
   updateSegment: ProtocolManager['updateSegment']
   /** Move a segment between tracks or positions. */
@@ -73,6 +84,8 @@ export interface EditorCoreCommands {
   removeTransition: ProtocolManager['removeTransition']
   /** Update a transition by segment id. */
   updateTransition: ProtocolManager['updateTransition']
+  /** Update a track's mutable presentation fields (hidden / muted / extra). */
+  updateTrack: ProtocolManager['updateTrack']
   /** Replace a track id (useful for migrations). */
   replaceTrackId: ProtocolManager['replaceTrackId']
   /** Replace a segment id (useful for migrations). */
