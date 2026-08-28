@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import type { SegmentDragPayload, SegmentLayout, TimelineTrack } from '../types'
+import type { SnapResolution } from '../snap'
 import { ref } from 'vue'
 import { useDragDetection } from './useDragDetection'
 import { useDragVisualFeedback } from './useDragVisualFeedback'
@@ -18,7 +19,12 @@ export interface UseDragAndDropOptions {
   trackGapPx: Ref<number>
   pixelsPerMs: Ref<number>
   disableInteraction: Ref<boolean>
-  snap: (time: number) => number
+  /**
+   * Resolves the snapped start time of the dragged segment. Both edges are
+   * considered by the resolver; the returned guide times describe the matches
+   * that were actually applied.
+   */
+  snap: (rawStartMs: number, durationMs: number, excludeId?: string) => SnapResolution
   onDragStart: (payload: SegmentDragPayload) => void
   onDrag: (payload: SegmentDragPayload) => void
   onDragEnd: (payload: SegmentDragPayload) => void
@@ -40,6 +46,8 @@ export function useDragAndDrop(options: UseDragAndDropOptions) {
 
   const draggingState = ref<DragState | null>(null)
   const dragPreview = ref<SegmentDragPayload | null>(null)
+  /** Candidate times matched by the last resolved snap, drawn as guide lines. */
+  const snapGuideTimes = ref<number[]>([])
 
   // 使用检测 hook
   const { detectTrackGap, resolveTrackIndexFromClientY } = useDragDetection(
@@ -52,7 +60,7 @@ export function useDragAndDrop(options: UseDragAndDropOptions) {
   // 使用视觉反馈 hook
   const { snapGuides } = useDragVisualFeedback(
     dragPreview,
-    tracks,
+    snapGuideTimes,
     pixelsPerMs,
   )
 
@@ -68,6 +76,7 @@ export function useDragAndDrop(options: UseDragAndDropOptions) {
       initialY: event.clientY,
       moved: false,
     }
+    snapGuideTimes.value = []
   }
 
   /**
@@ -166,8 +175,10 @@ export function useDragAndDrop(options: UseDragAndDropOptions) {
       }
     }
 
-    const startTime = snap(layout.segment.start + deltaX / Math.max(pixelsPerMs.value, 0.0001))
-    const nextStart = Math.max(0, startTime)
+    const rawStart = layout.segment.start + deltaX / Math.max(pixelsPerMs.value, 0.0001)
+    const resolution = snap(rawStart, duration, layout.segment.id)
+    snapGuideTimes.value = resolution.guideTimes
+    const nextStart = Math.max(0, resolution.time)
     const nextEnd = nextStart + duration
     const payload: SegmentDragPayload = {
       segment: layout.segment,
@@ -214,6 +225,7 @@ export function useDragAndDrop(options: UseDragAndDropOptions) {
     emitDragPreview(draggingState.value, event.clientX, event.clientY, 'end')
     draggingState.value = null
     dragPreview.value = null
+    snapGuideTimes.value = []
   }
 
   return {
@@ -221,6 +233,7 @@ export function useDragAndDrop(options: UseDragAndDropOptions) {
     draggingState,
     dragPreview,
     snapGuides,
+    snapGuideTimes,
 
     // Methods
     startDrag,

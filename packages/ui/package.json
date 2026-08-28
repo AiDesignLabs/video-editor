@@ -19,7 +19,8 @@
   "scripts": {
     "build": "vite build",
     "typecheck": "vue-tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run --config ./vitest.config.ts"
   },
   "peerDependencies": {
     "vue": "catalog:"

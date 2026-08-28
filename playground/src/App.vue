@@ -318,14 +318,49 @@ function togglePlay() {
     inst.play()
 }
 
-function removeSelectedSegment() {
+function removeSelectedSegment(options?: { ripple?: boolean }) {
   const id = selectedSegmentId.value
   if (!id)
     return
 
-  const result = commands.removeSegment(id)
+  const result = commands.removeSegment(id, options)
   if (result.success)
     commands.setSelectedSegment(undefined)
+}
+
+/** Local clipboard for segment copy/paste, holds a detached protocol segment. */
+const segmentClipboard = ref<SegmentUnion | null>(null)
+
+function copySelectedSegment() {
+  const selected = state.selectedSegment.value
+  if (!selected)
+    return
+  segmentClipboard.value = JSON.parse(JSON.stringify(selected)) as SegmentUnion
+}
+
+function pasteClipboardSegment() {
+  const clipboard = segmentClipboard.value
+  if (!clipboard)
+    return
+  // addSegment re-anchors the copy at the playhead and regenerates a colliding id.
+  const result = commands.addSegment(JSON.parse(JSON.stringify(clipboard)) as SegmentUnion)
+  if (result.id)
+    commands.setSelectedSegment(result.id)
+}
+
+function duplicateSelectedSegment() {
+  const id = selectedSegmentId.value
+  if (!id)
+    return
+  const result = commands.duplicateSegment(id)
+  if (result.success)
+    commands.setSelectedSegment(result.id)
+}
+
+function handleTrackToggle(payload: { trackId: string, field: 'hidden' | 'muted', value: boolean }) {
+  commands.updateTrack(payload.trackId, (track) => {
+    track[payload.field] = payload.value
+  })
 }
 
 function handleInspectorUpdate(updater: SegmentUpdater) {
@@ -429,7 +464,26 @@ function handleGlobalKeydown(event: KeyboardEvent) {
 
   if ((event.key === 'Delete' || event.key === 'Backspace') && selectedSegmentId.value) {
     event.preventDefault()
-    removeSelectedSegment()
+    // Shift turns the delete into a ripple delete (following clips shift left).
+    removeSelectedSegment({ ripple: event.shiftKey })
+    return
+  }
+
+  if (withMod && event.key.toLowerCase() === 'c' && selectedSegmentId.value) {
+    event.preventDefault()
+    copySelectedSegment()
+    return
+  }
+
+  if (withMod && event.key.toLowerCase() === 'v' && segmentClipboard.value) {
+    event.preventDefault()
+    pasteClipboardSegment()
+    return
+  }
+
+  if (withMod && event.key.toLowerCase() === 'd' && selectedSegmentId.value) {
+    event.preventDefault()
+    duplicateSelectedSegment()
     return
   }
 
@@ -907,7 +961,7 @@ function handleAddSegmentClick(data: {
             <button class="tool" :disabled="!selectedSegmentId" title="在播放头处分割 (Cmd/Ctrl+B)" @click="splitSelectedSegment">
               分割
             </button>
-            <button class="tool tool--danger" :disabled="!selectedSegmentId" title="删除选中片段 (Delete)" @click="removeSelectedSegment">
+            <button class="tool tool--danger" :disabled="!selectedSegmentId" title="删除选中片段 (Delete，按住 Shift 为波纹删除)" @click="removeSelectedSegment()">
               删除
             </button>
           </div>
@@ -939,6 +993,7 @@ function handleAddSegmentClick(data: {
         @video-segment-mute-toggle="handleVideoSegmentMuteToggle"
         @add-segment="handleAddSegmentClick"
         @transition-edit="handleTransitionEdit"
+        @track-toggle="handleTrackToggle"
       />
     </section>
 

@@ -15,6 +15,10 @@ export interface TimelineTrack {
   type?: string
   color?: string
   isMain?: boolean
+  /** Presentation flag: the track's visuals are skipped by the renderer. */
+  hidden?: boolean
+  /** Presentation flag: the track's audio is skipped by the renderer. */
+  muted?: boolean
   payload?: unknown
   segments: TimelineSegment[]
 }

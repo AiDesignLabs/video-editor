@@ -96,18 +96,12 @@ function getGapsForTrack(trackId: string) {
       class="ve-track"
       :class="{
         've-track--main': trackLayout.track.isMain,
+        've-track--hidden': trackLayout.track.hidden,
         've-track--has-selection': trackLayout.segments.some((layout: SegmentLayout) => layout.isSelected)
       }"
       :style="{ height: `${trackHeight}px` }"
     >
-      <slot
-        name="track"
-        :track="trackLayout.track"
-        :index="trackLayout.trackIndex"
-        :segments="trackLayout.segments"
-        :height="trackHeight"
-      >
-        <div class="ve-track__body">
+      <div class="ve-track__body">
           <div
             v-for="layout in trackLayout.segments"
             v-show="dragPreview?.segment.id !== layout.segment.id && resizePreview?.segment.id !== layout.segment.id"
@@ -206,8 +200,16 @@ function getGapsForTrack(trackId: string) {
               </svg>
             </div>
           </template>
-        </div>
-      </slot>
+      </div><!-- .ve-track__body -->
+
+      <!-- Row-level overlay (track controls), drawn above the track body -->
+      <slot
+        name="track"
+        :track="trackLayout.track"
+        :index="trackLayout.trackIndex"
+        :segments="trackLayout.segments"
+        :height="trackHeight"
+      />
     </div>
   </div>
 </template>
@@ -241,6 +243,11 @@ function getGapsForTrack(trackId: string) {
 .ve-track__body {
   position: relative;
   height: 100%;
+}
+
+/* A hidden track keeps its layout but reads as inactive */
+.ve-track--hidden .ve-track__body {
+  opacity: 0.4;
 }
 
 .ve-segment {

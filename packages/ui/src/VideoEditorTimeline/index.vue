@@ -49,6 +49,7 @@ const emit = defineEmits<{
   (e: 'videoSegmentMuteToggle', payload: { segment: IVideoFramesSegment, track: TrackUnion, muted: boolean }): void
   (e: 'add-segment', { track, startTime, endTime, event }: { track: TrackUnion, startTime: number, endTime?: number, event?: MouseEvent }): void
   (e: 'transition-edit', payload: TransitionEditPayload): void
+  (e: 'track-toggle', payload: { trackId: string, field: 'hidden' | 'muted', value: boolean }): void
 }>()
 
 const innerSelectedId = ref<string | null>(props.selectedSegmentId ?? null)
@@ -122,6 +123,8 @@ const timelineTracks = computed<TimelineTrack[]>(() => filteredTracks.value.map(
     type: track.trackType,
     color: accent,
     isMain,
+    hidden: track.hidden === true,
+    muted: track.muted === true,
     payload: track,
     segments: track.children.map((segment: SegmentUnion) => ({
       ...(isVideoFramesSegment(segment)
@@ -279,6 +282,24 @@ function handleTransitionSeamClick(seam: TransitionSeam) {
   emit('transition-edit', payload)
 }
 
+/** Only tracks that can produce sound expose the mute toggle. */
+function canMuteTrack(track: TimelineTrack) {
+  return track.type === 'frames' || track.type === 'audio'
+}
+
+function resolveTrackId(track: TimelineTrack) {
+  const trackPayload = track.payload as TrackUnion | undefined
+  return trackPayload?.trackId ?? track.id
+}
+
+function handleTrackToggle(track: TimelineTrack, field: 'hidden' | 'muted') {
+  emit('track-toggle', {
+    trackId: resolveTrackId(track),
+    field,
+    value: !(track[field] === true),
+  })
+}
+
 function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: TrackUnion, payload: { segmentId: string, muted: boolean }) {
   if (segment.id !== payload.segmentId)
     return
@@ -337,6 +358,33 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
         <span v-if="seam.existing" class="ve-transition-seam__label">{{ formatSeamDuration(seam.existing.duration) }}</span>
         <span v-else class="ve-transition-seam__icon">⧉</span>
       </button>
+    </template>
+
+    <!-- Per-track visibility / mute toggles, pinned to the row's left edge -->
+    <template #track="{ track }">
+      <div class="ve-track-controls">
+        <button
+          type="button"
+          class="ve-track-toggle"
+          :class="{ 've-track-toggle--off': track.hidden }"
+          :title="track.hidden ? '显示轨道' : '隐藏轨道'"
+          @mousedown.stop
+          @click.stop="handleTrackToggle(track, 'hidden')"
+        >
+          👁
+        </button>
+        <button
+          v-if="canMuteTrack(track)"
+          type="button"
+          class="ve-track-toggle"
+          :class="{ 've-track-toggle--off': track.muted }"
+          :title="track.muted ? '取消静音' : '静音轨道'"
+          @mousedown.stop
+          @click.stop="handleTrackToggle(track, 'muted')"
+        >
+          🔇
+        </button>
+      </div>
     </template>
 
     <template #segment="{ layout }">
@@ -424,6 +472,45 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
 
 .ve-transition-seam--active:hover {
   background: #4f46e5;
+}
+
+/* Track controls: faint until the row is hovered, always readable when active */
+.ve-track-controls {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  z-index: 30;
+  display: flex;
+  gap: 2px;
+  opacity: 0.25;
+  transition: opacity 0.12s ease;
+}
+
+.ve-track:hover .ve-track-controls,
+.ve-track-controls:focus-within {
+  opacity: 1;
+}
+
+.ve-track-toggle {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.75);
+  color: #0f172a;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ve-track-toggle:hover {
+  background: #fff;
+}
+
+.ve-track-toggle--off {
+  opacity: 0.45;
+  background: rgba(15, 23, 42, 0.18);
 }
 
 .ve-transition-seam__label {

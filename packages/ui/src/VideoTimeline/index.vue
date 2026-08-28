@@ -7,12 +7,15 @@ import type {
   TimelineTick,
   TimelineTrack,
 } from './types'
+import type { SnapResolution } from './snap'
+import type { SnapGuide } from './hooks'
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import TimelinePlayhead from '../timeline/TimelinePlayhead.vue'
 import TimelineRuler from '../timeline/TimelineRuler.vue'
 import TimelineToolbar from '../timeline/TimelineToolbar.vue'
 import TimelineTracks from '../timeline/TimelineTracks.vue'
 import { useDragAndDrop } from './hooks'
+import { collectSnapCandidates, quantizeToGrid, resolveSnapCandidates, SNAP_THRESHOLD_PX } from './snap'
 
 defineOptions({ name: 'VideoTimeline' })
 
@@ -168,7 +171,7 @@ const {
   trackGapPx,
   pixelsPerMs,
   disableInteraction: toRef(props, 'disableInteraction'),
-  snap,
+  snap: (rawStartMs, durationMs, excludeId) => resolveSnap(rawStartMs, durationMs, { excludeId }),
   onDragStart: (payload) => {
     emit('segmentDragStart', payload)
   },
@@ -181,12 +184,26 @@ const {
 })
 
 const resizePreview = ref<SegmentResizePayload | null>(null)
+/** Snap guide times matched while resizing (drags keep theirs in the hook). */
+const resizeGuideTimes = ref<number[]>([])
 const dragPreviewPayload = computed(() => dragPreview.value)
 const resizePreviewPayload = computed(() => resizePreview.value)
 const resizingState = ref<ResizeState | null>(null)
 const draggingPlayhead = ref(false)
 const isMouseDownOnTimeline = ref(false)
 const justFinishedDragging = ref(false)
+
+/** Guide lines currently visible: drag guides, else resize guides. */
+const activeSnapGuides = computed<SnapGuide[]>(() => {
+  if (dragPreview.value)
+    return snapGuides.value
+  if (!resizingState.value)
+    return []
+  return resizeGuideTimes.value.map(timeMs => ({
+    time: timeMs,
+    left: timeMs * pixelsPerMs.value,
+  }))
+})
 
 // Calculate dragged segment position offset
 const draggingSegmentLayout = computed(() => {
@@ -331,10 +348,40 @@ function buildTicks(duration: number, pxPerMs: number): TimelineTick[] {
   return ticksList
 }
 
-function snap(time: number) {
+/** Grid step used for plain quantization (explicit snapStep, else one frame). */
+const gridStepMs = computed(() => {
   const customStep = props.snapStep
-  const step = customStep && customStep > 0 ? customStep : frameDurationMs.value
-  return Math.max(Math.round(time / step) * step, 0)
+  return customStep && customStep > 0 ? customStep : frameDurationMs.value
+})
+
+/** Grid-only snap: used by the playhead, which must not magnet to itself. */
+function snap(time: number) {
+  return quantizeToGrid(time, gridStepMs.value)
+}
+
+/**
+ * Edge snapping: tests both edges of the moved range against the grid, every
+ * other segment boundary, the playhead and the timeline origin, within a
+ * pixel-based threshold. Falls back to grid quantization when nothing matches.
+ */
+function resolveSnap(
+  rawStartMs: number,
+  durationMs: number,
+  opts: { excludeId?: string } = {},
+): SnapResolution {
+  const thresholdMs = SNAP_THRESHOLD_PX / Math.max(pixelsPerMs.value, 0.0001)
+  const candidates = collectSnapCandidates({
+    tracks: props.tracks,
+    rawStart: rawStartMs,
+    durationMs,
+    gridStepMs: gridStepMs.value,
+    playheadMs: props.currentTime,
+    excludeId: opts.excludeId,
+  })
+  const resolved = resolveSnapCandidates(candidates, rawStartMs, durationMs, thresholdMs)
+  if (resolved)
+    return resolved
+  return { time: snap(rawStartMs), guideTimes: [] }
 }
 
 function handleBackgroundClick(event: MouseEvent) {
@@ -394,6 +441,7 @@ function startResize(layout: SegmentLayout, edge: 'start' | 'end', event: MouseE
     edge,
   }
   resizePreview.value = payload
+  resizeGuideTimes.value = []
   emit('segmentResizeStart', payload)
 }
 
@@ -406,12 +454,21 @@ function emitResizePreview(state: ResizeState, clientX: number, trigger: 'drag' 
   let nextStart = layout.segment.start
   let nextEnd = layout.segment.end
   if (edge === 'start') {
-    nextStart = snap(Math.max(0, layout.segment.start + deltaMs))
+    // A resize moves a single edge, so the snapped range has no duration.
+    const resolved = resolveSnap(Math.max(0, layout.segment.start + deltaMs), 0, { excludeId: layout.segment.id })
+    resizeGuideTimes.value = resolved.guideTimes
+    nextStart = resolved.time
     if (layout.segment.end - nextStart < minDuration)
       nextStart = layout.segment.end - minDuration
   }
   else {
-    nextEnd = snap(Math.max(layout.segment.start + minDuration, layout.segment.end + deltaMs))
+    const resolved = resolveSnap(
+      Math.max(layout.segment.start + minDuration, layout.segment.end + deltaMs),
+      0,
+      { excludeId: layout.segment.id },
+    )
+    resizeGuideTimes.value = resolved.guideTimes
+    nextEnd = Math.max(layout.segment.start + minDuration, resolved.time)
 
     const { sourceDurationMs, fromTime: fromTimeMs } = layout.segment
     if (
@@ -486,6 +543,7 @@ function handleGlobalMouseUp(event: MouseEvent) {
     emitResizePreview(resizingState.value, event.clientX, 'end')
     resizingState.value = null
     resizePreview.value = null
+    resizeGuideTimes.value = []
     isMouseDownOnTimeline.value = false
     justFinishedDragging.value = true
     return
@@ -656,6 +714,11 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
             @resize-start="startResize"
             @add-segment="handleAddSegment"
           >
+            <!-- Pass through the per-track overlay slot (track controls) -->
+            <template v-if="$slots.track" #track="slotProps">
+              <slot name="track" v-bind="slotProps" />
+            </template>
+
             <template #segment="{ layout, segment, track, isSelected }">
               <slot
                 name="segment"
@@ -752,9 +815,9 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
         </template>
 
         <!-- 吸附辅助线 -->
-        <template v-if="dragPreview && snapGuides.length">
+        <template v-if="activeSnapGuides.length">
           <div
-            v-for="guide in snapGuides"
+            v-for="guide in activeSnapGuides"
             :key="`snap-${guide.time}`"
             class="ve-snap-guide"
             :style="{
