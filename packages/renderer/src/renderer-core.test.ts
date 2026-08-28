@@ -89,29 +89,8 @@ vi.mock('opfs-tools', () => ({
   })),
 }))
 
-vi.mock('pixi.js', () => {
-  class Filter {}
-
-  class BlurFilter extends Filter {
-    public strength = 8
-
-    constructor(options?: { strength?: number }) {
-      super()
-      if (typeof options?.strength === 'number')
-        this.strength = options.strength
-    }
-  }
-
-  class ColorMatrixFilter extends Filter {
-    grayscale() {}
-    sepia() {}
-    negative() {}
-    vintage() {}
-    contrast() {}
-    brightness() {}
-    saturate() {}
-    hue() {}
-  }
+vi.mock('pixi.js', async () => {
+  const { MockBlurFilter: BlurFilter, MockColorMatrixFilter: ColorMatrixFilter, MockFilter: Filter, MOCK_DEFAULT_FILTER_VERT: defaultFilterVert } = await import('../test/pixi-mock')
 
   class Container {
     public children: unknown[] = []
@@ -184,7 +163,7 @@ vi.mock('pixi.js', () => {
     constructor(public options?: unknown) {}
   }
 
-  return { BlurFilter, ColorMatrixFilter, Container, Filter, Graphics, ImageSource, Sprite, Texture }
+  return { BlurFilter, ColorMatrixFilter, Container, defaultFilterVert, Filter, Graphics, ImageSource, Sprite, Texture }
 })
 
 vi.mock('./audio-manager', () => {

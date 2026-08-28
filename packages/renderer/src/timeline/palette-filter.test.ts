@@ -1,6 +1,6 @@
 import type { IPalette } from '@video-editor/shared'
 import { describe, expect, it } from 'vitest'
-import { computePaletteMatrix, PALETTE_NEUTRAL } from './palette-filter'
+import { computePaletteMatrix, computePalettePostUniforms, PALETTE_NEUTRAL, paletteNeedsPostShader, paletteStructuralKey } from './palette-filter'
 
 function palette(patch: Partial<IPalette>): IPalette {
   return { ...PALETTE_NEUTRAL, ...patch }
@@ -79,5 +79,42 @@ describe('computePaletteMatrix', () => {
     expect(r).toBeCloseTo(g, 6)
     expect(r).toBeCloseTo(0.2126 * 1.3, 4)
     expect(b).toBeCloseTo(r, 6)
+  })
+})
+
+describe('palette post shader gating', () => {
+  it('needs the post shader only for sharpness/vignette/grain', () => {
+    expect(paletteNeedsPostShader(PALETTE_NEUTRAL)).toBe(false)
+    // fade stays fully in the color matrix.
+    expect(paletteNeedsPostShader(palette({ fade: 1 }))).toBe(false)
+    expect(paletteNeedsPostShader(palette({ brightness: 1, contrast: -1 }))).toBe(false)
+    expect(paletteNeedsPostShader(palette({ sharpness: -0.2 }))).toBe(true)
+    expect(paletteNeedsPostShader(palette({ vignette: 0.1 }))).toBe(true)
+    expect(paletteNeedsPostShader(palette({ grain: 0.1 }))).toBe(true)
+  })
+
+  it('clamps post uniforms into their protocol ranges', () => {
+    expect(computePalettePostUniforms(palette({ sharpness: -5, vignette: 3, grain: -1 }), 1.5)).toEqual({
+      uSharpness: -1,
+      uVignette: 1,
+      uGrain: 0,
+      uTime: 1.5,
+    })
+    expect(computePalettePostUniforms(PALETTE_NEUTRAL, Number.NaN).uTime).toBe(0)
+  })
+})
+
+describe('paletteStructuralKey', () => {
+  it('is empty for a neutral palette and for no palette', () => {
+    expect(paletteStructuralKey(undefined)).toBe('')
+    expect(paletteStructuralKey(PALETTE_NEUTRAL)).toBe('')
+  })
+
+  it('tracks which fields are active, never their values', () => {
+    expect(paletteStructuralKey(palette({ brightness: 0.1, vignette: 0.2 })))
+      .toBe(paletteStructuralKey(palette({ brightness: 0.9, vignette: 0.8 })))
+    expect(paletteStructuralKey(palette({ brightness: 0.1 })))
+      .not.toBe(paletteStructuralKey(palette({ brightness: 0.1, grain: 0.1 })))
+    expect(paletteStructuralKey(palette({ temperature: 3000 }))).toBe('palette:temperature')
   })
 })

@@ -1,23 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-vi.mock('pixi.js', () => {
-  class Filter {}
-  class BlurFilter extends Filter {}
-  class ColorMatrixFilter extends Filter {
-    grayscale() {}
-    sepia() {}
-    negative() {}
-    vintage() {}
-    contrast() {}
-    brightness() {}
-    saturate() {}
-    hue() {}
-  }
-  return {
-    BlurFilter,
-    ColorMatrixFilter,
-    Filter,
-  }
-})
+vi.mock('pixi.js', async () => (await import('../../test/pixi-mock')).createPixiMock())
 import { createPixiFiltersFromVisualEffects } from './pixi-effects'
 
 describe('createPixiFiltersFromVisualEffects', () => {

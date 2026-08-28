@@ -18,11 +18,36 @@ export {
   evaluateTimelinePlan,
 } from './evaluator'
 
-export type { EffectDefinition } from './effect-registry'
-export { getEffectDefinition, listEffectDefinitions, registerEffect } from './effect-registry'
+export type {
+  EffectDefinition,
+  EffectFilterOptions,
+  EffectUniformDeclaration,
+  ShaderEffectContext,
+} from './effect-registry'
+export {
+  buildEffectFilters,
+  EFFECT_UNIFORM_GROUP,
+  getEffectDefinition,
+  listEffectDefinitions,
+  registerEffect,
+  structuralKeyForEffect,
+  unregisterEffect,
+} from './effect-registry'
 export { cubicBezierEase, findKeyframeTrack, sampleFrames, sampleKeyframes, sampleSegmentKeyframe, sampleVisualKeyframes } from './keyframes'
-export { computePaletteMatrix, PALETTE_NEUTRAL, paletteToColorMatrix } from './palette-filter'
-export { createPixiFiltersFromVisualEffects } from './pixi-effects'
+export {
+  computePaletteMatrix,
+  computePalettePostUniforms,
+  createPalettePostFilter,
+  PALETTE_NEUTRAL,
+  paletteNeedsPostShader,
+  paletteStructuralKey,
+  paletteToColorMatrix,
+  updatePaletteColorMatrixFilter,
+  updatePalettePostFilter,
+} from './palette-filter'
+export { createPixiFiltersFromVisualEffects, resolveEffectDefinition } from './pixi-effects'
+export { createSegmentFilterCache } from './segment-filter-cache'
+export type { SegmentFilterCache, SegmentFilterCacheDeps, SegmentFilterEntry } from './segment-filter-cache'
 export { createPreviewRunner } from './preview-runner'
 
 export type {

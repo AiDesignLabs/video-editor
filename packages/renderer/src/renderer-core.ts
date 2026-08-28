@@ -2,7 +2,7 @@ import type { IKeyframeProperty, ITextSegment, IVideoFramesSegment, IVideoProtoc
 import type { VisualBox } from './gizmo-math'
 import type { ComputedRef, Ref, ShallowRef } from '@vue/reactivity'
 import type { Application, ApplicationOptions, Filter as PixiFilter } from 'pixi.js'
-import type { TimelinePlan } from './timeline'
+import type { ShaderEffectContext, TimelinePlan } from './timeline'
 import type { MaybeRef, PixiDisplayObject } from './types'
 import { createResourceManager, createValidator, getResourceKey } from '@video-editor/protocol'
 import {
@@ -34,8 +34,7 @@ import { buildTextRuns, renderTextBitmap } from './text'
 import { measureTextRuns } from './text-bitmap'
 import {
   createEmptyEvaluatorState,
-  createPixiFiltersFromVisualEffects,
-  paletteToColorMatrix,
+  createSegmentFilterCache,
   createPreviewAudioTicker,
   createPreviewRunner,
   createTimelineTransport,
@@ -252,7 +251,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       if ((display as { destroyed?: boolean }).destroyed)
         continue
       activeFilterSegmentIds.add(segment.id)
-      applyVisualEffects(display, segment, visual.effects)
+      applyVisualEffects(display, segment, visual.effects, {
+        timeMs: renderTimelineMs,
+        sourceTimeMs: visual.sourceTimeMs,
+      })
       const { layout, baseWidth, baseHeight } = applyDisplayProps(display, segment, stageWidth, stageHeight, {
         opacity: visual.opacity,
         transform: visual.transform,
@@ -294,27 +296,16 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     task.app.render()
   }
 
-  // Filters are reused across frames per segment and only rebuilt when their
-  // parameters change; entries are destroyed once the segment leaves the plan.
-  const segmentFilterCache = new Map<string, { key: string, filters: PixiFilter[] }>()
-
-  function destroySegmentFilters(entry: { filters: PixiFilter[] }) {
-    for (const filter of entry.filters)
-      filter.destroy()
-  }
+  // Filters are reused across frames per segment: only a structural change
+  // (different effect chain / newly active palette fields) rebuilds them,
+  // animated params are pushed into the live filters each frame.
+  const segmentFilterCache = createSegmentFilterCache()
 
   function evictInactiveSegmentFilters(activeIds: Set<string>) {
-    for (const [id, entry] of segmentFilterCache) {
-      if (activeIds.has(id))
-        continue
-      destroySegmentFilters(entry)
-      segmentFilterCache.delete(id)
-    }
+    segmentFilterCache.evictInactive(activeIds)
   }
 
   function clearSegmentFilterCache() {
-    for (const entry of segmentFilterCache.values())
-      destroySegmentFilters(entry)
     segmentFilterCache.clear()
   }
 
@@ -322,26 +313,13 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     display: PixiDisplayObject,
     segment: SegmentUnion,
     effects: TimelinePlan['visuals'][number]['effects'],
+    ctx: ShaderEffectContext,
   ) {
     const palette = 'palette' in segment ? segment.palette : undefined
-    const key = `${effects?.length ? JSON.stringify(effects) : ''}|${palette ? JSON.stringify(palette) : ''}`
-
-    let entry = segmentFilterCache.get(segment.id)
-    if (!entry || entry.key !== key) {
-      if (entry)
-        destroySegmentFilters(entry)
-      const filters: PixiFilter[] = effects?.length ? createPixiFiltersFromVisualEffects(effects) : []
-      if (palette) {
-        const paletteFilter = paletteToColorMatrix(palette)
-        if (paletteFilter)
-          filters.push(paletteFilter)
-      }
-      entry = { key, filters }
-      segmentFilterCache.set(segment.id, entry)
-    }
+    const filters = segmentFilterCache.resolve(segment.id, effects, palette, ctx)
 
     ;(display as PixiDisplayObject & { filters?: PixiFilter[] | null }).filters
-      = entry.filters.length ? entry.filters : null
+      = filters.length ? filters : null
   }
 
   const queueRender = createRenderQueue(() => renderScene({

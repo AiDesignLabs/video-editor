@@ -20,3 +20,5 @@ export {
   toBoxLocalPoint,
 } from './src/index'
 export type { GizmoBox, VisualBox } from './src/index'
+export { listEffectDefinitions, registerEffect, unregisterEffect } from './src/index'
+export type { EffectDefinition, ShaderEffectContext, VisualEffectParam } from './src/index'

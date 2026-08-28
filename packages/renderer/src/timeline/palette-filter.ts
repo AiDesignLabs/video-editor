@@ -1,6 +1,7 @@
 import type { IPalette } from '@video-editor/shared'
-import type { ColorMatrix as PixiColorMatrix } from 'pixi.js'
-import { ColorMatrixFilter } from 'pixi.js'
+import type { ColorMatrix as PixiColorMatrix, Filter } from 'pixi.js'
+import { ColorMatrixFilter, defaultFilterVert, Filter as PixiFilter } from 'pixi.js'
+import { readFilterUniforms } from './effect-registry'
 
 export const PALETTE_NEUTRAL: IPalette = {
   temperature: 6500,
@@ -37,7 +38,7 @@ const IDENTITY: ColorMatrix = [
  * - shadow: dark-range lift approximated by a constant offset
  * - fade: desaturation + slight offset toward gray
  * `sharpness`, `vignette` and `grain` are not expressible as a color matrix
- * and are ignored here (custom shader follow-up).
+ * and are handled by the palette post shader (see `createPalettePostFilter`).
  */
 export function computePaletteMatrix(palette: IPalette): ColorMatrix | null {
   let matrix = IDENTITY
@@ -118,6 +119,158 @@ export function paletteToColorMatrix(palette: IPalette): ColorMatrixFilter | nul
   const filter = new ColorMatrixFilter()
   filter.matrix = [...matrix] as unknown as PixiColorMatrix
   return filter
+}
+
+/**
+ * Re-assign the matrix of an existing palette filter in place, so keyframed
+ * palettes do not force a filter rebuild every frame.
+ */
+export function updatePaletteColorMatrixFilter(filter: ColorMatrixFilter, palette: IPalette): void {
+  const matrix = computePaletteMatrix(palette) ?? IDENTITY
+  filter.matrix = [...matrix] as unknown as PixiColorMatrix
+}
+
+/**
+ * Structural fingerprint of a palette: which fields are active, never their
+ * values. Animating an already-active field therefore keeps the same filters.
+ */
+export function paletteStructuralKey(palette: IPalette | undefined): string {
+  if (!palette)
+    return ''
+  const active: string[] = []
+  if (Math.abs(clamp(palette.temperature, 1000, 40000) - 6500) > 1)
+    active.push('temperature')
+  for (const field of ['hue', 'saturation', 'brightness', 'contrast', 'shine', 'highlight', 'shadow', 'fade', 'sharpness', 'vignette', 'grain'] as const) {
+    if (nonZero(palette[field]))
+      active.push(field)
+  }
+  return active.length ? `palette:${active.join(',')}` : ''
+}
+
+/**
+ * Whether the palette needs the post shader. `fade` stays fully in the color
+ * matrix (it is expressible there); only sharpness/vignette/grain need GLSL.
+ */
+export function paletteNeedsPostShader(palette: IPalette): boolean {
+  return nonZero(palette.sharpness) || nonZero(palette.vignette) || nonZero(palette.grain)
+}
+
+export interface PalettePostUniforms {
+  uSharpness: number
+  uVignette: number
+  uGrain: number
+  uTime: number
+}
+
+/** Pure uniform computation for the palette post shader. */
+export function computePalettePostUniforms(palette: IPalette, timeSec: number): PalettePostUniforms {
+  return {
+    uSharpness: clamp(palette.sharpness, -1, 1),
+    uVignette: clamp(palette.vignette, 0, 1),
+    uGrain: clamp(palette.grain, 0, 1),
+    uTime: Number.isFinite(timeSec) ? timeSec : 0,
+  }
+}
+
+/** Uniform group name of the palette post shader. */
+export const PALETTE_POST_UNIFORM_GROUP = 'uPalettePost'
+
+/**
+ * WebGL-only post shader covering the palette fields a color matrix cannot
+ * express: sharpness (3x3 unsharp mask), vignette (radial smoothstep) and
+ * grain (hash noise animated by uTime).
+ */
+export const PALETTE_POST_FRAGMENT = `
+precision highp float;
+
+in vec2 vTextureCoord;
+out vec4 finalColor;
+
+uniform sampler2D uTexture;
+uniform vec4 uInputSize;
+uniform vec4 uInputClamp;
+
+uniform float uSharpness;
+uniform float uVignette;
+uniform float uGrain;
+uniform float uTime;
+
+vec3 unpremultiply(vec4 c)
+{
+    return c.a > 0.0 ? c.rgb / c.a : c.rgb;
+}
+
+vec3 sampleUnpremultiplied(vec2 coord)
+{
+    return unpremultiply(texture(uTexture, clamp(coord, uInputClamp.xy, uInputClamp.zw)));
+}
+
+float hash(vec2 p)
+{
+    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+void main(void)
+{
+    vec4 source = texture(uTexture, vTextureCoord);
+    vec3 color = unpremultiply(source);
+
+    if (uSharpness != 0.0) {
+        vec2 texel = uInputSize.zw;
+        vec3 sum = sampleUnpremultiplied(vTextureCoord + vec2(-texel.x, 0.0));
+        sum += sampleUnpremultiplied(vTextureCoord + vec2(texel.x, 0.0));
+        sum += sampleUnpremultiplied(vTextureCoord + vec2(0.0, -texel.y));
+        sum += sampleUnpremultiplied(vTextureCoord + vec2(0.0, texel.y));
+        vec3 blurred = sum * 0.25;
+        color = color + (color - blurred) * uSharpness * 2.0;
+    }
+
+    if (uVignette > 0.0) {
+        vec2 uv = vTextureCoord / max(uInputClamp.zw, vec2(0.0001));
+        float dist = distance(uv, vec2(0.5)) / 0.70710678;
+        color *= 1.0 - uVignette * smoothstep(0.4, 1.0, dist);
+    }
+
+    if (uGrain > 0.0) {
+        float noise = hash(vTextureCoord * uInputSize.xy + vec2(uTime * 37.0, uTime * 17.0));
+        color += (noise - 0.5) * uGrain * 0.5;
+    }
+
+    color = clamp(color, 0.0, 1.0);
+    finalColor = vec4(color * source.a, source.a);
+}
+`
+
+/** Build the palette post shader filter. */
+export function createPalettePostFilter(palette: IPalette): Filter {
+  const uniforms = computePalettePostUniforms(palette, 0)
+  return PixiFilter.from({
+    gl: { vertex: defaultFilterVert, fragment: PALETTE_POST_FRAGMENT },
+    resources: {
+      [PALETTE_POST_UNIFORM_GROUP]: {
+        uSharpness: { value: uniforms.uSharpness, type: 'f32' },
+        uVignette: { value: uniforms.uVignette, type: 'f32' },
+        uGrain: { value: uniforms.uGrain, type: 'f32' },
+        uTime: { value: uniforms.uTime, type: 'f32' },
+      },
+    },
+  })
+}
+
+/** Push the current palette values into an existing post shader filter. */
+export function updatePalettePostFilter(filter: Filter, palette: IPalette, timeSec: number): void {
+  const bag = readFilterUniforms(filter, PALETTE_POST_UNIFORM_GROUP)
+  if (!bag)
+    return
+  const uniforms = computePalettePostUniforms(palette, timeSec)
+  bag.uSharpness = uniforms.uSharpness
+  bag.uVignette = uniforms.uVignette
+  bag.uGrain = uniforms.uGrain
+  bag.uTime = uniforms.uTime
+}
+
+function nonZero(value: number): boolean {
+  return Number.isFinite(value) && value !== 0
 }
 
 function clamp(value: number, min: number, max: number) {

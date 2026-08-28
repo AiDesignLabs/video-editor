@@ -12,6 +12,9 @@ export async function createApp(opts?: Partial<ApplicationOptions>) {
   const app = new Application()
 
   await app.init({
+    // Custom effect/palette shaders ship GLSL only; on a WebGPU renderer the
+    // whole filter chain of a display would be silently skipped.
+    preference: 'webgl',
     resizeTo: window,
     backgroundAlpha: 0,
     resolution: globalThis.devicePixelRatio || 1,
