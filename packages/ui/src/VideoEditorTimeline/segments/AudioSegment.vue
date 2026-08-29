@@ -224,7 +224,7 @@ const waveformDisplay = computed(() => {
 <style scoped>
 :where(.audio-segment) {
   --at-apply: relative flex items-center w-full h-full overflow-hidden rounded-4px;
-  background-color: #EFEFEF;
+  background-color: var(--ve-surface-control-muted);
 }
 
 :where(.audio-segment .audio-segment__waveform) {
@@ -238,7 +238,7 @@ const waveformDisplay = computed(() => {
 
 :where(.audio-segment .audio-segment__placeholder) {
   --at-apply: flex items-center justify-center w-full h-full text-xs;
-  color: #2B2B2B;
+  color: var(--ve-content-primary);
   opacity: 0.6;
 }
 

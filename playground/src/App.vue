@@ -21,7 +21,7 @@ import { clearBootCache, readBootCache, writeBootCache } from './project-boot'
 const swatches = {
   primary: 'https://dummyimage.com/1280x720/6aa7ff/ffffff.png&text=Clip+A',
   alt: 'https://dummyimage.com/1280x720/f97316/ffffff.png&text=Clip+C',
-  video: 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+  video: 'https://mogic-static.oss-cn-hangzhou.aliyuncs.com/test/output.mp4',
   audio: `https://creatly-public.oss-cn-shanghai.aliyuncs.com/test/audio-test.mp3`,
   extra: 'https://dummyimage.com/1280x720/22c55e/ffffff.png&text=Clip+D',
 }
@@ -94,9 +94,9 @@ const initialProtocol: IVideoProtocol = {
           segmentType: 'frames',
           type: 'video',
           url: swatches.video,
-          fromTime: 15000,
+          fromTime: 0,
           startTime: 3000,
-          endTime: 13000,
+          endTime: 9000,
           opacity: 1,
           volume: 1,
           extra: { aiTag: 'video-segment', confidence: 0.88, label: 'Big Buck Bunny (Sound)' },
@@ -107,7 +107,7 @@ const initialProtocol: IVideoProtocol = {
           type: 'image',
           format: 'img',
           url: swatches.alt,
-          startTime: 13000,
+          startTime: 9000,
           endTime: 16000,
           opacity: 1,
           extra: { aiTag: 'ending', confidence: 0.91, label: 'Clip C' },
@@ -378,7 +378,6 @@ const protocolDuration = computed(() => {
 const durationMs = computed(() => renderer.value?.duration.value ?? protocolDuration.value)
 const currentTimeMs = computed(() => renderer.value?.currentTime.value ?? scrub.value)
 const isPlaying = computed(() => renderer.value?.isPlaying.value ?? false)
-const clipCount = computed(() => protocol.value.tracks.reduce((acc, track) => acc + track.children.length, 0))
 const selectedSegment = computed(() => state.selectedSegment.value ?? null)
 const undoCount = computed(() => state.undoCount.value)
 const redoCount = computed(() => state.redoCount.value)
@@ -1064,44 +1063,41 @@ function handleAddSegmentClick(data: {
 <template>
   <main class="studio">
     <header class="topbar">
-      <div class="topbar__brand">
-        <span class="topbar__mark" aria-hidden="true" />
-        <span class="topbar__name">video-editor</span>
-        <span class="topbar__tag">playground</span>
+      <div class="topbar__left">
+        <button class="topbar__back" type="button" title="返回画布">
+          <span class="topbar__back-icon i-creatly-return" aria-hidden="true" />
+          <span>返回</span>
+        </button>
+
+        <ProjectMenu
+          :projects="projects"
+          :current-id="currentProjectId"
+          :current-name="currentProjectName"
+          :saved-at="lastSavedAt"
+          @select="switchProject"
+          @create="createProject"
+          @rename="renameProject"
+          @delete="deleteProject"
+        />
       </div>
 
-      <ProjectMenu
-        :projects="projects"
-        :current-id="currentProjectId"
-        :current-name="currentProjectName"
-        :saved-at="lastSavedAt"
-        @select="switchProject"
-        @create="createProject"
-        @rename="renameProject"
-        @delete="deleteProject"
-      />
-
-      <div class="heartbeat" title="reactive protocol 实时状态">
-        <span class="heartbeat__cell">
-          <em>{{ protocol.tracks.length }}</em>tracks
-        </span>
-        <span class="heartbeat__cell">
-          <em>{{ clipCount }}</em>segments
-        </span>
-        <span class="heartbeat__cell">
-          <em>{{ undoCount }}</em>undo
-        </span>
-        <span class="heartbeat__cell heartbeat__cell--selection" :class="{ 'heartbeat__cell--empty': !selectedSegment }">
-          <em>{{ selectedSegment ? selectedSegment.id : '—' }}</em>selected
-        </span>
+      <div class="topbar__mode" aria-label="工作区模式">
+        <button class="topbar__mode-button topbar__mode-button--active" type="button">
+          <span class="topbar__mode-icon i-creatly-preview" aria-hidden="true" />
+          预览
+        </button>
+        <button class="topbar__mode-button" type="button" disabled>
+          <span class="topbar__mode-icon i-creatly-comment" aria-hidden="true" />
+          审片
+        </button>
       </div>
 
       <div class="topbar__actions">
-        <button class="tool" :disabled="!undoCount" title="撤销 (Cmd/Ctrl+Z)" @click="commands.undo()">
-          撤销
+        <button class="tool tool--icon" :disabled="!undoCount" title="撤销 (Cmd/Ctrl+Z)" aria-label="撤销" @click="commands.undo()">
+          <span class="tool__icon i-creatly-withdraw" aria-hidden="true" />
         </button>
-        <button class="tool" :disabled="!redoCount" title="重做 (Cmd/Ctrl+Shift+Z)" @click="commands.redo()">
-          重做
+        <button class="tool tool--icon" :disabled="!redoCount" title="重做 (Cmd/Ctrl+Shift+Z)" aria-label="重做" @click="commands.redo()">
+          <span class="tool__icon i-creatly-advance" aria-hidden="true" />
         </button>
         <span class="topbar__divider" />
         <button class="tool" :class="{ 'tool--active': drawerOpen && drawerTab === 'assets' }" @click="openDrawer('assets')">
@@ -1117,6 +1113,7 @@ function handleAddSegmentClick(data: {
           演示
         </button>
         <button class="export" :disabled="composeState.loading" @click="exportDialogOpen = true">
+          <span v-if="!composeState.loading" class="export__icon i-creatly-download" aria-hidden="true" />
           {{ composeState.loading ? `导出中 ${Math.round(composeState.progress * 100)}%` : '导出视频' }}
         </button>
       </div>
@@ -1144,14 +1141,14 @@ function handleAddSegmentClick(data: {
 
         <div class="transport">
           <div class="transport__group">
-            <button class="tool" :disabled="!renderer" title="回到开头" @click="seekTo(0)">
-              ⏮
+            <button class="tool tool--icon" :disabled="!renderer" title="回到开头" aria-label="回到开头" @click="seekTo(0)">
+              <span class="tool__icon i-creatly-back-one-frame" aria-hidden="true" />
             </button>
             <button class="transport__play" :disabled="!renderer" :title="isPlaying ? '暂停 (空格)' : '播放 (空格)'" @click="togglePlay">
-              {{ isPlaying ? '⏸' : '▶' }}
+              <span class="transport__play-icon" :class="isPlaying ? 'i-creatly-pause' : 'i-creatly-play'" aria-hidden="true" />
             </button>
-            <button class="tool" :disabled="!renderer" title="跳到末尾" @click="seekTo(durationMs)">
-              ⏭
+            <button class="tool tool--icon" :disabled="!renderer" title="跳到末尾" aria-label="跳到末尾" @click="seekTo(durationMs)">
+              <span class="tool__icon i-creatly-forward-one-frame" aria-hidden="true" />
             </button>
           </div>
 
@@ -1162,9 +1159,11 @@ function handleAddSegmentClick(data: {
 
           <div class="transport__group">
             <button class="tool" :disabled="!selectedSegmentId" title="在播放头处分割 (Cmd/Ctrl+B)" @click="splitSelectedSegment">
+              <span class="tool__leading-icon i-creatly-cutting" aria-hidden="true" />
               分割
             </button>
             <button class="tool tool--danger" :disabled="!selectedSegmentId" title="删除选中片段 (Delete，按住 Shift 为波纹删除)" @click="removeSelectedSegment()">
+              <span class="tool__leading-icon i-creatly-clear" aria-hidden="true" />
               删除
             </button>
           </div>
@@ -1189,6 +1188,7 @@ function handleAddSegmentClick(data: {
         :protocol="protocol"
         :current-time="currentTimeMs"
         :track-types="['sticker', 'effect', 'filter', 'text', 'frames', 'audio']"
+        :show-track-rail="true"
         @update:current-time="handleTimelineCurrentTime"
         @segment-click="handleTimelineSegmentClick"
         @segment-drag-end="handleSegmentDragEnd"
@@ -1197,7 +1197,17 @@ function handleAddSegmentClick(data: {
         @add-segment="handleAddSegmentClick"
         @transition-edit="handleTransitionEdit"
         @track-toggle="handleTrackToggle"
-      />
+      >
+        <template #track-rail="{ track }">
+          <div class="track-rail-icon" :title="`${track.label} 轨道`">
+            <span
+              class="track-rail-icon__glyph"
+              :class="track.type === 'audio' ? 'i-creatly-audio' : track.type === 'text' ? 'i-creatly-text' : track.type === 'frames' ? 'i-creatly-video' : 'i-creatly-element'"
+              aria-hidden="true"
+            />
+          </div>
+        </template>
+      </VideoEditorTimeline>
     </section>
 
     <ExportDialog

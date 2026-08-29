@@ -39,8 +39,8 @@ const label = computed(() => {
 <style scoped>
 :where(.segment-base) {
   --at-apply: relative flex items-center w-full h-full p-1.5 rounded-4px;
-  background: rgba(255, 255, 255, 0.32);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  background: var(--ve-surface-control-subtle);
+  box-shadow: inset 0 0 0 1px var(--ve-border-weak);
 }
 
 :where(.segment-base .segment-base__content) {
@@ -49,7 +49,7 @@ const label = computed(() => {
 
 :where(.segment-base .segment-base__pill) {
   --at-apply: inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold whitespace-nowrap;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+  box-shadow: inset 0 0 0 1px var(--ve-border-weak);
 }
 
 :where(.segment-base .segment-base__pill--primary) {
@@ -58,7 +58,7 @@ const label = computed(() => {
 }
 
 :where(.segment-base .segment-base__pill--muted) {
-  color: rgba(15, 23, 42, 0.7);
+  color: var(--ve-content-secondary);
   background: rgba(34, 34, 38, 0.05);
 }
 

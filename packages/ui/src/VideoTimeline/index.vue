@@ -9,7 +9,7 @@ import type {
 } from './types'
 import type { SnapResolution } from './snap'
 import type { SnapGuide } from './hooks'
-import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, toRef, useSlots, watch } from 'vue'
 import TimelinePlayhead from '../timeline/TimelinePlayhead.vue'
 import TimelineRuler from '../timeline/TimelineRuler.vue'
 import TimelineToolbar from '../timeline/TimelineToolbar.vue'
@@ -33,6 +33,7 @@ const props = withDefaults(defineProps<{
   minSegmentDuration?: number
   selectedSegmentId?: string | null
   disableInteraction?: boolean
+  showTrackRail?: boolean
   fps?: number
 }>(), {
   minZoom: 0.25,
@@ -44,6 +45,7 @@ const props = withDefaults(defineProps<{
   minSegmentDuration: 60,
   selectedSegmentId: null,
   disableInteraction: false,
+  showTrackRail: false,
   fps: 30,
 })
 
@@ -60,6 +62,10 @@ const emit = defineEmits<{
   (e: 'backgroundClick', event: MouseEvent): void
   (e: 'add-segment', { track, startTime, endTime, event }: { track: TimelineTrack, startTime: number, endTime?: number, event?: MouseEvent }): void
 }>()
+
+const DEFAULT_TRACK_RAIL_WIDTH = 28
+const slots = useSlots()
+const hasTrackRailSlot = computed(() => props.showTrackRail || Boolean(slots['track-rail']))
 
 const viewportRef = ref<HTMLElement | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
@@ -219,7 +225,7 @@ const draggingSegmentLayout = computed(() => {
   if (!layout)
     return null
 
-  const deltaX = (payload.startTime - payload.segment.start) * pixelsPerMs.value
+  const left = Math.max(0, layout.left + payload.mouseDeltaX)
 
   // Calculate vertical position - use raw mouse Y offset to let segment fully follow mouse
   const originalTop = rulerHeightPx.value + payload.trackIndex * (trackHeightPx.value + trackGapPx.value) + trackGapPx.value
@@ -227,7 +233,7 @@ const draggingSegmentLayout = computed(() => {
 
   return {
     ...layout,
-    left: layout.left + deltaX,
+    left,
     top,
   }
 })
@@ -283,7 +289,7 @@ function centerViewportOnCurrentTime() {
   if (!viewport)
     return
   const halfWidth = viewport.clientWidth / 2
-  const desired = props.currentTime * pixelsPerMs.value - halfWidth
+  const desired = props.currentTime * pixelsPerMs.value + getTimelineTrackRailWidth() - halfWidth
   viewport.scrollLeft = Math.max(0, desired)
 }
 
@@ -394,12 +400,38 @@ function handleBackgroundClick(event: MouseEvent) {
     return
   }
 
-  const rect = contentRef.value.getBoundingClientRect()
-  const x = event.clientX - rect.left
+  const x = resolveTimelineClientX(event.clientX)
   const nextTime = snap(x / Math.max(pixelsPerMs.value, 0.0001))
   emit('update:currentTime', nextTime)
   emit('backgroundClick', event)
   isMouseDownOnTimeline.value = true
+}
+
+function getTimelineTrackRailWidth() {
+  if (!hasTrackRailSlot.value)
+    return 0
+
+  const content = contentRef.value
+  if (!content)
+    return DEFAULT_TRACK_RAIL_WIDTH
+
+  const value = Number.parseFloat(getComputedStyle(content).getPropertyValue('--ve-track-rail-width'))
+  return Number.isFinite(value) ? Math.max(value, 0) : DEFAULT_TRACK_RAIL_WIDTH
+}
+
+function resolveTimelineClientX(clientX: number) {
+  if (!contentRef.value)
+    return 0
+
+  const rect = contentRef.value.getBoundingClientRect()
+  return Math.max(0, clientX - rect.left - getTimelineTrackRailWidth())
+}
+
+function formatTimelineX(left: number) {
+  if (!hasTrackRailSlot.value)
+    return `${left}px`
+
+  return `calc(${left}px + var(--ve-track-rail-width, ${DEFAULT_TRACK_RAIL_WIDTH}px))`
 }
 
 function handlePlayheadMouseDown(event: MouseEvent) {
@@ -413,10 +445,7 @@ function handlePlayheadMouseDown(event: MouseEvent) {
 }
 
 function seekByClientX(clientX: number) {
-  if (!contentRef.value)
-    return
-  const rect = contentRef.value.getBoundingClientRect()
-  const relativeX = clientX - rect.left
+  const relativeX = resolveTimelineClientX(clientX)
   const nextTime = snap(relativeX / Math.max(pixelsPerMs.value, 0.0001))
   emit('update:currentTime', nextTime)
 }
@@ -655,7 +684,10 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 </script>
 
 <template>
-  <div class="ve-timeline">
+  <div
+    class="ve-timeline"
+    :class="{ 've-timeline--interacting': dragPreview || resizePreview || draggingPlayhead }"
+  >
     <slot
       name="toolbar"
       :zoom="innerZoom"
@@ -679,83 +711,96 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
       />
     </slot>
 
-    <div
-      ref="viewportRef"
-      class="ve-timeline__viewport"
-      @click="handleBackgroundClick"
-    >
+    <div class="ve-timeline__body">
       <div
-        ref="contentRef"
-        class="ve-timeline__content"
-        :style="{ width: `${contentWidthPx}px` }"
+        ref="viewportRef"
+        class="ve-timeline__viewport"
+        @click="handleBackgroundClick"
       >
-        <slot name="ruler" :ticks="ticks" :pixels-per-ms="pixelsPerMs">
-          <TimelineRuler :ticks="ticks" :style="{ height: `${rulerHeightPx}px` }" />
-        </slot>
+        <div
+          ref="contentRef"
+          class="ve-timeline__content"
+          :class="{ 've-timeline__content--with-track-rail': hasTrackRailSlot }"
+          :style="{ width: `${contentWidthPx}px` }"
+        >
+          <div class="ve-timeline__ruler-layer">
+            <slot name="ruler" :ticks="ticks" :pixels-per-ms="pixelsPerMs">
+              <TimelineRuler :ticks="ticks" :style="{ height: `${rulerHeightPx}px` }" />
+            </slot>
+          </div>
 
-        <slot name="playhead" :left="playheadLeft" :current-time="currentTime">
-          <TimelinePlayhead
-            class="top-0"
-            :left="playheadLeft"
-            @drag-start="handlePlayheadMouseDown"
-          />
-        </slot>
+          <slot name="playhead" :left="playheadLeft" :current-time="currentTime">
+            <TimelinePlayhead
+              :left="formatTimelineX(playheadLeft)"
+              @drag-start="handlePlayheadMouseDown"
+            />
+          </slot>
 
-        <div ref="tracksRef">
-          <TimelineTracks
-            :tracks="segmentLayouts"
-            :track-height="trackHeightPx"
-            :track-gap="trackGapPx"
-            :selected-segment-id="props.selectedSegmentId"
-            :drag-preview="dragPreview"
-            :resize-preview="resizePreview"
-            @segment-click="handleSegmentClick"
-            @segment-mousedown="startDrag"
-            @resize-start="startResize"
-            @add-segment="handleAddSegment"
+          <div ref="tracksRef">
+            <TimelineTracks
+              :tracks="segmentLayouts"
+              :track-height="trackHeightPx"
+              :track-gap="trackGapPx"
+              :selected-segment-id="props.selectedSegmentId"
+              :show-track-rail="hasTrackRailSlot"
+              :drag-preview="dragPreview"
+              :resize-preview="resizePreview"
+              @segment-click="handleSegmentClick"
+              @segment-mousedown="startDrag"
+              @resize-start="startResize"
+              @add-segment="handleAddSegment"
+            >
+              <template #track-rail="slotProps">
+                <slot name="track-rail" v-bind="slotProps" />
+              </template>
+
+              <!-- Pass through the per-track overlay slot (track controls) -->
+              <template v-if="$slots.track" #track="slotProps">
+                <slot name="track" v-bind="slotProps" />
+              </template>
+
+              <template #segment="{ layout, segment, track, isSelected }">
+                <slot
+                  name="segment"
+                  :layout="layout"
+                  :segment="segment"
+                  :track="track"
+                  :is-selected="isSelected"
+                >
+                  <div class="ve-segment__content">
+                    <div class="ve-segment__title">
+                      {{ segment.type || 'segment' }}
+                    </div>
+                    <div class="ve-segment__time">
+                      {{ formatTime(segment.start) }} - {{ formatTime(segment.end) }}
+                    </div>
+                  </div>
+                </slot>
+              </template>
+            </TimelineTracks>
+          </div>
+
+          <!-- 轨道之上的自定义覆盖层（如转场手柄），与拖拽预览共用坐标系 -->
+          <div
+            class="ve-timeline__overlay-layer"
+            :class="{ 've-timeline__overlay-layer--with-track-rail': hasTrackRailSlot }"
           >
-            <!-- Pass through the per-track overlay slot (track controls) -->
-            <template v-if="$slots.track" #track="slotProps">
-              <slot name="track" v-bind="slotProps" />
-            </template>
-
-            <template #segment="{ layout, segment, track, isSelected }">
-              <slot
-                name="segment"
-                :layout="layout"
-                :segment="segment"
-                :track="track"
-                :is-selected="isSelected"
-              >
-                <div class="ve-segment__content">
-                  <div class="ve-segment__title">
-                    {{ segment.type || 'segment' }}
-                  </div>
-                  <div class="ve-segment__time">
-                    {{ formatTime(segment.start) }} - {{ formatTime(segment.end) }}
-                  </div>
-                </div>
-              </slot>
-            </template>
-          </TimelineTracks>
-        </div>
-
-        <!-- 轨道之上的自定义覆盖层（如转场手柄），与拖拽预览共用坐标系 -->
-        <slot
-          name="overlay"
-          :track-layouts="segmentLayouts"
-          :pixels-per-ms="pixelsPerMs"
-          :ruler-height="rulerHeightPx"
-          :track-height="trackHeightPx"
-          :track-gap="trackGapPx"
-        />
+            <slot
+              name="overlay"
+              :track-layouts="segmentLayouts"
+              :pixels-per-ms="pixelsPerMs"
+              :ruler-height="rulerHeightPx"
+              :track-height="trackHeightPx"
+              :track-gap="trackGapPx"
+            />
+          </div>
 
         <!-- 拖拽中的 segment (提升到轨道外避免被 overflow 裁剪) -->
         <template v-if="draggingSegmentLayout">
           <div
             class="ve-segment ve-segment--dragging"
             :style="{
-              left: `${draggingSegmentLayout.left}px`,
+              left: formatTimelineX(draggingSegmentLayout.left),
               width: `${draggingSegmentLayout.width}px`,
               top: `${draggingSegmentLayout.top}px`,
               height: `${trackHeightPx}px`,
@@ -786,7 +831,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
           <div
             class="ve-segment ve-segment--placeholder"
             :style="{
-              left: `${dragPreviewPayload.startTime * pixelsPerMs}px`,
+              left: formatTimelineX(dragPreviewPayload.startTime * pixelsPerMs),
               width: `${(dragPreviewPayload.endTime - dragPreviewPayload.startTime) * pixelsPerMs}px`,
               top: `${placeholderTop}px`,
               height: `${trackHeightPx}px`,
@@ -805,7 +850,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
           <div
             class="ve-segment ve-segment--preview"
             :style="{
-              left: `${resizePreviewPayload.startTime * pixelsPerMs}px`,
+              left: formatTimelineX(resizePreviewPayload.startTime * pixelsPerMs),
               width: `${(resizePreviewPayload.endTime - resizePreviewPayload.startTime) * pixelsPerMs}px`,
               top: `${rulerHeightPx + resizePreviewPayload.trackIndex * (trackHeightPx + trackGapPx) + trackGapPx}px`,
               height: `${trackHeightPx}px`,
@@ -821,7 +866,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
             :key="`snap-${guide.time}`"
             class="ve-snap-guide"
             :style="{
-              left: `${guide.left}px`,
+              left: formatTimelineX(guide.left),
               top: `${rulerHeightPx}px`,
               height: `calc(100% - ${rulerHeightPx}px)`,
             }"
@@ -834,11 +879,12 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
             class="ve-new-track-line"
             :style="{
               top: `${rulerHeightPx + dragPreview.targetTrackIndex * (trackHeightPx + trackGapPx)}px`,
-              left: '0',
+              left: hasTrackRailSlot ? `var(--ve-track-rail-width, ${DEFAULT_TRACK_RAIL_WIDTH}px)` : '0',
               right: '0',
             }"
           />
         </template>
+        </div>
       </div>
     </div>
   </div>
@@ -847,28 +893,97 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 <style scoped>
 :where(.ve-timeline) {
   --ve-primary: #222226;
+  --ve-track-rail-width: 28px;
+  --ve-content-primary: rgba(0, 0, 0, 0.9);
+  --ve-content-secondary: rgba(0, 0, 0, 0.55);
+  --ve-content-tertiary: rgba(0, 0, 0, 0.35);
+  --ve-content-on-primary: rgba(255, 255, 255, 0.9);
+  --ve-surface-elevated: #fff;
+  --ve-surface-control-subtle: rgba(0, 0, 0, 0.05);
+  --ve-surface-control-muted: rgba(0, 0, 0, 0.08);
+  --ve-surface-control-hover: rgba(0, 0, 0, 0.1);
+  --ve-border-weak: rgba(0, 0, 0, 0.05);
+  --ve-border-subtle: rgba(0, 0, 0, 0.12);
+  --ve-selection-background: rgba(90, 90, 255, 0.12);
+  --ve-selection-border: #5a5aff;
+  --ve-shadow-floating: 0 8px 10px -5px rgba(0, 0, 0, 0.08), 0 6px 30px 5px rgba(0, 0, 0, 0.05);
+  color-scheme: light;
   --at-apply: flex flex-col w-full max-w-full min-w-0 rounded-10px h-full;
 }
 
+:where(.ve-theme-dark .ve-timeline),
+:where(.ve-timeline[data-theme='dark']) {
+  --ve-primary: #fff;
+  --ve-content-primary: rgba(255, 255, 255, 0.9);
+  --ve-content-secondary: rgba(255, 255, 255, 0.55);
+  --ve-content-tertiary: rgba(255, 255, 255, 0.35);
+  --ve-content-on-primary: rgba(0, 0, 0, 0.9);
+  --ve-surface-elevated: #1a1a1a;
+  --ve-surface-control-subtle: rgba(255, 255, 255, 0.05);
+  --ve-surface-control-muted: rgba(255, 255, 255, 0.08);
+  --ve-surface-control-hover: rgba(255, 255, 255, 0.1);
+  --ve-border-weak: rgba(255, 255, 255, 0.12);
+  --ve-border-subtle: rgba(255, 255, 255, 0.12);
+  --ve-selection-background: rgba(90, 90, 255, 0.18);
+  color-scheme: dark;
+}
+
+:where(.ve-timeline .ve-timeline__body) {
+  display: flex;
+  flex: 1 1 0%;
+  width: 100%;
+  min-height: 0;
+}
+
 :where(.ve-timeline .ve-timeline__viewport) {
-  --at-apply: relative overflow-auto w-full flex-1 bg-white;
+  --at-apply: relative overflow-auto w-full flex-1 min-w-0 min-h-0;
+  background: var(--ve-surface-elevated);
 }
 
 :where(.ve-timeline .ve-timeline__content) {
   --at-apply: relative min-h-full min-w-full;
 }
 
+:where(.ve-timeline .ve-timeline__ruler-layer) {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  width: 100%;
+  background: var(--ve-surface-elevated);
+}
+
+:where(.ve-timeline .ve-timeline__content--with-track-rail .ve-timeline__ruler-layer) {
+  margin-left: var(--ve-track-rail-width);
+}
+
+:where(.ve-timeline .ve-timeline__overlay-layer) {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+:where(.ve-timeline .ve-timeline__overlay-layer--with-track-rail) {
+  left: var(--ve-track-rail-width);
+}
+
+:where(.ve-timeline .ve-timeline__overlay-layer > *) {
+  pointer-events: auto;
+}
+
 /* Dragging segment (VideoTimeline specific) */
 :where(.ve-timeline .ve-segment--dragging) {
-  --at-apply: absolute z-50 rounded-[4px] text-[#0f172a] cursor-pointer flex items-center overflow-hidden pointer-events-none;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 0 0 2px rgba(255, 255, 255, 0.5);
+  --at-apply: absolute z-50 rounded-[4px] cursor-pointer flex items-center overflow-hidden pointer-events-none;
+  color: var(--ve-content-primary);
+  box-shadow: var(--ve-shadow-floating), inset 0 0 0 1px var(--ve-border-weak);
+  transition: none;
 }
 
 /* Resize preview (VideoTimeline specific) */
 :where(.ve-timeline .ve-segment--preview) {
   --at-apply: absolute z-45 rounded-[4px] pointer-events-none;
   opacity: 0.7;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 0 0 2px rgba(255, 255, 255, 0.4);
+  box-shadow: var(--ve-shadow-floating), inset 0 0 0 1px var(--ve-border-weak);
+  transition: none;
 }
 
 /* Segment content for dragging segment */
@@ -881,14 +996,16 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 }
 
 :where(.ve-timeline .ve-segment__time) {
-  --at-apply: text-[11px] text-[rgba(15,23,42,0.8)] font-mono;
+  --at-apply: text-[11px] font-mono;
+  color: var(--ve-content-secondary);
 }
 
 /* Drop placeholder (VideoTimeline specific) */
 :where(.ve-timeline .ve-segment--placeholder) {
   --at-apply: absolute pointer-events-none rounded-[4px] z-24;
-  background: rgba(34, 34, 38, 0.12);
-  border: 2px solid rgba(34, 34, 38, 0.6);
+  background: var(--ve-selection-background);
+  border: 1px solid var(--ve-selection-border);
+  transition: none;
 }
 
 :where(.ve-timeline .ve-segment--placeholder-inner) {
@@ -908,5 +1025,10 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
   height: 1px;
   background: var(--ve-primary);
   opacity: 0.8;
+}
+
+:where(.ve-timeline--interacting .ve-segment),
+:where(.ve-timeline--interacting .ve-track) {
+  transition: none !important;
 }
 </style>

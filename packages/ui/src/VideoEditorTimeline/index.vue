@@ -31,12 +31,14 @@ const props = withDefaults(defineProps<{
   selectedSegmentId?: string | null
   trackTypes?: ITrackType[]
   disableInteraction?: boolean
+  showTrackRail?: boolean
 }>(), {
   protocol: null,
   snapStep: 0,
   selectedSegmentId: null,
   trackTypes: undefined,
   disableInteraction: false,
+  showTrackRail: false,
 })
 
 const emit = defineEmits<{
@@ -317,6 +319,7 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
     :snap-step="snapStep"
     :selected-segment-id="innerSelectedId ?? null"
     :disable-interaction="disableInteraction"
+    :show-track-rail="showTrackRail"
     @update:current-time="emit('update:currentTime', $event)"
     @update:zoom="emit('update:zoom', $event)"
     @segment-click="handleTimelineSegmentClick"
@@ -342,6 +345,10 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
       <slot name="playhead" v-bind="slotProps" />
     </template>
 
+    <template v-if="$slots['track-rail']" #track-rail="slotProps">
+      <slot name="track-rail" v-bind="slotProps" />
+    </template>
+
     <!-- Transition seams on the main frames track -->
     <template #overlay="overlay">
       <button
@@ -356,7 +363,7 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
         @mousedown.stop
       >
         <span v-if="seam.existing" class="ve-transition-seam__label">{{ formatSeamDuration(seam.existing.duration) }}</span>
-        <span v-else class="ve-transition-seam__icon">⧉</span>
+        <span v-else class="ve-transition-seam__icon i-creatly-add" aria-hidden="true" />
       </button>
     </template>
 
@@ -371,7 +378,11 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
           @mousedown.stop
           @click.stop="handleTrackToggle(track, 'hidden')"
         >
-          👁
+          <span
+            class="ve-track-toggle__icon"
+            :class="track.hidden ? 'i-creatly-invisible' : 'i-creatly-visible'"
+            aria-hidden="true"
+          />
         </button>
         <button
           v-if="canMuteTrack(track)"
@@ -382,7 +393,11 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
           @mousedown.stop
           @click.stop="handleTrackToggle(track, 'muted')"
         >
-          🔇
+          <span
+            class="ve-track-toggle__icon"
+            :class="track.muted ? 'i-creatly-mute' : 'i-creatly-sound'"
+            aria-hidden="true"
+          />
         </button>
       </div>
     </template>
@@ -439,7 +454,8 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
 
 <style scoped>
 :where(.ve-editor-segment) {
-  --at-apply: relative flex flex-col gap-1.5 w-full h-full text-[#0f172a];
+  --at-apply: relative flex flex-col gap-1.5 w-full h-full;
+  color: var(--ve-content-primary);
 }
 
 :where(.ve-editor-segment .ve-editor-segment__preview) {
@@ -497,20 +513,29 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
   padding: 0;
   border: none;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.75);
-  color: #0f172a;
+  background: var(--ve-surface-elevated);
+  color: var(--ve-content-primary);
   font-size: 9px;
   line-height: 1;
   cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.ve-track-toggle__icon,
+.ve-transition-seam__icon {
+  display: block;
+  width: 12px;
+  height: 12px;
 }
 
 .ve-track-toggle:hover {
-  background: #fff;
+  background: var(--ve-surface-control-hover);
 }
 
 .ve-track-toggle--off {
   opacity: 0.45;
-  background: rgba(15, 23, 42, 0.18);
+  background: var(--ve-surface-control-muted);
 }
 
 .ve-transition-seam__label {

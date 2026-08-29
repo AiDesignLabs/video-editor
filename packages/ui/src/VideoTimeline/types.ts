@@ -76,6 +76,7 @@ export interface SegmentDragPayload {
   newTrackInsertIndex?: number
   visualTrackIndex: number // Visual preview track index that follows mouse
   isValidTarget: boolean // Whether the current mouse position is a valid drop target
+  mouseDeltaX: number // Raw mouse X-axis offset in pixels
   mouseDeltaY: number // Raw mouse Y-axis offset in pixels
 }
 

@@ -2,7 +2,7 @@
 defineOptions({ name: 'TimelinePlayhead' })
 
 defineProps<{
-  left: number
+  left: number | string
 }>()
 
 const emit = defineEmits<{
@@ -13,7 +13,7 @@ const emit = defineEmits<{
 <template>
   <div
     class="ve-playhead"
-    :style="{ left: `${left}px` }"
+    :style="{ left: typeof left === 'number' ? `${left}px` : left }"
     @mousedown.stop.prevent="emit('dragStart', $event)"
   >
     <svg class="ve-playhead__icon" width="12" height="18" viewBox="0 0 12 18" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -41,15 +41,15 @@ const emit = defineEmits<{
 <style scoped>
 :where(.ve-playhead) {
   --ve-playhead-nudge: 0px;
-  --at-apply: absolute z-20 pointer-events-auto cursor-ew-resize h-full;
+  --at-apply: absolute top-0 z-40 pointer-events-auto cursor-ew-resize h-full;
   transform: translateX(calc(-50% - var(--ve-playhead-nudge)));
 }
 
 :where(.ve-playhead__icon) {
-  --at-apply: text-[#222226] pointer-events-none relative z-2;
+  --at-apply: text-[var(--ve-content-primary,#222226)] pointer-events-none sticky top-0 z-2 block;
 }
 
 :where(.ve-playhead__line) {
-  --at-apply: bg-[#222226] bottom-0 w-px translate-x--50% left-50% top-2px absolute pointer-events-none;
+  --at-apply: bg-[var(--ve-content-primary,#222226)] bottom-0 w-px translate-x--50% left-50% top-2px absolute pointer-events-none;
 }
 </style>

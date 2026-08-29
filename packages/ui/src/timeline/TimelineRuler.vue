@@ -34,7 +34,10 @@ defineProps<{
 :where(.ve-ruler) {
   --ve-ruler-major: 8px;
   --ve-ruler-minor: 4px;
-  --at-apply: sticky top-0 left-0 right-0 bg-white z-3 border-b border-[#e5e7eb] overflow-hidden;
+  --at-apply: sticky top-0 left-0 right-0 z-3 border-b overflow-hidden;
+  color: var(--ve-content-secondary);
+  border-color: var(--ve-border-weak);
+  background: var(--ve-surface-elevated);
 }
 
 :where(.ve-ruler .ve-ruler__ticks) {
@@ -42,15 +45,18 @@ defineProps<{
 }
 
 :where(.ve-ruler .ve-ruler__tick) {
-  --at-apply: absolute top-0 h-full text-center text-[#6b7280] text-[11px];
+  --at-apply: absolute top-0 h-full text-center text-[11px];
+  color: var(--ve-content-secondary);
 }
 
 :where(.ve-ruler .ve-ruler__line) {
-  --at-apply: h-[var(--ve-ruler-minor)] w-px mx-auto bg-[#cbd5e1];
+  --at-apply: h-[var(--ve-ruler-minor)] w-px mx-auto;
+  background: var(--ve-border-subtle);
 }
 
 :where(.ve-ruler .ve-ruler__tick--major .ve-ruler__line) {
-  --at-apply: relative h-[var(--ve-ruler-major)] bg-[#94a3b8];
+  --at-apply: relative h-[var(--ve-ruler-major)];
+  background: var(--ve-content-tertiary);
 }
 
 :where(.ve-ruler .ve-ruler__label ) {

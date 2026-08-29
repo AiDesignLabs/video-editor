@@ -102,6 +102,7 @@ export function useDragAndDrop(options: UseDragAndDropOptions) {
         isNewTrack: false,
         visualTrackIndex: layout.trackIndex,
         isValidTarget: true,
+        mouseDeltaX: 0,
         mouseDeltaY: 0,
       }
       onDragStart(payload)
@@ -193,6 +194,7 @@ export function useDragAndDrop(options: UseDragAndDropOptions) {
       newTrackInsertIndex,
       visualTrackIndex,
       isValidTarget,
+      mouseDeltaX: deltaX,
       mouseDeltaY: deltaY,
     }
 

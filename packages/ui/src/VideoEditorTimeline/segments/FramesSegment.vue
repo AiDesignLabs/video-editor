@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import type { IFramesSegmentUnion, IVideoFramesSegment } from '@video-editor/shared'
 import type { WaveformData } from '@video-editor/protocol'
+import type { IFramesSegmentUnion } from '@video-editor/shared'
+import type { VideoThumbnailExtractionDiagnostics, VideoThumbnailRequest } from './videoThumbnailExtractionModel'
 import { extractWaveform, generateThumbnails, getMp4Meta } from '@video-editor/protocol'
 import { isVideoFramesSegment } from '@video-editor/shared'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { createVideoThumbnailExtractionDiagnostics, videoThumbnailExtractionModel } from './videoThumbnailExtractionModel'
 import WaveformCanvasStrip from './WaveformCanvasStrip.vue'
 
 defineOptions({ name: 'FramesSegment' })
@@ -46,7 +48,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
-  cleanupThumbnails()
+  cancelThumbnailWork()
+  currentWaveformJobId += 1
 })
 
 watch(waveformRef, (el, prevEl) => {
@@ -59,7 +62,6 @@ watch(waveformRef, (el, prevEl) => {
 })
 
 interface ThumbnailPreview { tsMs: number, url: string }
-interface ThumbnailState { items: ThumbnailPreview[], loading: boolean, error: string | null }
 interface WaveformState {
   data: WaveformData | null
   hasAudio: boolean | null
@@ -68,7 +70,8 @@ interface WaveformState {
   loadedUrl: string | null
 }
 
-const thumbnailState = reactive<ThumbnailState>({ items: [], loading: false, error: null })
+const thumbnailItems = ref<ThumbnailPreview[]>([])
+const thumbnailDiagnostics = reactive<VideoThumbnailExtractionDiagnostics>(createVideoThumbnailExtractionDiagnostics())
 const waveformState = reactive<WaveformState>({
   data: null,
   hasAudio: null,
@@ -79,64 +82,70 @@ const waveformState = reactive<WaveformState>({
 let currentJobId = 0
 let currentWaveformJobId = 0
 let refreshTimer: number | undefined
-let pendingSegment: IVideoFramesSegment | null = null
+let pendingThumbnailRequest: VideoThumbnailRequest | null = null
 
-watch(() => props.segment, (segment, prev) => {
-  if (!isVideoFramesSegment(segment as IFramesSegmentUnion))
+watch(() => {
+  if (!isVideoFramesSegment(props.segment))
+    return null
+  return videoThumbnailExtractionModel.createRequest(props.segment)
+}, (request, previousRequest) => {
+  if (!request?.url) {
+    cancelThumbnailWork()
     return
-  const shouldRefresh = !prev || hasVideoSegmentChanged(prev as IVideoFramesSegment, segment as IVideoFramesSegment)
-  if (shouldRefresh)
-    scheduleThumbnailRefresh(segment as IVideoFramesSegment, prev as IVideoFramesSegment | undefined)
-}, { immediate: true, deep: true })
+  }
+  scheduleThumbnailRefresh(request, previousRequest)
+}, { immediate: true })
 
-watch(() => props.segment, (segment, prev) => {
-  if (!isVideoFramesSegment(segment as IFramesSegmentUnion))
-    return
-  const video = segment as IVideoFramesSegment
-  const prevVideo = prev && isVideoFramesSegment(prev as IFramesSegmentUnion) ? prev as IVideoFramesSegment : undefined
-  if (video.url && video.url !== prevVideo?.url)
-    void loadVideoWaveform(video.url)
-}, { immediate: true, deep: true })
+watch(() => isVideoFramesSegment(props.segment) ? props.segment.url : '', (url, previousUrl) => {
+  if (url && url !== previousUrl)
+    void loadVideoWaveform(url)
+}, { immediate: true })
 
-function hasVideoSegmentChanged(prev: IVideoFramesSegment, next: IVideoFramesSegment) {
-  return prev.url !== next.url
-    || prev.startTime !== next.startTime
-    || prev.endTime !== next.endTime
-    || prev.fromTime !== next.fromTime
-}
-
-function scheduleThumbnailRefresh(segment: IVideoFramesSegment, prev?: IVideoFramesSegment) {
-  const urlChanged = !prev || prev.url !== segment.url
-  const fromChanged = !prev || prev.fromTime !== segment.fromTime
+function scheduleThumbnailRefresh(request: VideoThumbnailRequest, previousRequest: VideoThumbnailRequest | null | undefined) {
+  const urlChanged = !previousRequest || previousRequest.url !== request.url
+  const fromChanged = !previousRequest || previousRequest.fromTime !== request.fromTime
   const immediate = urlChanged || fromChanged
-  pendingSegment = segment
+  pendingThumbnailRequest = request
   if (refreshTimer) {
     window.clearTimeout(refreshTimer)
     refreshTimer = undefined
   }
   if (immediate) {
-    void loadVideoThumbnails(segment)
+    void loadVideoThumbnails(request)
     return
   }
   refreshTimer = window.setTimeout(() => {
-    if (pendingSegment)
-      void loadVideoThumbnails(pendingSegment)
+    if (pendingThumbnailRequest)
+      void loadVideoThumbnails(pendingThumbnailRequest)
     refreshTimer = undefined
   }, 240)
 }
 
-async function loadVideoThumbnails(segment: IVideoFramesSegment) {
-  if (!segment.url)
-    return
-
+async function loadVideoThumbnails(request: VideoThumbnailRequest) {
   const jobId = ++currentJobId
   cleanupThumbnails()
-  thumbnailState.loading = true
-  thumbnailState.error = null
+  const startedAt = readThumbnailClock()
+  let extractionStartedAt: number | undefined
+  Object.assign(thumbnailDiagnostics, createVideoThumbnailExtractionDiagnostics(), {
+    requestId: jobId,
+    stage: 'metadata',
+    status: 'loading',
+  } satisfies Partial<VideoThumbnailExtractionDiagnostics>)
 
   try {
-    const options = buildThumbnailOptions(segment)
-    const shots = await generateThumbnails(segment.url, options)
+    const metadata = await getMp4Meta(request.url)
+    if (currentJobId !== jobId)
+      return
+
+    const options = videoThumbnailExtractionModel.resolveOptions(request, metadata.durationUs)
+    extractionStartedAt = readThumbnailClock()
+    thumbnailDiagnostics.metadataDurationMs = resolveThumbnailDuration(startedAt, extractionStartedAt)
+    thumbnailDiagnostics.sourceDurationMs = Math.round(metadata.durationUs / 1000)
+    thumbnailDiagnostics.requestedStartUs = options.start
+    thumbnailDiagnostics.requestedEndUs = options.end
+    thumbnailDiagnostics.requestedStepUs = options.step
+    thumbnailDiagnostics.stage = 'extracting'
+    const shots = await generateThumbnails(request.url, options)
     if (currentJobId !== jobId)
       return
 
@@ -144,15 +153,37 @@ async function loadVideoThumbnails(segment: IVideoFramesSegment) {
       tsMs: Math.round(thumb.ts / 1000),
       url: URL.createObjectURL(thumb.img),
     }))
-    thumbnailState.items = previews
-    thumbnailState.loading = false
+    const completedAt = readThumbnailClock()
+    thumbnailItems.value = previews
+    thumbnailDiagnostics.extractionDurationMs = resolveThumbnailDuration(extractionStartedAt, completedAt)
+    thumbnailDiagnostics.totalDurationMs = resolveThumbnailDuration(startedAt, completedAt)
+    thumbnailDiagnostics.resultCount = previews.length
+    thumbnailDiagnostics.stage = 'complete'
+    thumbnailDiagnostics.status = previews.length > 0 ? 'ready' : 'empty'
   }
   catch (err) {
     if (currentJobId !== jobId)
       return
-    thumbnailState.error = err instanceof Error ? err.message : String(err)
-    thumbnailState.loading = false
+    const failedAt = readThumbnailClock()
+    if (thumbnailDiagnostics.stage === 'metadata')
+      thumbnailDiagnostics.metadataDurationMs = resolveThumbnailDuration(startedAt, failedAt)
+    if (thumbnailDiagnostics.stage === 'extracting' && extractionStartedAt !== undefined)
+      thumbnailDiagnostics.extractionDurationMs = resolveThumbnailDuration(extractionStartedAt, failedAt)
+    thumbnailDiagnostics.error = err instanceof Error ? err.message : String(err)
+    thumbnailDiagnostics.errorName = err instanceof Error ? err.name : undefined
+    thumbnailDiagnostics.errorStack = err instanceof Error ? err.stack : undefined
+    thumbnailDiagnostics.totalDurationMs = resolveThumbnailDuration(startedAt, failedAt)
+    thumbnailDiagnostics.resultCount = 0
+    thumbnailDiagnostics.status = 'error'
   }
+}
+
+function readThumbnailClock() {
+  return typeof performance === 'undefined' ? Date.now() : performance.now()
+}
+
+function resolveThumbnailDuration(startedAt: number, completedAt: number) {
+  return Math.round(Math.max(0, completedAt - startedAt))
 }
 
 async function loadVideoWaveform(url: string) {
@@ -201,18 +232,20 @@ async function loadVideoWaveform(url: string) {
   }
 }
 
-function buildThumbnailOptions(segment: IVideoFramesSegment) {
-  const startUs = Math.max(segment.fromTime ?? 0, 0) * 1000
-  const durationMs = Math.max(segment.endTime - segment.startTime, 1)
-  const endUs = startUs + durationMs * 1000
-  const targetThumbs = 8
-  const stepUs = Math.max(Math.floor((endUs - startUs) / targetThumbs), 200_000)
-  return { start: startUs, end: endUs, step: stepUs }
+function cleanupThumbnails() {
+  thumbnailItems.value.forEach(thumb => URL.revokeObjectURL(thumb.url))
+  thumbnailItems.value = []
 }
 
-function cleanupThumbnails() {
-  thumbnailState.items.forEach(thumb => URL.revokeObjectURL(thumb.url))
-  thumbnailState.items = []
+function cancelThumbnailWork() {
+  currentJobId += 1
+  pendingThumbnailRequest = null
+  if (refreshTimer) {
+    window.clearTimeout(refreshTimer)
+    refreshTimer = undefined
+  }
+  cleanupThumbnails()
+  Object.assign(thumbnailDiagnostics, createVideoThumbnailExtractionDiagnostics())
 }
 
 const WAVEFORM_BAR_MIN_WIDTH = 1
@@ -333,25 +366,26 @@ function handleMuteToggle(event: MouseEvent) {
       <slot
         name="video"
         :segment="segment"
-        :thumbnails="thumbnailState.items"
+        :thumbnails="thumbnailItems"
+        :thumbnail-diagnostics="thumbnailDiagnostics"
         :waveform-peaks="videoWaveformDisplay.peaks"
         :waveform-coverage-percent="videoWaveformDisplay.coveragePercent"
       >
         <div class="frames-segment__video-wrap">
           <div class="frames-segment__video">
-            <template v-if="thumbnailState.items.length">
+            <template v-if="thumbnailItems.length">
               <div
-                v-for="thumb in thumbnailState.items"
+                v-for="thumb in thumbnailItems"
                 :key="`${segment.id}-${thumb.tsMs}`"
                 class="frames-segment__thumb"
                 :style="{ backgroundImage: `url(${thumb.url})` }"
               />
             </template>
             <div v-else class="frames-segment__placeholder frames-segment__placeholder--video">
-              <slot v-if="thumbnailState.loading" name="loading" :segment="segment">
+              <slot v-if="thumbnailDiagnostics.status === 'loading'" name="loading" :segment="segment">
                 <span>抽帧中…</span>
               </slot>
-              <slot v-else-if="thumbnailState.error" name="error" :segment="segment" :error="thumbnailState.error">
+              <slot v-else-if="thumbnailDiagnostics.status === 'error'" name="error" :segment="segment" :error="thumbnailDiagnostics.error">
                 <span>生成失败</span>
               </slot>
               <slot v-else name="empty" :segment="segment">
@@ -441,7 +475,7 @@ function handleMuteToggle(event: MouseEvent) {
 
 :where(.frames-segment .frames-segment__video) {
   --at-apply: flex items-center w-full h-full overflow-hidden;
-  background: #f1f5f9;
+  background: var(--ve-surface-control-subtle);
 }
 
 :where(.frames-segment .frames-segment__video-wrap) {
@@ -458,7 +492,7 @@ function handleMuteToggle(event: MouseEvent) {
 :where(.frames-segment .frames-segment__waveform-strip) {
   --at-apply: absolute left-0 right-0 bottom-0 flex items-center w-full px-1 overflow-hidden;
   height: 16px;
-  background: #e5e5e8;
+  background: var(--ve-surface-control-muted);
   z-index: 2;
 }
 
@@ -502,8 +536,8 @@ function handleMuteToggle(event: MouseEvent) {
 
 :where(.frames-segment .frames-segment__placeholder) {
   --at-apply: flex items-center justify-center w-full h-full text-[12px] rounded-4px whitespace-nowrap;
-  color: rgba(15, 23, 42, 0.75);
-  background: rgba(0, 0, 0, 0.05);
+  color: var(--ve-content-secondary);
+  background: var(--ve-surface-control-subtle);
 }
 
 :where(.frames-segment .frames-segment__placeholder--video) {

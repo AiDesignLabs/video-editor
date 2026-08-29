@@ -15,6 +15,7 @@ const props = defineProps<{
   trackHeight: number
   trackGap: number
   selectedSegmentId?: string | null
+  showTrackRail?: boolean
   dragPreview?: {
     segment: { id: string }
   } | null
@@ -89,7 +90,11 @@ function getGapsForTrack(trackId: string) {
 </script>
 
 <template>
-  <div class="ve-timeline__tracks" :style="{ gap: `${trackGap}px`, paddingTop: `${trackGap}px` }">
+  <div
+    class="ve-timeline__tracks"
+    :class="{ 've-timeline__tracks--with-rail': showTrackRail }"
+    :style="{ gap: `${trackGap}px`, paddingTop: `${trackGap}px` }"
+  >
     <div
       v-for="trackLayout in tracks"
       :key="trackLayout.track.id"
@@ -97,10 +102,20 @@ function getGapsForTrack(trackId: string) {
       :class="{
         've-track--main': trackLayout.track.isMain,
         've-track--hidden': trackLayout.track.hidden,
-        've-track--has-selection': trackLayout.segments.some((layout: SegmentLayout) => layout.isSelected)
+        've-track--has-selection': trackLayout.segments.some((layout: SegmentLayout) => layout.isSelected),
+        've-track--with-rail': showTrackRail,
       }"
       :style="{ height: `${trackHeight}px` }"
     >
+      <div v-if="showTrackRail" class="ve-track__rail">
+        <slot
+          name="track-rail"
+          :track="trackLayout.track"
+          :index="trackLayout.trackIndex"
+          :segments="trackLayout.segments"
+          :height="trackHeight"
+        />
+      </div>
       <div class="ve-track__body">
           <div
             v-for="layout in trackLayout.segments"
@@ -176,10 +191,7 @@ function getGapsForTrack(trackId: string) {
             @click.stop="handleAddAt(trackLayout.track, gap.startTime, gap.endTime, $event)"
           >
             <div class="ve-track__gap-add-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 5V19" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" />
-                <path d="M5 12H19" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
+              <span class="ve-track__add-icon i-creatly-add" aria-hidden="true" />
             </div>
           </div>
 
@@ -194,10 +206,7 @@ function getGapsForTrack(trackId: string) {
               }"
               @click.stop="handleAddAt(trackLayout.track, trackLayout.segments.length > 0 ? trackLayout.segments[trackLayout.segments.length - 1].segment.end : 0, undefined, $event)"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 5V19" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" />
-                <path d="M5 12H19" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
+              <span class="ve-track__add-icon i-creatly-add" aria-hidden="true" />
             </div>
           </template>
       </div><!-- .ve-track__body -->
@@ -225,23 +234,47 @@ function getGapsForTrack(trackId: string) {
   flex: 1;
 }
 
+.ve-timeline__tracks--with-rail {
+  width: calc(100% + var(--ve-track-rail-width, 28px));
+}
+
 .ve-track {
   position: relative;
-  background-color: #f8fafc;
+  background-color: var(--ve-track-background, var(--ve-surface-control-subtle));
   overflow: hidden;
 }
 
+.ve-track--with-rail {
+  display: flex;
+  align-items: stretch;
+  overflow: visible;
+}
+
+.ve-track__rail {
+  position: sticky;
+  left: 0;
+  z-index: 25;
+  display: flex;
+  flex: 0 0 var(--ve-track-rail-width, 28px);
+  align-items: stretch;
+  width: var(--ve-track-rail-width, 28px);
+  height: 100%;
+  background: inherit;
+}
+
 .ve-track--main {
-  background-color: #F4F4F6;
+  background-color: var(--ve-track-main-background, var(--ve-surface-control-muted));
 }
 
 .ve-track--has-selection {
-  background-color: #F2F2FA !important;
-  box-shadow: inset 0 1px 0 0 #E4E4FC, inset 0 -1px 0 0 #E4E4FC;
+  background-color: var(--ve-selection-background) !important;
+  box-shadow: inset 0 1px 0 0 var(--ve-selection-border), inset 0 -1px 0 0 var(--ve-selection-border);
 }
 
 .ve-track__body {
   position: relative;
+  flex: 1 0 auto;
+  min-width: 0;
   height: 100%;
 }
 
@@ -255,12 +288,12 @@ function getGapsForTrack(trackId: string) {
   top: 0;
   bottom: 0;
   border-radius: 4px;
-  color: #0f172a;
+  color: var(--ve-content-primary);
   cursor: pointer;
   display: flex;
   align-items: center;
   overflow: hidden;
-  transition-duration: 150ms;
+  transition: background-color 150ms, border-color 150ms, box-shadow 150ms;
 }
 
 .ve-segment__content {
@@ -278,7 +311,7 @@ function getGapsForTrack(trackId: string) {
 
 .ve-segment__time {
   font-size: 11px;
-  color: rgba(15, 23, 42, 0.8);
+  color: var(--ve-content-secondary);
   font-family: monospace;
 }
 
@@ -296,10 +329,10 @@ function getGapsForTrack(trackId: string) {
   position: absolute;
   height: 100%;
   width: 4px;
-  background-color: #222226;
+  background-color: var(--ve-primary);
   cursor: ew-resize;
   pointer-events: auto;
-  border: 2px solid #222226;
+  border: 2px solid var(--ve-primary);
 }
 
 .ve-segment__handle--left {
@@ -328,7 +361,7 @@ function getGapsForTrack(trackId: string) {
 
 .ve-segment__handle-dot {
   border-radius: 9999px;
-  background-color: white;
+  background-color: var(--ve-content-on-primary);
   width: 1px;
   height: 1px;
 }
@@ -344,15 +377,15 @@ function getGapsForTrack(trackId: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #222226;
-  background-color: #F2F2FA;
+  color: var(--ve-content-primary);
+  background-color: var(--ve-surface-elevated);
   cursor: pointer;
   transition: background-color 0.2s;
-  border: 1px solid #222226;
+  border: 1px solid var(--ve-border-subtle);
 }
 
 .ve-track__add-button:hover {
-  background-color: #E5E5E5;
+  background-color: var(--ve-surface-control-hover);
 }
 
 .ve-track__gap-add {
@@ -367,18 +400,24 @@ function getGapsForTrack(trackId: string) {
 }
 
 .ve-track__gap-add:hover {
-  background-color: #EFEFEF;
+  background-color: var(--ve-surface-control-hover);
 }
 
 .ve-track__gap-add-icon {
   display: none;
-  color: white;
-  background-color: #222226;
+  color: var(--ve-content-on-primary);
+  background-color: var(--ve-primary);
   padding: 4px;
   border-radius: 4px;
 }
 
 .ve-track__gap-add:hover .ve-track__gap-add-icon {
   display: block;
+}
+
+.ve-track__add-icon {
+  display: block;
+  width: 16px;
+  height: 16px;
 }
 </style>

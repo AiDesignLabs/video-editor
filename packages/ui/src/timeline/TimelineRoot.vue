@@ -84,8 +84,10 @@ defineExpose({
 
 <style scoped>
 :where(.ve-root) {
-  --at-apply: relative overflow-auto w-full bg-gradient-to-b from-white to-[#f9fafb];
+  --at-apply: relative overflow-auto w-full;
   min-height: 100%;
+  color: var(--ve-content-primary);
+  background: var(--ve-surface-elevated);
 }
 
 :where(.ve-root .ve-root__content) {
