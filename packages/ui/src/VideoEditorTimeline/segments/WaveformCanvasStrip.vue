@@ -21,7 +21,11 @@ const props = withDefaults(defineProps<{
   minBarHeight: 3,
   maxBarWidth: 4,
   barGap: 1,
-  maxBufferWidth: 2048,
+  // A zoomed-in segment can be far wider than 2048 CSS px; capping the backing
+  // buffer there made the waveform visibly soft, so the ceiling is the widest
+  // canvas browsers reliably allocate. The buffer only ever tracks the element,
+  // so this costs nothing at normal widths.
+  maxBufferWidth: 32767,
   maxBufferHeight: 256,
 })
 

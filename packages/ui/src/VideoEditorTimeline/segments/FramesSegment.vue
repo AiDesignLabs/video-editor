@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import type { WaveformData } from '@video-editor/protocol'
 import type { IFramesSegmentUnion, IStickerSegment } from '@video-editor/shared'
+import type { ThumbnailFrame } from './thumbnailTiles'
 import type { VideoThumbnailExtractionDiagnostics, VideoThumbnailRequest } from './videoThumbnailExtractionModel'
 import { extractWaveform, generateThumbnails, getMp4Meta } from '@video-editor/protocol'
 import { isVideoFramesSegment } from '@video-editor/shared'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { buildThumbnailTiles, THUMBNAIL_TILE_SIZE } from './thumbnailTiles'
 import { createVideoThumbnailExtractionDiagnostics, videoThumbnailExtractionModel } from './videoThumbnailExtractionModel'
 import WaveformCanvasStrip from './WaveformCanvasStrip.vue'
 
@@ -22,6 +24,16 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   (e: 'toggleVideoMute', payload: { segmentId: string, muted: boolean }): void
+  /**
+   * Every change to the thumbnail pipeline's state — stage, timings, errors.
+   *
+   * The package owns extraction, so a host that wants to instrument it (log
+   * slow or failed extractions, correlate with network timing) would otherwise
+   * have to take over the `video` slot and re-implement the rendering just to
+   * observe. This hands the state out instead; the payload is a snapshot, safe
+   * to keep.
+   */
+  (e: 'thumbnailDiagnostics', payload: VideoThumbnailExtractionDiagnostics): void
 }>()
 
 /** A sticker has no `type` field, so branch on the shape rather than narrowing. */
@@ -32,6 +44,13 @@ const isImageLike = computed(() => {
 
 const isVideoLike = computed(() => (props.segment as { type?: string }).type === 'video')
 
+/**
+ * The video branch is only rendered when `isVideoLike`, so the `video` slot can
+ * hand consumers the narrowed segment instead of the whole union — otherwise
+ * every consumer has to re-narrow it before passing it on.
+ */
+const videoSegment = computed(() => (isVideoFramesSegment(props.segment) ? props.segment : null))
+
 /** Only reached by 3D (or future) frame types, which a sticker never is. */
 const fallbackLabel = computed(() => {
   const segment = props.segment as { type?: string, segmentType?: string }
@@ -40,18 +59,17 @@ const fallbackLabel = computed(() => {
 
 const containerRef = ref<HTMLElement | null>(null)
 const waveformRef = ref<HTMLElement | null>(null)
-const imageCount = ref(1)
+/** Rendered width of the thumbnail strip; drives both branches' tiling. */
+const containerWidth = ref(0)
+const imageCount = computed(() => Math.max(1, Math.ceil(containerWidth.value / THUMBNAIL_TILE_SIZE)))
 const waveformWidth = ref(0)
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
   resizeObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
-      if (entry.target === containerRef.value) {
-        const nextCount = Math.max(1, Math.ceil(entry.contentRect.width / 56))
-        if (imageCount.value !== nextCount)
-          imageCount.value = nextCount
-      }
+      if (entry.target === containerRef.value)
+        containerWidth.value = entry.contentRect.width
 
       if (entry.target === waveformRef.value)
         waveformWidth.value = entry.contentRect.width
@@ -77,6 +95,15 @@ onBeforeUnmount(() => {
   currentWaveformJobId += 1
 })
 
+watch(containerRef, (el, prevEl) => {
+  if (resizeObserver && prevEl)
+    resizeObserver.unobserve(prevEl)
+  if (resizeObserver && el) {
+    containerWidth.value = el.clientWidth
+    resizeObserver.observe(el)
+  }
+})
+
 watch(waveformRef, (el, prevEl) => {
   if (resizeObserver && prevEl)
     resizeObserver.unobserve(prevEl)
@@ -86,7 +113,6 @@ watch(waveformRef, (el, prevEl) => {
   }
 })
 
-interface ThumbnailPreview { tsMs: number, url: string }
 interface WaveformState {
   data: WaveformData | null
   hasAudio: boolean | null
@@ -95,8 +121,25 @@ interface WaveformState {
   loadedUrl: string | null
 }
 
-const thumbnailItems = ref<ThumbnailPreview[]>([])
+const thumbnailItems = ref<ThumbnailFrame[]>([])
 const thumbnailDiagnostics = reactive<VideoThumbnailExtractionDiagnostics>(createVideoThumbnailExtractionDiagnostics())
+
+watch(
+  () => ({ ...thumbnailDiagnostics }),
+  snapshot => emit('thumbnailDiagnostics', snapshot),
+  { deep: false },
+)
+
+/**
+ * Frames laid out along the strip. See `thumbnailTiles.ts` for why this is
+ * tiled by time rather than rendering one element per extracted frame.
+ */
+const thumbnailTiles = computed(() => buildThumbnailTiles({
+  frames: thumbnailItems.value,
+  width: containerWidth.value,
+  durationMs: Math.max((props.segment.endTime ?? 0) - (props.segment.startTime ?? 0), 0),
+  fromTimeMs: (props.segment as { fromTime?: number }).fromTime ?? 0,
+}))
 const waveformState = reactive<WaveformState>({
   data: null,
   hasAudio: null,
@@ -389,20 +432,20 @@ function handleMuteToggle(event: MouseEvent) {
     <template v-else-if="isVideoLike">
       <slot
         name="video"
-        :segment="segment"
+        :segment="videoSegment!"
         :thumbnails="thumbnailItems"
         :thumbnail-diagnostics="thumbnailDiagnostics"
         :waveform-peaks="videoWaveformDisplay.peaks"
         :waveform-coverage-percent="videoWaveformDisplay.coveragePercent"
       >
         <div class="frames-segment__video-wrap">
-          <div class="frames-segment__video">
-            <template v-if="thumbnailItems.length">
+          <div ref="containerRef" class="frames-segment__video">
+            <template v-if="thumbnailTiles.length && thumbnailTiles[0]?.url">
               <div
-                v-for="thumb in thumbnailItems"
-                :key="`${segment.id}-${thumb.tsMs}`"
+                v-for="tile in thumbnailTiles"
+                :key="tile.index"
                 class="frames-segment__thumb"
-                :style="{ backgroundImage: `url(${thumb.url})` }"
+                :style="{ backgroundImage: tile.url ? `url(${tile.url})` : '' }"
               />
             </template>
             <div v-else class="frames-segment__placeholder frames-segment__placeholder--video">
