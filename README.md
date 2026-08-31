@@ -4,6 +4,7 @@ A CapCut-inspired video editor built as a monorepo with headless core architectu
 
 ## Documentation
 
+- [Feature Roadmap](./docs/feature-roadmap.md) - Current capabilities and planned editing features
 - [Audio Waveform API](./WAVEFORM.md) - Extract and visualize audio waveforms
 - [Architecture Guide](./CLAUDE.md) - Project structure and conventions
 
