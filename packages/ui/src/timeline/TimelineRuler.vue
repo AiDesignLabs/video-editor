@@ -33,7 +33,6 @@ defineProps<{
 .ve-ruler {
   --at-apply: sticky top-0 left-0 right-0 z-3 overflow-hidden;
   color: var(--ve-content-ruler, rgba(0, 0, 0, 0.55));
-  border-bottom: 1px solid var(--ve-ruler-border, rgba(34, 34, 38, 0.08));
   background: var(--ve-ruler-background, #fff);
 }
 
