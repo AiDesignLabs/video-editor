@@ -2,8 +2,9 @@
   "name": "video-editor-monorepo",
   "version": "0.0.1-beta.34",
   "private": true,
+  "packageManager": "pnpm@12.1.0",
   "engines": {
-    "node": ">=16.14"
+    "node": ">=18"
   },
   "scripts": {
     "dev": "pnpm -C playground dev",
