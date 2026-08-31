@@ -1,15 +1,20 @@
+/*
+ * The playground's palette is expressed entirely in terms of the package's
+ * `--ve-*` tokens, so flipping `data-theme` on <html> re-themes the whole app —
+ * shell and timeline together — without a second set of dark overrides here.
+ */
 :root {
-  --shell: #f4f4f6;
-  --shell-deep: #ededf0;
-  --panel: #ffffff;
-  --line: rgba(0, 0, 0, 0.1);
-  --ink: rgba(0, 0, 0, 0.9);
-  --ink-muted: rgba(0, 0, 0, 0.5);
-  --accent: #5a5aff;
+  --shell: var(--ve-surface-page);
+  --shell-deep: var(--ve-surface-card);
+  --panel: var(--ve-surface-elevated);
+  --line: var(--ve-border-weak);
+  --ink: var(--ve-content-primary);
+  --ink-muted: var(--ve-content-secondary);
+  --accent: var(--ve-selection-border);
   --accent-ink: #ffffff;
-  --danger: #f0655f;
-  --paper: #f5f6f8;
-  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --danger: #ef4444;
+  --paper: var(--ve-overlay-2);
+  --mono: var(--ve-font-numeric, 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 html,
@@ -22,7 +27,13 @@ body {
   margin: 0;
   background: var(--shell);
   color: var(--ink);
-  font-family: Inter, 'PingFang SC', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+  font-family:
+    Inter,
+    'PingFang SC',
+    'Noto Sans SC',
+    system-ui,
+    -apple-system,
+    sans-serif;
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
 }
@@ -191,7 +202,9 @@ body {
   border-radius: 7px;
   cursor: pointer;
   text-decoration: none;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .tool__icon {
@@ -391,32 +404,35 @@ body {
 /* ---------- timeline rail ---------- */
 
 .rail {
-  height: clamp(200px, 30vh, 300px);
+  /* toolbar 33 + ruler 20 + 5 rows x 56 with 2px gaps = 343, which is exactly
+     the Figma card height. */
+  height: 343px;
   min-height: 0;
   overflow: hidden;
-  margin: 16px 16px 24px 20px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  margin: 16px 18px 18px;
+  border-radius: var(--ve-timeline-radius, 8px);
   background: var(--panel);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
 }
 
 .rail__timeline {
-  --ve-track-rail-width: 28px;
   min-height: 100%;
 }
 
-.track-rail-icon {
-  display: grid;
-  width: 100%;
-  height: 100%;
-  place-items: center;
-  color: var(--ink-muted);
+/* Clock inside the timeline toolbar's centre zone. */
+.rail__clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--ve-content-primary);
+  white-space: nowrap;
 }
 
-.track-rail-icon__glyph {
-  width: 16px;
-  height: 16px;
+.rail__clock-divider {
+  color: var(--ve-content-tertiary);
 }
 
 /* ---------- utility drawer ---------- */

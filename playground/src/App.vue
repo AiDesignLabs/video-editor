@@ -1,22 +1,22 @@
 <script setup lang="ts">
 import type { AssetMeta, ProjectMeta } from '@video-editor/protocol'
-import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageFramesSegment, IStickerSegment, ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
+import type { Renderer } from '@video-editor/renderer'
+import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageFramesSegment, IKeyframeProperty, IStickerSegment, ITextSegment, ITransform, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
+import type { SegmentUpdater, TransitionEditPayload } from '@video-editor/ui'
 import type { Ref } from 'vue'
+import type { ExportSettings } from './export-options'
+import type { GizmoTransformPatch } from './gizmo/types'
 import { createEditorCore } from '@video-editor/editor-core'
 import { createProjectStore, generateThumbnails } from '@video-editor/protocol'
-import { composeProtocol, createRenderer, listTransitionDefinitions, type Renderer } from '@video-editor/renderer'
-import type { SegmentUpdater, TransitionEditPayload } from '@video-editor/ui'
+import { composeProtocol, createRenderer, listEffectDefinitions, listTransitionDefinitions } from '@video-editor/renderer'
 import { PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
-import type { IKeyframeProperty, ITransform } from '@video-editor/shared'
-import type { GizmoTransformPatch } from './gizmo/types'
-import type { ExportSettings } from './export-options'
-import CanvasGizmo from './gizmo/CanvasGizmo.vue'
 import AssetPanel from './AssetPanel.vue'
-import ExportDialog from './ExportDialog.vue'
-import ProjectMenu from './ProjectMenu.vue'
 import { toComposeOptions } from './export-options'
+import ExportDialog from './ExportDialog.vue'
+import CanvasGizmo from './gizmo/CanvasGizmo.vue'
 import { clearBootCache, readBootCache, writeBootCache } from './project-boot'
+import ProjectMenu from './ProjectMenu.vue'
 
 const swatches = {
   primary: 'https://dummyimage.com/1280x720/6aa7ff/ffffff.png&text=Clip+A',
@@ -911,6 +911,83 @@ async function runCompose(settings: ExportSettings) {
   }
 }
 
+/**
+ * Presets offered by the filter/effect designer. `@video-editor/ui` cannot
+ * depend on the renderer, so the host resolves the registry and passes it down.
+ */
+const effectPresets = computed(() => listEffectDefinitions()
+  .filter(definition => !definition.id.startsWith('legacy:'))
+  .map(definition => ({ id: definition.id, label: definition.label })))
+
+// --- theme -----------------------------------------------------------------
+// The spec requires light and dark; `data-theme` on <html> is what
+// @video-editor/ui's token layer keys off, so the shell and the timeline flip
+// together.
+type ThemeName = 'light' | 'dark'
+const THEME_STORAGE_KEY = 'video-editor-playground-theme'
+const theme = ref<ThemeName>('light')
+
+function applyTheme(next: ThemeName) {
+  theme.value = next
+  document.documentElement.dataset.theme = next
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, next)
+  }
+  catch {
+    // private mode / storage disabled — the toggle still works for this session
+  }
+}
+
+function toggleTheme() {
+  applyTheme(theme.value === 'dark' ? 'light' : 'dark')
+}
+
+onMounted(() => {
+  let stored: string | null = null
+  try {
+    stored = localStorage.getItem(THEME_STORAGE_KEY)
+  }
+  catch {
+    stored = null
+  }
+  const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches
+  applyTheme(stored === 'dark' || stored === 'light' ? stored : (prefersDark ? 'dark' : 'light'))
+})
+
+// --- muting ----------------------------------------------------------------
+// The renderer exposes no master-volume API, so the toolbar's speaker drives the
+// per-track `muted` flags that already exist instead of faking a global one.
+const audibleTracks = computed(() => (protocol.value?.tracks ?? []).filter(
+  track => track.trackType === 'audio' || track.trackType === 'frames',
+))
+const masterMuted = computed(() => audibleTracks.value.length > 0
+  && audibleTracks.value.every(track => track.muted === true))
+
+function toggleMasterMute() {
+  const next = !masterMuted.value
+  for (const track of audibleTracks.value) {
+    if (!track.trackId)
+      continue
+    commands.updateTrack(track.trackId, (draft) => {
+      draft.muted = next
+    })
+  }
+}
+
+/** Nudge the playhead by whole frames, as the toolbar's frame-step buttons do. */
+function stepFrame(direction: 1 | -1) {
+  const fps = protocol.value?.fps || 30
+  const frameMs = 1000 / Math.max(fps, 1)
+  seekTo(Math.min(Math.max(currentTimeMs.value + direction * frameMs, 0), durationMs.value))
+}
+
+/** Mirrors the Figma toolbar's "15:59:00 自动保存云端" status line. */
+const savedStatusLabel = computed(() => (
+  lastSavedAt.value
+    ? `${new Date(lastSavedAt.value).toLocaleTimeString('zh-CN', { hour12: false })} 已自动保存`
+    : '尚未保存'
+))
+
 function formatTimecode(value: number | Ref<number>) {
   const ms = Math.max(0, unref(value))
   const totalSeconds = ms / 1000
@@ -1093,11 +1170,8 @@ function handleAddSegmentClick(data: {
       </div>
 
       <div class="topbar__actions">
-        <button class="tool tool--icon" :disabled="!undoCount" title="撤销 (Cmd/Ctrl+Z)" aria-label="撤销" @click="commands.undo()">
-          <span class="tool__icon i-creatly-withdraw" aria-hidden="true" />
-        </button>
-        <button class="tool tool--icon" :disabled="!redoCount" title="重做 (Cmd/Ctrl+Shift+Z)" aria-label="重做" @click="commands.redo()">
-          <span class="tool__icon i-creatly-advance" aria-hidden="true" />
+        <button class="tool" :title="theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题'" @click="toggleTheme">
+          {{ theme === 'dark' ? '亮色' : '暗色' }}
         </button>
         <span class="topbar__divider" />
         <button class="tool" :class="{ 'tool--active': drawerOpen && drawerTab === 'assets' }" @click="openDrawer('assets')">
@@ -1138,36 +1212,6 @@ function handleAddSegmentClick(data: {
             初始化失败：{{ error }}
           </div>
         </div>
-
-        <div class="transport">
-          <div class="transport__group">
-            <button class="tool tool--icon" :disabled="!renderer" title="回到开头" aria-label="回到开头" @click="seekTo(0)">
-              <span class="tool__icon i-creatly-back-one-frame" aria-hidden="true" />
-            </button>
-            <button class="transport__play" :disabled="!renderer" :title="isPlaying ? '暂停 (空格)' : '播放 (空格)'" @click="togglePlay">
-              <span class="transport__play-icon" :class="isPlaying ? 'i-creatly-pause' : 'i-creatly-play'" aria-hidden="true" />
-            </button>
-            <button class="tool tool--icon" :disabled="!renderer" title="跳到末尾" aria-label="跳到末尾" @click="seekTo(durationMs)">
-              <span class="tool__icon i-creatly-forward-one-frame" aria-hidden="true" />
-            </button>
-          </div>
-
-          <div class="transport__clock">
-            <span class="transport__now">{{ formatTimecode(currentTimeMs) }}</span>
-            <span class="transport__total">/ {{ formatTimecode(durationMs) }}</span>
-          </div>
-
-          <div class="transport__group">
-            <button class="tool" :disabled="!selectedSegmentId" title="在播放头处分割 (Cmd/Ctrl+B)" @click="splitSelectedSegment">
-              <span class="tool__leading-icon i-creatly-cutting" aria-hidden="true" />
-              分割
-            </button>
-            <button class="tool tool--danger" :disabled="!selectedSegmentId" title="删除选中片段 (Delete，按住 Shift 为波纹删除)" @click="removeSelectedSegment()">
-              <span class="tool__leading-icon i-creatly-clear" aria-hidden="true" />
-              删除
-            </button>
-          </div>
-        </div>
       </div>
 
       <aside class="side">
@@ -1175,6 +1219,8 @@ function handleAddSegmentClick(data: {
           class="side__inspector"
           :segment="selectedSegment"
           :current-time-ms="currentTimeMs"
+          :filter-presets="effectPresets"
+          :effect-presets="effectPresets"
           @update:segment="handleInspectorUpdate"
         />
       </aside>
@@ -1198,13 +1244,53 @@ function handleAddSegmentClick(data: {
         @transition-edit="handleTransitionEdit"
         @track-toggle="handleTrackToggle"
       >
-        <template #track-rail="{ track }">
-          <div class="track-rail-icon" :title="`${track.label} 轨道`">
-            <span
-              class="track-rail-icon__glyph"
-              :class="track.type === 'audio' ? 'i-creatly-audio' : track.type === 'text' ? 'i-creatly-text' : track.type === 'frames' ? 'i-creatly-video' : 'i-creatly-element'"
-              aria-hidden="true"
-            />
+        <template #toolbar-left>
+          <button class="ve-btn" title="添加素材" aria-label="添加素材" @click="openDrawer('assets')">
+            <span class="ve-btn__icon i-creatly-add" aria-hidden="true" />
+          </button>
+          <span class="ve-toolbar-divider" />
+          <button class="ve-btn" :disabled="!selectedSegmentId" title="删除选中片段 (Delete，按住 Shift 为波纹删除)" aria-label="删除" @click="removeSelectedSegment()">
+            <span class="ve-btn__icon i-creatly-clear" aria-hidden="true" />
+          </button>
+          <button class="ve-btn" :disabled="!selectedSegmentId" title="在播放头处分割 (Cmd/Ctrl+B)" aria-label="分割" @click="splitSelectedSegment">
+            <span class="ve-btn__icon i-creatly-cutting" aria-hidden="true" />
+          </button>
+          <span class="ve-toolbar-divider" />
+          <button class="ve-btn" :disabled="!undoCount" title="撤销 (Cmd/Ctrl+Z)" aria-label="撤销" @click="commands.undo()">
+            <span class="ve-btn__icon i-creatly-withdraw" aria-hidden="true" />
+          </button>
+          <button class="ve-btn" :disabled="!redoCount" title="重做 (Cmd/Ctrl+Shift+Z)" aria-label="重做" @click="commands.redo()">
+            <span class="ve-btn__icon i-creatly-advance" aria-hidden="true" />
+          </button>
+          <span class="ve-toolbar-divider" />
+          <span class="ve-btn__icon i-creatly-save" aria-hidden="true" />
+          <span class="ve-toolbar-status">{{ savedStatusLabel }}</span>
+        </template>
+
+        <template #toolbar-right-leading>
+          <button class="ve-btn" :disabled="!renderer" title="上一帧" aria-label="上一帧" @click="stepFrame(-1)">
+            <span class="ve-btn__icon i-creatly-back-one-frame" aria-hidden="true" />
+          </button>
+          <button class="ve-btn" :disabled="!renderer" title="下一帧" aria-label="下一帧" @click="stepFrame(1)">
+            <span class="ve-btn__icon i-creatly-forward-one-frame" aria-hidden="true" />
+          </button>
+          <span class="ve-toolbar-divider" />
+        </template>
+
+        <template #toolbar-right-trailing>
+          <button class="ve-btn" :title="masterMuted ? '取消静音' : '静音'" :aria-label="masterMuted ? '取消静音' : '静音'" @click="toggleMasterMute">
+            <span class="ve-btn__icon" :class="masterMuted ? 'i-creatly-mute' : 'i-creatly-sound'" aria-hidden="true" />
+          </button>
+        </template>
+
+        <template #toolbar-center>
+          <button class="ve-btn ve-btn--strong" :disabled="!renderer" :title="isPlaying ? '暂停 (空格)' : '播放 (空格)'" :aria-label="isPlaying ? '暂停' : '播放'" @click="togglePlay">
+            <span class="ve-btn__icon" :class="isPlaying ? 'i-creatly-pause' : 'i-creatly-play'" aria-hidden="true" />
+          </button>
+          <div class="rail__clock">
+            <span>{{ formatTimecode(currentTimeMs) }}</span>
+            <span class="rail__clock-divider">/</span>
+            <span>{{ formatTimecode(durationMs) }}</span>
           </div>
         </template>
       </VideoEditorTimeline>
@@ -1316,7 +1402,9 @@ function handleAddSegmentClick(data: {
           <div v-else-if="thumbnailsState.items.length" class="thumb-grid">
             <figure v-for="thumb in thumbnailsState.items" :key="thumb.tsMs" class="thumb-grid__item">
               <img :src="thumb.url" :alt="`帧 ${formatTimecode(thumb.tsMs)}`">
-              <figcaption class="mono">{{ formatTimecode(thumb.tsMs) }}</figcaption>
+              <figcaption class="mono">
+                {{ formatTimecode(thumb.tsMs) }}
+              </figcaption>
             </figure>
           </div>
           <p v-else class="drawer__empty">
