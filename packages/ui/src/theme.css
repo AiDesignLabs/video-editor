@@ -84,9 +84,6 @@
 
   /* Shared by both themes per the spec. */
   --ve-shadow-floating: 0 8px 10px -5px rgba(0, 0, 0, 0.08), 0 6px 30px 5px rgba(0, 0, 0, 0.05);
-
-  /* Node-selection blue: explicitly still current in the spec, same both themes. */
-  --ve-selection-border: #5a5aff;
 }
 
 /* ==========================================================================
@@ -102,6 +99,10 @@
    is inherited, giving us:
 
    - `:root` follows the OS;
+   - `html.dark` / `html.light` follow the host's own theme switch — this is the
+     Tailwind and @nuxtjs/color-mode convention, and hosts that use it usually
+     never set `color-scheme`, so without this the package would silently follow
+     the OS while the rest of the page is dark;
    - `[data-theme]` pins a theme for that subtree;
    - `.ve-theme-dark` themes a subtree without touching the document.
 
@@ -115,11 +116,13 @@
 
 /* Not anchored to :root — a consumer can theme any subtree, e.g. a dark
    timeline inside a light page. */
+html.light,
 [data-theme='light'],
 .ve-theme-light {
   color-scheme: light;
 }
 
+html.dark,
 [data-theme='dark'],
 .ve-theme-dark {
   color-scheme: dark;
@@ -143,7 +146,7 @@
   --ve-content-tertiary: light-dark(rgba(0, 0, 0, 0.35), rgba(255, 255, 255, 0.35));
   --ve-content-disabled: light-dark(rgba(34, 34, 38, 0.35), rgba(255, 255, 255, 0.35));
   --ve-content-on-primary: light-dark(#ffffff, rgba(0, 0, 0, 0.9));
-  --ve-content-on-overlay: #ffffff;
+  --ve-content-on-overlay: #ffffff; /* both-themes: sits on a dark scrim either way */
   --ve-content-ruler: var(--ve-content-secondary);
 
   /* Surfaces — ct-surface-* / ct-canvas-background */
