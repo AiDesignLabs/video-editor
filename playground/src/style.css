@@ -306,7 +306,6 @@ body {
   margin: 8px;
   border-radius: 6px;
   overflow: hidden;
-  background: #000;
 }
 
 /* The canvas is sized to the project's aspect ratio in JS and centred here, so
@@ -321,6 +320,10 @@ body {
 
 .stage__canvas canvas {
   display: block;
+  /* Fixed black, not a theme token: the matte around the frame is black in
+     light and dark alike. Also covers the gap before the renderer first
+     paints, so the canvas never flashes the page background. */
+  background: #000;
 }
 
 .stage__placeholder {

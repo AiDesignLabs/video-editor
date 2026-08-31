@@ -426,7 +426,8 @@ async function mountRendererInstance(options: {
         host?.clientHeight || 720,
         (protocol.value?.width ?? 16) / (protocol.value?.height ?? 9),
       ),
-      background: '#101116',
+      // Video matte is black in both themes — deliberately not a theme token.
+      background: '#000000',
     },
   }
   const instance = await createRenderer(rendererOptions)
