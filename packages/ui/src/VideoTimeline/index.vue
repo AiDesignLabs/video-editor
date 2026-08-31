@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ToolbarAction } from '../timeline/toolbar-actions'
 import type { SnapGuide } from './hooks'
 import type { TrackMetrics } from './metrics'
 import type { SnapResolution } from './snap'
@@ -33,6 +34,12 @@ const props = withDefaults(defineProps<{
   trackHeight?: number
   /** Per-track-type height overrides, e.g. `{ audio: 48 }`. */
   trackHeightByType?: Record<string, number>
+  /**
+   * Declarative toolbar contents. Build it with `createDefaultToolbarActions()`
+   * and reshape it with `mergeToolbarActions()`; leave it unset to keep the
+   * slot-only toolbar.
+   */
+  toolbarActions?: ToolbarAction[]
   trackGap?: number
   rulerHeight?: number
   minSegmentDuration?: number
@@ -46,6 +53,7 @@ const props = withDefaults(defineProps<{
   snapStep: 0,
   trackHeight: 56,
   trackHeightByType: undefined,
+  toolbarActions: undefined,
   trackGap: 2,
   rulerHeight: 20,
   minSegmentDuration: 60,
@@ -70,7 +78,17 @@ const emit = defineEmits<{
 }>()
 
 const DEFAULT_TRACK_RAIL_WIDTH = 24
-const slots = useSlots()
+// Annotated on purpose: the template declares dynamic `#[name]` slots derived
+// from this value, so leaving it inferred makes the component's own slot types
+// circular and every read of it collapses to `any`.
+const slots: Record<string, unknown> = useSlots()
+
+/**
+ * Names of the per-action override slots the consumer supplied, forwarded to
+ * the toolbar. Computed rather than hard-coded because the ids come from the
+ * action list, which the consumer owns.
+ */
+const actionSlotNames = computed<string[]>(() => Object.keys(slots).filter(name => name.startsWith('action-')))
 const hasTrackRailSlot = computed(() => props.showTrackRail || Boolean(slots['track-rail']))
 
 const viewportRef = ref<HTMLElement | null>(null)
@@ -840,6 +858,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
       :format-time="formatTime"
     >
       <TimelineToolbar
+        :actions="toolbarActions"
         :zoom="innerZoom"
         :min-zoom="minZoom"
         :max-zoom="maxZoom"
@@ -869,6 +888,18 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
         </template>
         <template v-if="$slots['toolbar-time']" #time="s">
           <slot name="toolbar-time" v-bind="s" />
+        </template>
+
+        <!-- One renderer for every button action, so a host with its own
+             button component keeps the shared action list. -->
+        <template v-if="$slots['toolbar-button']" #button="s">
+          <slot name="toolbar-button" v-bind="s" />
+        </template>
+
+        <!-- Per-action overrides: a consumer renders one action itself by
+             filling `#action-<id>`, without taking over the whole zone. -->
+        <template v-for="name in actionSlotNames" :key="name" #[name]="slotProps">
+          <slot :name="name" v-bind="slotProps || {}" />
         </template>
       </TimelineToolbar>
     </slot>
@@ -1060,7 +1091,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
   /* All token values (light and dark) live in theme.css so a consumer can
      redefine them on any ancestor. Declaring them here would shadow that and
      make the package un-themeable. */
-  --at-apply: flex flex-col w-full max-w-full min-w-0 rounded-10px h-full '!p-2';
+  --at-apply: flex flex-col w-full max-w-full min-w-0 rounded-10px h-full p-2 pt-0;
 }
 
 .ve-timeline .ve-timeline__body {

@@ -13,11 +13,12 @@ import type {
   SegmentUnion,
   TrackUnion,
 } from '@video-editor/shared'
+import type { ToolbarAction } from '../timeline/toolbar-actions'
 import type { SegmentDragPayload, SegmentLayout, SegmentResizePayload, TimelineOverlaySlotProps, TimelineTrack } from '../VideoTimeline/types'
 import type { TransitionEditPayload, TransitionSeam } from './types'
 import { getMp4Meta } from '@video-editor/protocol'
 import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
-import { computed, reactive, ref, watch, watchEffect } from 'vue'
+import { computed, reactive, ref, useSlots, watch, watchEffect } from 'vue'
 import VideoTimeline from '../VideoTimeline/index.vue'
 import { AudioSegment, FramesSegment, KeyframeMarkers, SegmentBase, TextSegment } from './segments'
 
@@ -37,6 +38,8 @@ const props = withDefaults(defineProps<{
    * default — every row is `trackHeight` (56px) unless a consumer opts in.
    */
   trackHeightByType?: Record<string, number>
+  /** Declarative toolbar contents — see `createDefaultToolbarActions()`. */
+  toolbarActions?: ToolbarAction[]
 }>(), {
   protocol: null,
   snapStep: 0,
@@ -45,6 +48,7 @@ const props = withDefaults(defineProps<{
   disableInteraction: false,
   showTrackRail: false,
   trackHeightByType: undefined,
+  toolbarActions: undefined,
 })
 
 const emit = defineEmits<{
@@ -59,6 +63,14 @@ const emit = defineEmits<{
   (e: 'transitionEdit', payload: TransitionEditPayload): void
   (e: 'trackToggle', payload: { trackId: string, field: 'hidden' | 'muted', value: boolean }): void
 }>()
+
+// Annotated on purpose: the template declares dynamic `#[name]` slots derived
+// from this value, so leaving it inferred makes the component's own slot types
+// circular and every read of it collapses to `any`.
+const slots: Record<string, unknown> = useSlots()
+
+/** Per-action toolbar override slots, forwarded down to VideoTimeline. */
+const actionSlotNames = computed<string[]>(() => Object.keys(slots).filter(name => name.startsWith('action-')))
 
 const innerSelectedId = ref<string | null>(props.selectedSegmentId ?? null)
 watch(() => props.selectedSegmentId, (value) => {
@@ -347,6 +359,7 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
     :disable-interaction="disableInteraction"
     :show-track-rail="showTrackRail"
     :track-height-by-type="trackHeightByType"
+    :toolbar-actions="toolbarActions"
     @update:current-time="emit('update:currentTime', $event)"
     @update:zoom="emit('update:zoom', $event)"
     @segment-click="handleTimelineSegmentClick"
@@ -380,6 +393,15 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
     </template>
     <template v-if="$slots['toolbar-time']" #toolbar-time="s">
       <slot name="toolbar-time" v-bind="s" />
+    </template>
+
+    <template v-if="$slots['toolbar-button']" #toolbar-button="s">
+      <slot name="toolbar-button" v-bind="s" />
+    </template>
+
+    <!-- Per-action toolbar overrides, forwarded by name -->
+    <template v-for="name in actionSlotNames" :key="name" #[name]="slotProps">
+      <slot :name="name" v-bind="slotProps || {}" />
     </template>
 
     <!-- Pass through ruler slot -->

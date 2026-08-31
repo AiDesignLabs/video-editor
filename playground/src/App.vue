@@ -9,7 +9,7 @@ import type { GizmoTransformPatch } from './gizmo/types'
 import { createEditorCore } from '@video-editor/editor-core'
 import { createProjectStore, generateThumbnails } from '@video-editor/protocol'
 import { composeProtocol, createRenderer, listEffectDefinitions, listTransitionDefinitions } from '@video-editor/renderer'
-import { CanvasSizePanel, PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
+import { CanvasSizePanel, createDefaultToolbarActions, mergeToolbarActions, PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 import AssetPanel from './AssetPanel.vue'
 import { toComposeOptions } from './export-options'
@@ -1051,6 +1051,38 @@ const savedStatusLabel = computed(() => (
     : '尚未保存'
 ))
 
+/**
+ * The timeline's own toolbar, built from the package's standard set. The
+ * playground only adds what the package cannot know about — here, the
+ * autosave indicator — which is the same seam a business embed uses.
+ */
+const timelineToolbarActions = computed(() => mergeToolbarActions(
+  createDefaultToolbarActions({
+    onAdd: () => openDrawer('assets'),
+    onDelete: () => removeSelectedSegment(),
+    onSplit: splitSelectedSegment,
+    onUndo: () => commands.undo(),
+    onRedo: () => commands.redo(),
+    onTogglePlay: togglePlay,
+    onStepBackward: () => stepFrame(-1),
+    onStepForward: () => stepFrame(1),
+    onToggleMute: toggleMasterMute,
+    hasSelection: Boolean(selectedSegmentId.value),
+    canUndo: Boolean(undoCount.value),
+    canRedo: Boolean(redoCount.value),
+    canPlay: Boolean(renderer.value),
+    canStep: Boolean(renderer.value),
+    isPlaying: isPlaying.value,
+    muted: masterMuted.value,
+    titles: { delete: '删除选中片段 (Delete，按住 Shift 为波纹删除)' },
+  }),
+  {
+    add: [
+      { id: 'saved', kind: 'status', icon: 'i-creatly-save', text: savedStatusLabel.value, after: 'redo' },
+    ],
+  },
+))
+
 function formatTimecode(value: number | Ref<number>) {
   const ms = Math.max(0, unref(value))
   const totalSeconds = ms / 1000
@@ -1306,6 +1338,7 @@ function handleAddSegmentClick(data: {
         :current-time="currentTimeMs"
         :track-types="['sticker', 'effect', 'filter', 'text', 'frames', 'audio']"
         :show-track-rail="true"
+        :toolbar-actions="timelineToolbarActions"
         @update:current-time="handleTimelineCurrentTime"
         @segment-click="handleTimelineSegmentClick"
         @segment-drag-end="handleSegmentDragEnd"
@@ -1315,49 +1348,7 @@ function handleAddSegmentClick(data: {
         @transition-edit="handleTransitionEdit"
         @track-toggle="handleTrackToggle"
       >
-        <template #toolbar-left>
-          <button class="ve-btn" title="添加素材" aria-label="添加素材" @click="openDrawer('assets')">
-            <span class="ve-btn__icon i-creatly-add" aria-hidden="true" />
-          </button>
-          <span class="ve-toolbar-divider" />
-          <button class="ve-btn" :disabled="!selectedSegmentId" title="删除选中片段 (Delete，按住 Shift 为波纹删除)" aria-label="删除" @click="removeSelectedSegment()">
-            <span class="ve-btn__icon i-creatly-clear" aria-hidden="true" />
-          </button>
-          <button class="ve-btn" :disabled="!selectedSegmentId" title="在播放头处分割 (Cmd/Ctrl+B)" aria-label="分割" @click="splitSelectedSegment">
-            <span class="ve-btn__icon i-creatly-cutting" aria-hidden="true" />
-          </button>
-          <span class="ve-toolbar-divider" />
-          <button class="ve-btn" :disabled="!undoCount" title="撤销 (Cmd/Ctrl+Z)" aria-label="撤销" @click="commands.undo()">
-            <span class="ve-btn__icon i-creatly-withdraw" aria-hidden="true" />
-          </button>
-          <button class="ve-btn" :disabled="!redoCount" title="重做 (Cmd/Ctrl+Shift+Z)" aria-label="重做" @click="commands.redo()">
-            <span class="ve-btn__icon i-creatly-advance" aria-hidden="true" />
-          </button>
-          <span class="ve-toolbar-divider" />
-          <span class="ve-btn__icon i-creatly-save" aria-hidden="true" />
-          <span class="ve-toolbar-status">{{ savedStatusLabel }}</span>
-        </template>
-
-        <template #toolbar-right-leading>
-          <button class="ve-btn" :disabled="!renderer" title="上一帧" aria-label="上一帧" @click="stepFrame(-1)">
-            <span class="ve-btn__icon i-creatly-back-one-frame" aria-hidden="true" />
-          </button>
-          <button class="ve-btn" :disabled="!renderer" title="下一帧" aria-label="下一帧" @click="stepFrame(1)">
-            <span class="ve-btn__icon i-creatly-forward-one-frame" aria-hidden="true" />
-          </button>
-          <span class="ve-toolbar-divider" />
-        </template>
-
-        <template #toolbar-right-trailing>
-          <button class="ve-btn" :title="masterMuted ? '取消静音' : '静音'" :aria-label="masterMuted ? '取消静音' : '静音'" @click="toggleMasterMute">
-            <span class="ve-btn__icon" :class="masterMuted ? 'i-creatly-mute' : 'i-creatly-sound'" aria-hidden="true" />
-          </button>
-        </template>
-
-        <template #toolbar-center>
-          <button class="ve-btn ve-btn--strong" :disabled="!renderer" :title="isPlaying ? '暂停 (空格)' : '播放 (空格)'" :aria-label="isPlaying ? '暂停' : '播放'" @click="togglePlay">
-            <span class="ve-btn__icon" :class="isPlaying ? 'i-creatly-pause' : 'i-creatly-play'" aria-hidden="true" />
-          </button>
+        <template #toolbar-time>
           <div class="rail__clock">
             <span>{{ formatTimecode(currentTimeMs) }}</span>
             <span class="rail__clock-divider">/</span>

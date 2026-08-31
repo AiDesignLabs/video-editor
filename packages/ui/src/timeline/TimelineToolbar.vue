@@ -1,5 +1,9 @@
 <script setup lang="ts">
+import type { ToolbarAction, ToolbarActionGroup } from './toolbar-actions'
 import { computed } from 'vue'
+import TimelineToolbarAction from './TimelineToolbarAction.vue'
+import TimelineZoomControl from './TimelineZoomControl.vue'
+import { resolveToolbarGroup } from './toolbar-actions'
 
 defineOptions({ name: 'TimelineToolbar' })
 
@@ -12,6 +16,12 @@ const props = withDefaults(defineProps<{
   formatTime?: (ms: number) => string
   /** Hide the built-in zoom slider when the host supplies its own. */
   showZoomSlider?: boolean
+  /**
+   * Declarative contents — see `toolbar-actions.ts`. When omitted the toolbar
+   * keeps its legacy shape (empty side zones plus the zoom cluster on the
+   * right), so embeds that drive it purely through slots are unaffected.
+   */
+  actions?: ToolbarAction[]
 }>(), {
   minZoom: 0.25,
   maxZoom: 10,
@@ -19,6 +29,7 @@ const props = withDefaults(defineProps<{
   duration: 0,
   formatTime: (ms: number) => `${(ms / 1000).toFixed(2)}s`,
   showZoomSlider: true,
+  actions: undefined,
 })
 
 const emit = defineEmits<{
@@ -27,36 +38,63 @@ const emit = defineEmits<{
   (e: 'update:zoom', zoom: number): void
 }>()
 
-/**
- * Zoom is geometric, so a linear slider would spend most of its travel in the
- * high end. Map the handle position through log space to keep it even.
- */
-const sliderValue = computed({
-  get() {
-    const { zoom, minZoom, maxZoom } = props
-    if (maxZoom <= minZoom)
-      return 0
-    const ratio = Math.log(zoom / minZoom) / Math.log(maxZoom / minZoom)
-    return Math.round(Math.min(Math.max(ratio, 0), 1) * 100)
-  },
-  set(value: number) {
-    const { minZoom, maxZoom } = props
-    const ratio = Math.min(Math.max(value, 0), 100) / 100
-    emit('update:zoom', minZoom * (maxZoom / minZoom) ** ratio)
-  },
-})
+function useGroup(name: ToolbarActionGroup) {
+  return computed(() => props.actions ? resolveToolbarGroup(props.actions, name) : [])
+}
 
-const fillPercent = computed(() => `${sliderValue.value}%`)
+const leftActions = useGroup('left')
+const centerActions = useGroup('center')
+const rightActions = useGroup('right')
+
+/** Forwarded verbatim to every rendered action, which needs the zoom context. */
+const zoomBindings = computed(() => ({
+  zoom: props.zoom,
+  minZoom: props.minZoom,
+  maxZoom: props.maxZoom,
+  showZoomSlider: props.showZoomSlider,
+}))
 </script>
 
 <template>
   <div class="ve-toolbar">
     <div class="ve-toolbar__group ve-toolbar__group--left">
-      <slot name="left-actions" />
+      <slot name="left-actions">
+        <template v-for="action in leftActions" :key="action.id">
+          <slot :name="`action-${action.id}`" :action="action">
+            <TimelineToolbarAction
+              :action="action"
+              v-bind="zoomBindings"
+              @zoom-in="emit('zoomIn')"
+              @zoom-out="emit('zoomOut')"
+              @update:zoom="emit('update:zoom', $event)"
+            >
+              <template v-if="$slots.button" #button="s">
+                <slot name="button" v-bind="s" />
+              </template>
+            </TimelineToolbarAction>
+          </slot>
+        </template>
+      </slot>
     </div>
 
     <div class="ve-toolbar__group ve-toolbar__group--center">
       <slot name="center">
+        <template v-for="action in centerActions" :key="action.id">
+          <slot :name="`action-${action.id}`" :action="action">
+            <TimelineToolbarAction
+              :action="action"
+              v-bind="zoomBindings"
+              @zoom-in="emit('zoomIn')"
+              @zoom-out="emit('zoomOut')"
+              @update:zoom="emit('update:zoom', $event)"
+            >
+              <template v-if="$slots.button" #button="s">
+                <slot name="button" v-bind="s" />
+              </template>
+            </TimelineToolbarAction>
+          </slot>
+        </template>
+
         <div class="ve-toolbar__time">
           <slot name="time" :current-time="currentTime" :duration="duration">
             <span>{{ formatTime?.(currentTime || 0) }}</span>
@@ -73,41 +111,35 @@ const fillPercent = computed(() => `${sliderValue.value}%`)
       <slot name="right-actions-leading" />
 
       <slot name="right-actions">
-        <button
-          class="ve-btn ve-btn--strong"
-          type="button"
-          :disabled="zoom <= minZoom"
-          title="Zoom out"
-          aria-label="Zoom out"
-          @click="emit('zoomOut')"
-        >
-          <span class="ve-btn__icon i-creatly-zoom-out" aria-hidden="true" />
-        </button>
+        <template v-if="actions">
+          <template v-for="action in rightActions" :key="action.id">
+            <slot :name="`action-${action.id}`" :action="action">
+              <TimelineToolbarAction
+                :action="action"
+                v-bind="zoomBindings"
+                @zoom-in="emit('zoomIn')"
+                @zoom-out="emit('zoomOut')"
+                @update:zoom="emit('update:zoom', $event)"
+              >
+                <template v-if="$slots.button" #button="s">
+                  <slot name="button" v-bind="s" />
+                </template>
+              </TimelineToolbarAction>
+            </slot>
+          </template>
+        </template>
 
-        <label v-if="showZoomSlider" class="ve-slider" :style="{ '--ve-slider-fill': fillPercent }">
-          <span class="ve-slider__track" aria-hidden="true" />
-          <span class="ve-slider__fill" aria-hidden="true" />
-          <input
-            v-model.number="sliderValue"
-            class="ve-slider__input"
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            aria-label="Zoom"
-          >
-        </label>
-
-        <button
-          class="ve-btn ve-btn--strong"
-          type="button"
-          :disabled="zoom >= maxZoom"
-          title="Zoom in"
-          aria-label="Zoom in"
-          @click="emit('zoomIn')"
-        >
-          <span class="ve-btn__icon i-creatly-zoom-in" aria-hidden="true" />
-        </button>
+        <!-- No action list, so the zoom cluster stays the right zone's default. -->
+        <TimelineZoomControl
+          v-else
+          :zoom="zoom"
+          :min-zoom="minZoom"
+          :max-zoom="maxZoom"
+          :show-slider="showZoomSlider"
+          @zoom-in="emit('zoomIn')"
+          @zoom-out="emit('zoomOut')"
+          @update:zoom="emit('update:zoom', $event)"
+        />
       </slot>
 
       <slot name="right-actions-trailing" />
@@ -141,8 +173,8 @@ const fillPercent = computed(() => `${sliderValue.value}%`)
   --at-apply: flex-1 justify-end min-w-0;
 }
 
-/* `.ve-btn` / `.ve-toolbar-divider` live in theme.css so slotted content can
-   use them too — see the comment there. */
+/* `.ve-btn` / `.ve-toolbar-divider` / `.ve-toolbar-status` live in theme.css so
+   slotted content can use them too — see the comment there. */
 
 /* Time readout ----------------------------------------------------------- */
 
@@ -157,61 +189,5 @@ const fillPercent = computed(() => `${sliderValue.value}%`)
 
 .ve-toolbar .ve-toolbar__time-divider {
   color: var(--ve-content-tertiary, rgba(0, 0, 0, 0.35));
-}
-
-/* Zoom slider ------------------------------------------------------------ */
-
-.ve-toolbar .ve-slider {
-  --at-apply: relative inline-flex items-center shrink-0;
-  width: var(--ve-slider-width, 160px);
-  height: var(--ve-slider-knob-size, 16px);
-}
-
-.ve-toolbar .ve-slider__track,
-.ve-toolbar .ve-slider__fill {
-  --at-apply: absolute left-0 pointer-events-none;
-  height: var(--ve-slider-track-height, 4px);
-  border-radius: calc(var(--ve-slider-track-height, 4px) / 2);
-}
-
-.ve-toolbar .ve-slider__track {
-  --at-apply: w-full;
-  background: var(--ve-slider-track-color, rgba(34, 34, 38, 0.12));
-}
-
-.ve-toolbar .ve-slider__fill {
-  width: var(--ve-slider-fill, 0%);
-  background: var(--ve-slider-fill-color, #222226);
-}
-
-/* The native input stays on top so it keeps keyboard and pointer behaviour;
-   only its thumb is painted. */
-.ve-toolbar .ve-slider__input {
-  --at-apply: relative w-full m-0 bg-transparent cursor-pointer;
-  appearance: none;
-  height: var(--ve-slider-knob-size, 16px);
-}
-
-.ve-toolbar .ve-slider__input::-webkit-slider-thumb {
-  appearance: none;
-  width: var(--ve-slider-knob-size, 16px);
-  height: var(--ve-slider-knob-size, 16px);
-  border: var(--ve-slider-knob-border, 3px) solid var(--ve-slider-fill-color, #222226);
-  border-radius: 50%;
-  background: var(--ve-surface-elevated, #fff);
-  cursor: pointer;
-}
-
-.ve-toolbar .ve-slider__input::-moz-range-thumb {
-  width: var(--ve-slider-knob-size, 16px);
-  height: var(--ve-slider-knob-size, 16px);
-  border: var(--ve-slider-knob-border, 3px) solid var(--ve-slider-fill-color, #222226);
-  border-radius: 50%;
-  background: var(--ve-surface-elevated, #fff);
-  cursor: pointer;
-}
-
-.ve-toolbar .ve-slider__input::-moz-range-track {
-  background: transparent;
 }
 </style>
