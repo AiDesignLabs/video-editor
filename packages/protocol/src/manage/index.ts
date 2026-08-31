@@ -220,6 +220,20 @@ export interface TrackMutableFields {
   extra?: TrackUnion['extra']
 }
 
+/**
+ * What `undo()`/`redo()` report back. Exported because it is part of the
+ * manager's public return type: leaving it local made the emitted `.d.ts`
+ * reference a private name, which broke the rollup for downstream consumers.
+ */
+export interface HistoryMutationResult {
+  success: boolean
+  affectedSegments: SegmentUnion[]
+  affectedTracks: TrackUnion[]
+  createdTracks: TrackUnion[]
+  removedTrackIds: string[]
+  removedSegmentIds: string[]
+}
+
 export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
   idFactory?: {
     segment?: () => string
@@ -1218,15 +1232,6 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     if (success && selectedSegmentId.value === oldSegmentId)
       selectedSegmentId.value = newSegmentId
     return success
-  }
-
-  interface HistoryMutationResult {
-    success: boolean
-    affectedSegments: SegmentUnion[]
-    affectedTracks: TrackUnion[]
-    createdTracks: TrackUnion[]
-    removedTrackIds: string[]
-    removedSegmentIds: string[]
   }
 
   const emptyHistoryResult: HistoryMutationResult = {

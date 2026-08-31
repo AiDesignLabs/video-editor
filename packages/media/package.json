@@ -5,6 +5,7 @@
   "description": "Media decode/encode abstraction over mediabunny (WebCodecs)",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./*": "./*"

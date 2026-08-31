@@ -4,6 +4,7 @@
   "version": "0.0.1-beta.34",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./*": "./*"

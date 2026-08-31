@@ -4,6 +4,7 @@
   "version": "0.0.1-beta.34",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./*": "./*"
@@ -22,14 +23,14 @@
   "peerDependencies": {
     "@vue/reactivity": "catalog:"
   },
-  "devDependencies": {
-    "@vue/reactivity": "catalog:"
-  },
   "dependencies": {
     "@video-editor/media": "workspace:*",
     "@video-editor/protocol": "workspace:*",
     "@video-editor/shared": "workspace:*",
     "opfs-tools": "catalog:",
     "pixi.js": "catalog:"
+  },
+  "devDependencies": {
+    "@vue/reactivity": "catalog:"
   }
 }
