@@ -13,8 +13,10 @@ const props = withDefaults(defineProps<{
 })
 
 /**
- * No design exists yet for sticker / effect / filter segments, so they follow
- * the conventions the rest of the timeline already uses:
+ * No design exists yet for effect / filter segments, so they follow the
+ * conventions the rest of the timeline already uses. (Stickers are media and go
+ * through `FramesSegment`; text has its own preview in `TextSegment`.)
+ *
  *
  * - a neutral overlay surface (same family as the audio segment), never a
  *   saturated fill — in the shipped design colour comes from media, not chrome;
@@ -26,7 +28,6 @@ const props = withDefaults(defineProps<{
  * without touching markup.
  */
 const ICON_BY_TRACK_TYPE: Record<string, string> = {
-  sticker: 'i-creatly-element',
   effect: 'i-creatly-star',
   filter: 'i-creatly-brush',
   text: 'i-creatly-text',

@@ -248,9 +248,10 @@ Figma 稿里 frames 行 56px、audio 行 48px，一度按稿实现过。产品�
 
 ---
 
-## text / sticker / effect / filter 片段样式（暂无设计稿，按既有约定推导）
+## text / effect / filter 片段样式（暂无设计稿，按既有约定推导）
 
-设计稿只画了 frames 和 audio。这四类是「没有媒体内容可展示」的片段，统一成一套语言：
+设计稿只画了 frames 和 audio。text / effect / filter 这三类是「没有媒体内容可展示」的片段，
+统一成一套语言。（**sticker 不在其中** —— 它有 `url`，走 frames 那套媒体渲染，见下。）
 
 | 元素         | 值                                            | token                           |
 | ------------ | --------------------------------------------- | ------------------------------- |
@@ -269,7 +270,16 @@ Figma 稿里 frames 行 56px、audio 行 48px，一度按稿实现过。产品�
 3. **全部走 token** —— 亮暗自动成立，业务可单点覆盖。
 
 图标取自 `@creatly/figma-icons`（catalog 锁的 0.0.3-beta.1，391 个）：
-text→`text`、sticker→`element`、effect→`star`、filter→`brush`。没有引入新图标包。
+text→`text`、sticker→`element`、effect→`star`、filter→`brush`，轨道 rail 用同一套，
+让 rail 和片段读起来是同一个东西。没有引入新图标包。
+
+### sticker 走 frames
+
+`StickerSegment` 是 `{ format: 'img' | 'gif', url }`，和 `IImageFramesSegment` 去掉 `type`
+判别字段后结构一致，所以直接交给 `FramesSegment` 渲染成同样的缩略图平铺条。
+`FramesSegment` 里所有视频专属逻辑（波形、静音、抽帧）本来就由 `isVideoFramesSegment()` 守着，
+对 sticker 天然不生效。分支判断改成看结构（`segmentType === 'sticker' || type === 'image'`）
+而不是类型收窄，因为 sticker 没有 `type` 字段。
 
 顺带修掉一个存量缺陷：`SegmentBase` 原来并排渲染 `trackType` 和 `segmentType` 两个 pill，
 而这两个值对这些类型是**同一个字符串**，所以界面上一直显示成 `filter filter` / `effect effect`。

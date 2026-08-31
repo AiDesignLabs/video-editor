@@ -293,13 +293,16 @@ function handleTransitionSeamClick(seam: TransitionSeam) {
   emit('transitionEdit', payload)
 }
 
+/* Mirrors the per-type icons the segment components use, so the rail and the
+   segment read as the same thing. `text`/`element`/`star`/`brush` all exist in
+   the pinned @creatly/figma-icons; the previous fallbacks doubled up. */
 const RAIL_ICON_BY_TRACK_TYPE: Record<string, string> = {
   frames: 'i-creatly-video',
   audio: 'i-creatly-audio',
-  text: 'i-creatly-add-image',
-  sticker: 'i-creatly-add-image',
-  effect: 'i-creatly-background-video',
-  filter: 'i-creatly-background-video',
+  text: 'i-creatly-text',
+  sticker: 'i-creatly-element',
+  effect: 'i-creatly-star',
+  filter: 'i-creatly-brush',
 }
 
 /** Icon shown in the track rail for a given track type. */
@@ -503,8 +506,17 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
               </slot>
             </template>
             <template v-else-if="segment.segmentType === 'sticker'">
+              <!-- Stickers render as media, like frames: only the image branch is
+                   reachable for them, so just those inner slots are forwarded. -->
               <slot name="segment-sticker" :segment="segment as IStickerSegment" :layout="layout">
-                <SegmentBase :segment="segment" :track-type="layout.track.type || 'unknown'" :accent-color="layout.track.color" />
+                <FramesSegment :segment="segment as IStickerSegment">
+                  <template v-if="$slots['frames-image']" #image="s">
+                    <slot name="frames-image" v-bind="s" />
+                  </template>
+                  <template v-if="$slots['frames-overlay']" #overlay="s">
+                    <slot name="frames-overlay" v-bind="s" />
+                  </template>
+                </FramesSegment>
               </slot>
             </template>
             <template v-else-if="segment.segmentType === 'audio'">

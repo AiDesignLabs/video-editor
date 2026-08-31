@@ -64,6 +64,21 @@ const initialProtocol: IVideoProtocol = {
       ],
     },
     {
+      trackId: 'sticker-track',
+      trackType: 'sticker',
+      children: [
+        {
+          id: 'sticker-1',
+          segmentType: 'sticker',
+          format: 'img',
+          url: swatches.extra,
+          startTime: 2000,
+          endTime: 7000,
+          extra: { label: 'Sticker' },
+        },
+      ],
+    },
+    {
       trackId: 'text-track',
       trackType: 'text',
       children: [

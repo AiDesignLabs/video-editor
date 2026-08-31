@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { WaveformData } from '@video-editor/protocol'
-import type { IFramesSegmentUnion } from '@video-editor/shared'
+import type { IFramesSegmentUnion, IStickerSegment } from '@video-editor/shared'
 import type { VideoThumbnailExtractionDiagnostics, VideoThumbnailRequest } from './videoThumbnailExtractionModel'
 import { extractWaveform, generateThumbnails, getMp4Meta } from '@video-editor/protocol'
 import { isVideoFramesSegment } from '@video-editor/shared'
@@ -11,11 +11,32 @@ import WaveformCanvasStrip from './WaveformCanvasStrip.vue'
 defineOptions({ name: 'FramesSegment' })
 
 const props = defineProps<{
-  segment: IFramesSegmentUnion
+  /**
+   * Stickers are accepted alongside frames: a sticker is `{ format, url }`,
+   * structurally the same as an image-frames segment minus the `type`
+   * discriminant, and it renders as the same tiled thumbnail strip. Every
+   * video-only path below is guarded by `isVideoFramesSegment()`, so the
+   * audio/mute machinery stays inert for them.
+   */
+  segment: IFramesSegmentUnion | IStickerSegment
 }>()
 const emit = defineEmits<{
   (e: 'toggleVideoMute', payload: { segmentId: string, muted: boolean }): void
 }>()
+
+/** A sticker has no `type` field, so branch on the shape rather than narrowing. */
+const isImageLike = computed(() => {
+  const segment = props.segment as { segmentType?: string, type?: string }
+  return segment.segmentType === 'sticker' || segment.type === 'image'
+})
+
+const isVideoLike = computed(() => (props.segment as { type?: string }).type === 'video')
+
+/** Only reached by 3D (or future) frame types, which a sticker never is. */
+const fallbackLabel = computed(() => {
+  const segment = props.segment as { type?: string, segmentType?: string }
+  return segment.type ?? segment.segmentType ?? ''
+})
 
 const containerRef = ref<HTMLElement | null>(null)
 const waveformRef = ref<HTMLElement | null>(null)
@@ -351,7 +372,7 @@ function handleMuteToggle(event: MouseEvent) {
 <template>
   <div class="frames-segment">
     <!-- Image Type: Tiled background -->
-    <template v-if="segment.type === 'image'">
+    <template v-if="isImageLike">
       <slot name="image" :segment="segment" :style="{ backgroundImage: segment.url ? `url(${segment.url})` : '' }">
         <div ref="containerRef" class="frames-segment__image">
           <div
@@ -365,7 +386,7 @@ function handleMuteToggle(event: MouseEvent) {
     </template>
 
     <!-- Video Type: Extracted frame thumbnails -->
-    <template v-else-if="segment.type === 'video'">
+    <template v-else-if="isVideoLike">
       <slot
         name="video"
         :segment="segment"
@@ -426,7 +447,7 @@ function handleMuteToggle(event: MouseEvent) {
     <template v-else>
       <slot name="fallback" :segment="segment">
         <div class="frames-segment__placeholder">
-          <span>{{ segment.type }}</span>
+          <span>{{ fallbackLabel }}</span>
         </div>
       </slot>
     </template>
