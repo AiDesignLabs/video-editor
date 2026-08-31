@@ -63,12 +63,12 @@ function patch(apply: (draft: ITransform) => void) {
 </template>
 
 <style scoped>
-:where(.pi-transform) {
+.pi-transform {
   --at-apply: flex flex-col gap-1.5;
 }
 
-:where(.pi-transform .pi-transform__title) {
+.pi-transform .pi-transform__title {
   --at-apply: text-[11px] font-semibold uppercase tracking-wide;
-  color: rgba(15, 23, 42, 0.5);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 </style>

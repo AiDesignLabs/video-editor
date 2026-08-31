@@ -39,17 +39,19 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-:where(.ve-playhead) {
+.ve-playhead {
   --ve-playhead-nudge: 0px;
   --at-apply: absolute top-0 z-40 pointer-events-auto cursor-ew-resize h-full;
   transform: translateX(calc(-50% - var(--ve-playhead-nudge)));
 }
 
-:where(.ve-playhead__icon) {
-  --at-apply: text-[var(--ve-content-primary,#222226)] pointer-events-none sticky top-0 z-2 block;
+.ve-playhead__icon {
+  --at-apply: pointer-events-none sticky top-0 z-2 block;
+  color: var(--ve-playhead-color, #222226);
 }
 
-:where(.ve-playhead__line) {
-  --at-apply: bg-[var(--ve-content-primary,#222226)] bottom-0 w-px translate-x--50% left-50% top-2px absolute pointer-events-none;
+.ve-playhead__line {
+  --at-apply: bottom-0 w-px translate-x--50% left-50% top-2px absolute pointer-events-none;
+  background: var(--ve-playhead-color, #222226);
 }
 </style>

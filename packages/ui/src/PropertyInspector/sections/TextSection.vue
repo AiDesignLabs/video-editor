@@ -11,9 +11,9 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'change-line', index: number, patch: Partial<ITextBasic>): void
-  (e: 'add-line'): void
-  (e: 'remove-line', index: number): void
+  (e: 'changeLine', index: number, patch: Partial<ITextBasic>): void
+  (e: 'addLine'): void
+  (e: 'removeLine', index: number): void
 }>()
 
 const activeIndex = ref(0)
@@ -26,7 +26,7 @@ watch(() => props.texts.length, (length) => {
 const activeLine = computed(() => props.texts[activeIndex.value])
 
 function patchActive(patch: Partial<ITextBasic>) {
-  emit('change-line', activeIndex.value, patch)
+  emit('changeLine', activeIndex.value, patch)
 }
 
 function onContentInput(event: Event) {
@@ -85,14 +85,14 @@ function onBackgroundColor(event: Event) {
       >
         行 {{ index + 1 }}
       </button>
-      <button class="pi-text__line-tab" type="button" @click="emit('add-line')">
+      <button class="pi-text__line-tab" type="button" @click="emit('addLine')">
         ＋
       </button>
       <button
         v-if="props.texts.length > 1"
         class="pi-text__line-tab"
         type="button"
-        @click="emit('remove-line', activeIndex)"
+        @click="emit('removeLine', activeIndex)"
       >
         －
       </button>
@@ -115,18 +115,28 @@ function onBackgroundColor(event: Event) {
         <input class="pi-text__color" type="color" :value="activeLine.fill ?? '#ffffff'" @input="onColorInput('fill', $event)">
         <span class="pi-text__label">对齐</span>
         <select class="pi-text__select" :value="activeLine.align ?? 'left'" @change="onAlignChange">
-          <option value="left">左</option>
-          <option value="center">中</option>
-          <option value="right">右</option>
+          <option value="left">
+            左
+          </option>
+          <option value="center">
+            中
+          </option>
+          <option value="right">
+            右
+          </option>
         </select>
         <button
           class="pi-text__toggle" :class="{ 'pi-text__toggle--on': activeLine.fontWeight === 'bold' }"
           type="button" @click="toggleBold"
-        >B</button>
+        >
+          B
+        </button>
         <button
           class="pi-text__toggle" :class="{ 'pi-text__toggle--on': activeLine.underline }"
           type="button" @click="toggleUnderline"
-        >U</button>
+        >
+          U
+        </button>
       </div>
 
       <div class="pi-text__row">
@@ -162,68 +172,68 @@ function onBackgroundColor(event: Event) {
 </template>
 
 <style scoped>
-:where(.pi-text) {
+.pi-text {
   --at-apply: flex flex-col gap-1.5;
 }
 
-:where(.pi-text .pi-text__title) {
+.pi-text .pi-text__title {
   --at-apply: text-[11px] font-semibold uppercase tracking-wide;
-  color: rgba(15, 23, 42, 0.5);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 
-:where(.pi-text .pi-text__lines) {
+.pi-text .pi-text__lines {
   --at-apply: flex items-center gap-1 flex-wrap;
 }
 
-:where(.pi-text .pi-text__line-tab) {
+.pi-text .pi-text__line-tab {
   --at-apply: px-2 py-1 rounded-4px text-[11px] cursor-pointer;
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  background: #fff;
-  color: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
+  background: var(--ve-surface-elevated, #fff);
+  color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
 }
 
-:where(.pi-text .pi-text__line-tab--active) {
-  border-color: #222226;
-  color: #222226;
+.pi-text .pi-text__line-tab--active {
+  border-color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
+  color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
   font-weight: 600;
 }
 
-:where(.pi-text .pi-text__row) {
+.pi-text .pi-text__row {
   --at-apply: flex items-center gap-2 text-[12px];
-  color: rgba(15, 23, 42, 0.75);
+  color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
 }
 
-:where(.pi-text .pi-text__label) {
+.pi-text .pi-text__label {
   --at-apply: w-16 shrink-0 whitespace-nowrap;
 }
 
-:where(.pi-text .pi-text__input) {
+.pi-text .pi-text__input {
   --at-apply: flex-1 min-w-0 px-1.5 py-1 rounded-4px text-[12px];
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  background: #fff;
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
+  background: var(--ve-surface-elevated, #fff);
 }
 
-:where(.pi-text .pi-text__select) {
+.pi-text .pi-text__select {
   --at-apply: px-1.5 py-1 rounded-4px text-[12px];
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  background: #fff;
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
+  background: var(--ve-surface-elevated, #fff);
 }
 
-:where(.pi-text .pi-text__color) {
+.pi-text .pi-text__color {
   --at-apply: w-8 h-6 p-0 rounded-4px cursor-pointer;
-  border: 1px solid rgba(15, 23, 42, 0.15);
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
 }
 
-:where(.pi-text .pi-text__toggle) {
+.pi-text .pi-text__toggle {
   --at-apply: px-2 py-1 rounded-4px text-[11px] font-semibold cursor-pointer;
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  background: #fff;
-  color: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
+  background: var(--ve-surface-elevated, #fff);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 
-:where(.pi-text .pi-text__toggle--on) {
-  border-color: #222226;
-  color: #222226;
+.pi-text .pi-text__toggle--on {
+  border-color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
+  color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
   background: rgba(34, 34, 38, 0.08);
 }
 </style>

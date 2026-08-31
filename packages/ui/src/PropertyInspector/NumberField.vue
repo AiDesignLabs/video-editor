@@ -57,23 +57,23 @@ function onInput(event: Event) {
 </template>
 
 <style scoped>
-:where(.pi-field) {
+.pi-field {
   --at-apply: flex items-center gap-2 text-[12px];
-  color: rgba(15, 23, 42, 0.75);
+  color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
 }
 
-:where(.pi-field .pi-field__label) {
+.pi-field .pi-field__label {
   --at-apply: w-16 shrink-0 whitespace-nowrap;
 }
 
-:where(.pi-field .pi-field__slider) {
+.pi-field .pi-field__slider {
   --at-apply: flex-1 min-w-0;
-  accent-color: #222226;
+  accent-color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
 }
 
-:where(.pi-field .pi-field__input) {
+.pi-field .pi-field__input {
   --at-apply: w-18 px-1.5 py-1 rounded-4px text-[12px];
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  background: #fff;
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
+  background: var(--ve-surface-elevated, #fff);
 }
 </style>

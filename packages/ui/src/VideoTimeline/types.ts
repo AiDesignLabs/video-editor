@@ -60,6 +60,10 @@ export interface TimelineOverlaySlotProps {
   pixelsPerMs: number
   rulerHeight: number
   trackHeight: number
+  /** Resolved height of each row, in source order. */
+  trackHeights: number[]
+  /** Top edge of each row relative to the track area (ruler height not included). */
+  trackTops: number[]
   trackGap: number
 }
 

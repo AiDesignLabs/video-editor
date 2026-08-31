@@ -18,7 +18,6 @@ defineProps<{
         :class="{ 've-ruler__tick--major': tick.isMajor }"
         :style="{
           left: `${tick.position}px`,
-          transform: 'translateX(-50%)',
         }"
       >
         <div class="ve-ruler__line" />
@@ -31,36 +30,42 @@ defineProps<{
 </template>
 
 <style scoped>
-:where(.ve-ruler) {
-  --ve-ruler-major: 8px;
-  --ve-ruler-minor: 4px;
-  --at-apply: sticky top-0 left-0 right-0 z-3 border-b overflow-hidden;
-  color: var(--ve-content-secondary);
-  border-color: var(--ve-border-weak);
-  background: var(--ve-surface-elevated);
+.ve-ruler {
+  --at-apply: sticky top-0 left-0 right-0 z-3 overflow-hidden;
+  color: var(--ve-content-ruler, rgba(0, 0, 0, 0.55));
+  border-bottom: 1px solid var(--ve-ruler-border, rgba(34, 34, 38, 0.08));
+  background: var(--ve-ruler-background, #fff);
 }
 
-:where(.ve-ruler .ve-ruler__ticks) {
+.ve-ruler .ve-ruler__ticks {
   --at-apply: relative h-full w-full box-border;
 }
 
-:where(.ve-ruler .ve-ruler__tick) {
-  --at-apply: absolute top-0 h-full text-center text-[11px];
-  color: var(--ve-content-secondary);
+.ve-ruler .ve-ruler__tick {
+  --at-apply: absolute top-0 h-full;
 }
 
-:where(.ve-ruler .ve-ruler__line) {
-  --at-apply: h-[var(--ve-ruler-minor)] w-px mx-auto;
-  background: var(--ve-border-subtle);
+.ve-ruler .ve-ruler__line {
+  --at-apply: w-px;
+  height: var(--ve-ruler-minor, 4px);
+  background: var(--ve-ruler-tick-color, #e4e4e4);
 }
 
-:where(.ve-ruler .ve-ruler__tick--major .ve-ruler__line) {
-  --at-apply: relative h-[var(--ve-ruler-major)];
-  background: var(--ve-content-tertiary);
+.ve-ruler .ve-ruler__tick--major .ve-ruler__line {
+  --at-apply: relative;
+  height: var(--ve-ruler-major, 8px);
+  background: var(--ve-ruler-tick-major-color, rgba(0, 0, 0, 0.35));
 }
 
-:where(.ve-ruler .ve-ruler__label ) {
-  --at-apply: absolute font-mono text-right whitespace-nowrap left-4px bottom-0;
-  transform: translateY(-50%);
+/* The label hangs to the right of its tick, aligned to the bottom of the
+   ruler band - matching the Figma spec. */
+.ve-ruler .ve-ruler__label {
+  --at-apply: absolute bottom-0 left-1 whitespace-nowrap;
+  font-size: var(--ve-ruler-font-size, 10px);
+  font-weight: 400;
+  line-height: 1;
+  color: var(--ve-content-ruler, rgba(0, 0, 0, 0.55));
+  font-family: var(--ve-font-numeric, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
 }
 </style>

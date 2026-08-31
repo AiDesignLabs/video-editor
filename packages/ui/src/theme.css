@@ -1,0 +1,336 @@
+/**
+ * Default theme for @video-editor/ui.
+ *
+ * Source of truth: creatly `skills/canvas-fe-design-spec/references/design-rules.md`
+ * (造境画布规范页) for colour semantics, plus docs/timeline-design-spec.md for the
+ * timeline geometry taken from the `预览-编辑权限` frame.
+ *
+ * Two rules from the spec drive the whole file:
+ *
+ * 1. Light uses black alpha overlays, dark uses white alpha overlays, with the
+ *    SAME alpha numbers. So every colour token is declared once per theme and
+ *    the pair differs only in the base colour.
+ * 2. Geometry (type scale, radii, spacing, sizes) is identical across themes,
+ *    so those tokens are declared once and never overridden below.
+ *
+ * Consumers restyle by redefining tokens on any ancestor. Component styles read
+ * them as `var(--ve-x, <literal fallback>)`, so the package still renders if
+ * this stylesheet is not loaded.
+ */
+
+/* ==========================================================================
+   Geometry — shared by both themes
+   ========================================================================== */
+
+:root {
+  /* Radii. Spec ladder: 20 / 16 / 12 / 10 / 8 / 6 / 4 px.
+     Button radius follows height: <20→2, 20→4, 24→6, 32→8, 40→10. */
+  --ve-timeline-radius: 8px;
+  /* Shipped toolbar uses Uno `rounded` (4px), not the spec's 24→6px ladder. */
+  --ve-btn-radius: 4px;
+  --ve-segment-radius: 4px;
+  --ve-track-rail-radius: 4px;
+  --ve-add-radius: 8px;
+
+  --ve-timeline-padding: 8px;
+
+  /* Toolbar */
+  /* `--video-tracks-toolbar-height` in VideoTracks.vue */
+  --ve-toolbar-height: 33px;
+  --ve-toolbar-gap: 8px;
+  --ve-btn-size: 24px;
+  --ve-btn-icon-size: 16px;
+  --ve-divider-height: 16px;
+  --ve-divider-gap: 4px;
+  /* Spec: button/popover strokes are 0.5px (Toast is 1px). */
+  --ve-stroke-width: 0.5px;
+
+  /* Zoom slider */
+  --ve-slider-width: 160px;
+  --ve-slider-track-height: 4px;
+  --ve-slider-knob-size: 16px;
+  --ve-slider-knob-border: 3px;
+
+  /* Ruler. 10px is the smallest size on the spec's type ladder (10/16). The
+     Figma frame used 8px (off-scale) and the shipped build 11px; 10px is the
+     agreed value. */
+  --ve-ruler-major: 8px;
+  --ve-ruler-minor: 4px;
+  --ve-ruler-font-size: 10px;
+
+  /* Track rail */
+  --ve-track-rail-width: 24px;
+  --ve-track-rail-icon-size: 12px;
+
+  /* Track row heights are component props, not CSS — see VideoTimeline's
+     `trackHeight` (56px for every row) and the optional `trackHeightByType`. */
+  --ve-track-gap: 2px;
+
+  /* Segments */
+  --ve-segment-thumbnail-size: 56px;
+  --ve-segment-waveform-height: 16px;
+  --ve-segment-label-inset-y: 6px;
+  --ve-segment-label-inset-x: 8px;
+  --ve-segment-accent-bar-width: 3px;
+  --ve-segment-meta-icon-size: 12px;
+  --ve-segment-meta-gap: 6px;
+  --ve-segment-meta-padding-x: 8px;
+
+  /* Add-segment affordance */
+  --ve-add-size: 40px;
+
+  /* Numerals use Radio Canada per the spec; everything else inherits. */
+  --ve-font-numeric: 'Radio Canada', 'Radio_Canada', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Shared by both themes per the spec. */
+  --ve-shadow-floating: 0 8px 10px -5px rgba(0, 0, 0, 0.08), 0 6px 30px 5px rgba(0, 0, 0, 0.05);
+
+  /* Node-selection blue: explicitly still current in the spec, same both themes. */
+  --ve-selection-border: #5a5aff;
+}
+
+/* ==========================================================================
+   Colours — one declaration per token, both themes
+   --------------------------------------------------------------------------
+   Values are taken from the SHIPPED implementation, not the Figma mock:
+   creatly `apps/ailsc-global/app/assets/css/theme.css` (`--ct-*`, `:root` +
+   `html.dark`) as consumed by `packages/video-editor-ui/src/style.css` and
+   `preview-workspace/components/VideoTracks.vue`. Each token below names its
+   `--ct-*` counterpart so the two can be re-checked mechanically.
+
+   `light-dark()` resolves against the element's computed `color-scheme`, which
+   is inherited, giving us:
+
+   - `:root` follows the OS;
+   - `[data-theme]` pins a theme for that subtree;
+   - `.ve-theme-dark` themes a subtree without touching the document.
+
+   and each token is written once rather than three times, which is where
+   light/dark drift creeps in.
+   ========================================================================== */
+
+:root {
+  color-scheme: light dark;
+}
+
+/* Not anchored to :root — a consumer can theme any subtree, e.g. a dark
+   timeline inside a light page. */
+[data-theme='light'],
+.ve-theme-light {
+  color-scheme: light;
+}
+
+[data-theme='dark'],
+.ve-theme-dark {
+  color-scheme: dark;
+}
+
+:root {
+  /* Overlay ladder (spec: light black / dark white, identical alphas).
+     Published for consumers even where the package does not read every step —
+     it is the documented way to build a matching surface in both themes. */
+  --ve-overlay-2: light-dark(rgba(0, 0, 0, 0.02), rgba(255, 255, 255, 0.02));
+  --ve-overlay-5: light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.05));
+  --ve-overlay-10: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+  --ve-overlay-12: light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.12));
+  --ve-overlay-17: light-dark(rgba(0, 0, 0, 0.17), rgba(255, 255, 255, 0.17));
+  --ve-overlay-20: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
+  --ve-overlay-25: light-dark(rgba(0, 0, 0, 0.25), rgba(255, 255, 255, 0.25));
+
+  /* Content — ct-content-* */
+  --ve-content-primary: light-dark(#222226, rgba(255, 255, 255, 0.9));
+  --ve-content-secondary: light-dark(rgba(0, 0, 0, 0.55), rgba(255, 255, 255, 0.55));
+  --ve-content-tertiary: light-dark(rgba(0, 0, 0, 0.35), rgba(255, 255, 255, 0.35));
+  --ve-content-disabled: light-dark(rgba(34, 34, 38, 0.35), rgba(255, 255, 255, 0.35));
+  --ve-content-on-primary: light-dark(#ffffff, rgba(0, 0, 0, 0.9));
+  --ve-content-on-overlay: #ffffff;
+  --ve-content-ruler: var(--ve-content-secondary);
+
+  /* Surfaces — ct-surface-* / ct-canvas-background */
+  --ve-surface-page: light-dark(#f5f5f5, #121212);
+  --ve-surface-elevated: light-dark(#ffffff, #222222);
+  --ve-surface-card: var(--ve-surface-elevated);
+  --ve-surface-control-subtle: light-dark(#f5f5f5, #1a1a1a);
+  --ve-surface-control-muted: light-dark(#f1f1f1, #1a1a1a);
+  --ve-surface-control-hover: light-dark(#eeeeee, rgba(255, 255, 255, 0.05));
+  --ve-surface-selected: light-dark(#f0f0f0, rgba(255, 255, 255, 0.12));
+  --ve-surface-menu-hover: light-dark(#f5f5f5, rgba(255, 255, 255, 0.05));
+
+  /* Borders — ct-border-* */
+  --ve-border-card: light-dark(rgba(34, 34, 38, 0.08), rgba(59, 59, 59, 0.55));
+  --ve-border-subtle: light-dark(#e4e4e4, #3b3b3b);
+  --ve-border-field: light-dark(rgba(34, 34, 38, 0.12), rgba(59, 59, 59, 0.55));
+  --ve-border-weak: var(--ve-border-card);
+
+  /* Accents — ct-action-primary / ct-accent-selection-* */
+  --ve-primary: light-dark(#222226, #ffffff);
+  --ve-action-primary: var(--ve-primary);
+  --ve-selection-background: light-dark(rgba(90, 90, 255, 0.04), rgba(90, 90, 255, 0.16));
+  --ve-selection-border: light-dark(rgba(90, 90, 255, 0.35), rgba(90, 90, 255, 0.42));
+
+  /* Scrims over media — ct-overlay-scrim* */
+  --ve-overlay-scrim: light-dark(rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.45));
+  --ve-overlay-scrim-strong: light-dark(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.68));
+
+  /* Elevation — ct-elevation-* */
+  --ve-shadow-floating:
+    light-dark(0 6px 30px 5px rgba(0, 0, 0, 0.05), 0 8px 30px 5px rgba(0, 0, 0, 0.05)),
+    light-dark(0 8px 10px -5px rgba(0, 0, 0, 0.08), 0 8px 14px -5px rgba(0, 0, 0, 0.08));
+
+  /* Toolbar buttons. The shipped toolbar paints icons at full primary and only
+     tints the background on hover — not the 35% idle of the Figma mock. */
+  --ve-btn-icon-color: var(--ve-content-primary);
+  --ve-btn-icon-color-strong: var(--ve-content-primary);
+  --ve-btn-disabled-color: var(--ve-content-disabled);
+  --ve-btn-hover-background: var(--ve-surface-control-hover);
+  --ve-btn-active-background: var(--ve-surface-selected);
+
+  /* Zoom slider */
+  --ve-slider-track-color: var(--ve-border-field);
+  --ve-slider-fill-color: var(--ve-content-primary);
+
+  /* Ruler / playhead */
+  --ve-ruler-background: var(--ve-surface-elevated);
+  --ve-ruler-border: var(--ve-border-card);
+  --ve-ruler-tick-color: var(--ve-border-subtle);
+  --ve-ruler-tick-major-color: var(--ve-content-tertiary);
+  --ve-playhead-color: var(--ve-content-primary);
+
+  /* Track rail. The column is a surface of its own (the row colour stops at the
+     body); the cell is the rounded chip drawn inside it. */
+  --ve-track-rail-column-background: var(--ve-surface-elevated);
+  --ve-track-rail-background: var(--ve-overlay-5);
+  --ve-track-rail-icon-color: var(--ve-content-tertiary);
+
+  /* Tracks */
+  --ve-track-background: var(--ve-surface-control-subtle);
+  --ve-track-main-background: var(--ve-surface-control-muted);
+  --ve-track-selected-background: var(--ve-selection-background);
+  --ve-track-selected-border: var(--ve-selection-border);
+
+  /* Segments */
+  --ve-segment-audio-background: var(--ve-surface-control-muted);
+  --ve-segment-video-background: var(--ve-surface-control-muted);
+  --ve-segment-waveform-strip-background: var(--ve-surface-control-muted);
+  --ve-segment-placeholder-background: var(--ve-surface-control-hover);
+  --ve-segment-placeholder-color: var(--ve-content-secondary);
+  --ve-segment-label-background: var(--ve-overlay-scrim);
+  /* Segments with no media to show (text / sticker / effect / filter): a
+     neutral surface plus a thin accent bar, rather than a saturated fill. */
+  --ve-segment-meta-background: var(--ve-overlay-5);
+  --ve-segment-meta-border: var(--ve-border-card);
+  --ve-segment-base-background: var(--ve-surface-control-hover);
+  --ve-segment-pill-background: var(--ve-surface-selected);
+  --ve-segment-handle-color: var(--ve-action-primary);
+  --ve-segment-handle-dot-color: var(--ve-content-on-primary);
+  /* ct-progress-fill. Read by WaveformCanvasStrip through the element's
+     resolved `color`, since a canvas cannot read custom properties. */
+  --ve-waveform-color: light-dark(#3a3a40, rgba(255, 255, 255, 0.55));
+
+  /* Add-segment affordances. These names are already used by the business
+     layer's own override block, so they must not be renamed. */
+  --ve-track-add-button-background: var(--ve-surface-elevated);
+  --ve-track-add-button-border: var(--ve-border-card);
+  --ve-track-add-button-color: var(--ve-content-primary);
+  --ve-track-add-button-hover-background: var(--ve-surface-control-hover);
+  --ve-track-gap-add-hover-background: transparent;
+  --ve-track-gap-add-icon-background: var(--ve-action-primary);
+  --ve-track-gap-add-icon-color: var(--ve-content-on-primary);
+
+  /* Editor panels — spec "画布限定（节点编辑面板）" */
+  --ve-panel-background: var(--ve-surface-elevated);
+  --ve-panel-border: var(--ve-border-field);
+  --ve-option-background: transparent;
+  --ve-option-hover-background: var(--ve-surface-menu-hover);
+  --ve-option-selected-background: var(--ve-surface-selected);
+  --ve-option-selected-inset: inset 0 0 0 1px light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
+}
+
+/* ==========================================================================
+   Consumer-facing primitives
+   --------------------------------------------------------------------------
+   Deliberately global rather than scoped to a component: content a consumer
+   passes into `toolbar-left` / `toolbar-right` / `track-rail` carries the
+   *host's* scope id, so a scoped rule would never reach it. Keeping these
+   global means the business layer writes `<button class="ve-btn">` inside a
+   slot and gets the design system for free.
+   ========================================================================== */
+
+.ve-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ve-btn-size, 24px);
+  height: var(--ve-btn-size, 24px);
+  padding: 0;
+  border: none;
+  border-radius: var(--ve-btn-radius, 4px);
+  background: transparent;
+  color: var(--ve-btn-icon-color, #222226);
+  cursor: pointer;
+  transition:
+    color 150ms,
+    background-color 150ms;
+}
+
+.ve-btn--strong {
+  color: var(--ve-btn-icon-color-strong, #222226);
+}
+
+/* Two classes deep on purpose: UnoCSS emits `.i-creatly-*` with its own
+   width/height at single-class specificity and later in the cascade, so a
+   single-class rule here would lose to it. */
+.ve-btn .ve-btn__icon {
+  display: block;
+  width: var(--ve-btn-icon-size, 16px);
+  height: var(--ve-btn-icon-size, 16px);
+}
+
+.ve-btn:disabled {
+  /* Shipped buttons dim via colour, keeping opacity at 1. */
+  color: var(--ve-btn-disabled-color, rgba(34, 34, 38, 0.35));
+  cursor: not-allowed;
+}
+
+.ve-btn:not(:disabled):hover {
+  color: var(--ve-btn-icon-color-strong, #222226);
+  background: var(--ve-btn-hover-background, #eee);
+}
+
+.ve-btn:not(:disabled):active,
+.ve-btn.ve-btn--active {
+  background: var(--ve-btn-active-background, #f0f0f0);
+}
+
+.ve-toolbar-divider {
+  flex: none;
+  width: 1px;
+  height: var(--ve-divider-height, 16px);
+  margin: 0 var(--ve-divider-gap, 4px);
+  background: var(--ve-border-subtle, #e4e4e4);
+}
+
+.ve-toolbar-status {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+  color: var(--ve-content-tertiary, rgba(0, 0, 0, 0.35));
+  white-space: nowrap;
+}
+
+.ve-track-rail__cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--ve-track-rail-radius, 4px);
+  background: var(--ve-track-rail-background, rgba(0, 0, 0, 0.05));
+}
+
+.ve-track-rail__cell .ve-track-rail__icon {
+  display: block;
+  width: var(--ve-track-rail-icon-size, 12px);
+  height: var(--ve-track-rail-icon-size, 12px);
+  color: var(--ve-track-rail-icon-color, rgba(0, 0, 0, 0.35));
+}

@@ -4,15 +4,11 @@ import { computed } from 'vue'
 
 defineOptions({ name: 'TimelineTracks' })
 
-interface TrackLayout {
-  track: TimelineTrack
-  trackIndex: number
-  segments: SegmentLayout[]
-}
-
 const props = defineProps<{
   tracks: TrackLayout[]
   trackHeight: number
+  /** Per-row heights; falls back to `trackHeight` when a row is missing. */
+  trackHeights?: number[]
   trackGap: number
   selectedSegmentId?: string | null
   showTrackRail?: boolean
@@ -25,26 +21,38 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'segment-click': [layout: SegmentLayout, event: MouseEvent]
-  'segment-mousedown': [layout: SegmentLayout, event: MouseEvent]
-  'resize-start': [layout: SegmentLayout, edge: 'start' | 'end', event: MouseEvent]
-  'add-segment': [{ track: TrackLayout['track'], startTime: number, endTime?: number, event?: MouseEvent }]
+  segmentClick: [layout: SegmentLayout, event: MouseEvent]
+  segmentMousedown: [layout: SegmentLayout, event: MouseEvent]
+  resizeStart: [layout: SegmentLayout, edge: 'start' | 'end', event: MouseEvent]
+  addSegment: [{ track: TrackLayout['track'], startTime: number, endTime?: number, event?: MouseEvent }]
 }>()
 
+interface TrackLayout {
+  track: TimelineTrack
+  trackIndex: number
+  segments: SegmentLayout[]
+}
+
+/** Rows may differ in height (frames 56 / audio 48), so never assume a uniform row. */
+function resolveTrackHeight(index: number) {
+  const height = props.trackHeights?.[index]
+  return typeof height === 'number' && height > 0 ? height : props.trackHeight
+}
+
 function handleSegmentClick(layout: SegmentLayout, event: MouseEvent) {
-  emit('segment-click', layout, event)
+  emit('segmentClick', layout, event)
 }
 
 function handleSegmentMouseDown(layout: SegmentLayout, event: MouseEvent) {
-  emit('segment-mousedown', layout, event)
+  emit('segmentMousedown', layout, event)
 }
 
 function handleResizeStart(layout: SegmentLayout, edge: 'start' | 'end', event: MouseEvent) {
-  emit('resize-start', layout, edge, event)
+  emit('resizeStart', layout, edge, event)
 }
 
 function handleAddAt(track: TrackLayout['track'], startTime: number, endTime?: number, event?: MouseEvent) {
-  emit('add-segment', { track, startTime, endTime, event })
+  emit('addSegment', { track, startTime, endTime, event })
 }
 
 const trackGaps = computed(() => {
@@ -105,7 +113,7 @@ function getGapsForTrack(trackId: string) {
         've-track--has-selection': trackLayout.segments.some((layout: SegmentLayout) => layout.isSelected),
         've-track--with-rail': showTrackRail,
       }"
-      :style="{ height: `${trackHeight}px` }"
+      :style="{ height: `${resolveTrackHeight(trackLayout.trackIndex)}px` }"
     >
       <div v-if="showTrackRail" class="ve-track__rail">
         <slot
@@ -113,102 +121,102 @@ function getGapsForTrack(trackId: string) {
           :track="trackLayout.track"
           :index="trackLayout.trackIndex"
           :segments="trackLayout.segments"
-          :height="trackHeight"
+          :height="resolveTrackHeight(trackLayout.trackIndex)"
         />
       </div>
       <div class="ve-track__body">
+        <div
+          v-for="layout in trackLayout.segments"
+          v-show="dragPreview?.segment.id !== layout.segment.id && resizePreview?.segment.id !== layout.segment.id"
+          :key="layout.segment.id"
+          class="ve-segment"
+          :class="{
+            've-segment--selected': layout.isSelected,
+          }"
+          :style="{
+            left: `${layout.left}px`,
+            width: `${layout.width}px`,
+            backgroundColor: layout.segment.color || trackLayout.track.color || 'var(--ve-primary, #222226)',
+          }"
+          @mousedown.prevent.stop="handleSegmentMouseDown(layout, $event)"
+          @click.stop="handleSegmentClick(layout, $event)"
+        >
+          <slot
+            name="segment"
+            :layout="layout"
+            :segment="layout.segment"
+            :track="layout.track"
+            :is-selected="layout.isSelected"
+          >
+            <div class="ve-segment__content">
+              <div class="ve-segment__title">
+                {{ layout.segment.type || 'segment' }}
+              </div>
+              <div class="ve-segment__time">
+                {{ (layout.segment.start / 1000).toFixed(2) }}s - {{ (layout.segment.end / 1000).toFixed(2) }}s
+              </div>
+            </div>
+          </slot>
+
+          <!-- Selection border and handles -->
           <div
-            v-for="layout in trackLayout.segments"
-            v-show="dragPreview?.segment.id !== layout.segment.id && resizePreview?.segment.id !== layout.segment.id"
-            :key="layout.segment.id"
-            class="ve-segment"
-            :class="{
-              've-segment--selected': layout.isSelected,
-            }"
+            v-if="layout.isSelected"
+            class="ve-segment__selection"
+          >
+            <!-- Left handle -->
+            <div
+              class="ve-segment__handle ve-segment__handle--left"
+              @mousedown.stop="handleResizeStart(layout, 'start', $event)"
+            >
+              <div class="ve-segment__handle-dots">
+                <div class="ve-segment__handle-dot" />
+                <div class="ve-segment__handle-dot" />
+                <div class="ve-segment__handle-dot" />
+                <div class="ve-segment__handle-dot" />
+              </div>
+            </div>
+            <!-- Right handle -->
+            <div
+              class="ve-segment__handle ve-segment__handle--right"
+              @mousedown.stop="handleResizeStart(layout, 'end', $event)"
+            >
+              <div class="ve-segment__handle-dots">
+                <div class="ve-segment__handle-dot" />
+                <div class="ve-segment__handle-dot" />
+                <div class="ve-segment__handle-dot" />
+                <div class="ve-segment__handle-dot" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gaps between segments -->
+        <div
+          v-for="gap in getGapsForTrack(trackLayout.track.id)"
+          :key="gap.id"
+          class="ve-track__gap-add"
+          :style="{ left: `${gap.left}px`, width: `${gap.width}px` }"
+          @click.stop="handleAddAt(trackLayout.track, gap.startTime, gap.endTime, $event)"
+        >
+          <div class="ve-track__gap-add-icon">
+            <span class="ve-track__add-icon i-creatly-add" aria-hidden="true" />
+          </div>
+        </div>
+
+        <!-- Add button at the end of the main track -->
+        <template v-if="trackLayout.track.isMain">
+          <div
+            class="ve-track__add-button"
             :style="{
-              left: `${layout.left}px`,
-              width: `${layout.width}px`,
-              backgroundColor: layout.segment.color || trackLayout.track.color || '#222226',
+              left: trackLayout.segments.length > 0
+                ? `${trackLayout.segments[trackLayout.segments.length - 1].left + trackLayout.segments[trackLayout.segments.length - 1].width}px`
+                : '0px',
             }"
-            @mousedown.prevent.stop="handleSegmentMouseDown(layout, $event)"
-            @click.stop="handleSegmentClick(layout, $event)"
+            @click.stop="handleAddAt(trackLayout.track, trackLayout.segments.length > 0 ? trackLayout.segments[trackLayout.segments.length - 1].segment.end : 0, undefined, $event)"
           >
-            <slot
-              name="segment"
-              :layout="layout"
-              :segment="layout.segment"
-              :track="layout.track"
-              :is-selected="layout.isSelected"
-            >
-              <div class="ve-segment__content">
-                <div class="ve-segment__title">
-                  {{ layout.segment.type || 'segment' }}
-                </div>
-                <div class="ve-segment__time">
-                  {{ (layout.segment.start / 1000).toFixed(2) }}s - {{ (layout.segment.end / 1000).toFixed(2) }}s
-                </div>
-              </div>
-            </slot>
-
-            <!-- Selection border and handles -->
-            <div
-              v-if="layout.isSelected"
-              class="ve-segment__selection"
-            >
-              <!-- Left handle -->
-              <div
-                class="ve-segment__handle ve-segment__handle--left"
-                @mousedown.stop="handleResizeStart(layout, 'start', $event)"
-              >
-                <div class="ve-segment__handle-dots">
-                  <div class="ve-segment__handle-dot" />
-                  <div class="ve-segment__handle-dot" />
-                  <div class="ve-segment__handle-dot" />
-                  <div class="ve-segment__handle-dot" />
-                </div>
-              </div>
-              <!-- Right handle -->
-              <div
-                class="ve-segment__handle ve-segment__handle--right"
-                @mousedown.stop="handleResizeStart(layout, 'end', $event)"
-              >
-                <div class="ve-segment__handle-dots">
-                  <div class="ve-segment__handle-dot" />
-                  <div class="ve-segment__handle-dot" />
-                  <div class="ve-segment__handle-dot" />
-                  <div class="ve-segment__handle-dot" />
-                </div>
-              </div>
-            </div>
+            <span class="ve-track__add-icon i-creatly-add" aria-hidden="true" />
           </div>
-
-          <!-- Gaps between segments -->
-          <div
-            v-for="gap in getGapsForTrack(trackLayout.track.id)"
-            :key="gap.id"
-            class="ve-track__gap-add"
-            :style="{ left: `${gap.left}px`, width: `${gap.width}px` }"
-            @click.stop="handleAddAt(trackLayout.track, gap.startTime, gap.endTime, $event)"
-          >
-            <div class="ve-track__gap-add-icon">
-              <span class="ve-track__add-icon i-creatly-add" aria-hidden="true" />
-            </div>
-          </div>
-
-          <!-- Add button at the end of the main track -->
-          <template v-if="trackLayout.track.isMain">
-            <div
-              class="ve-track__add-button"
-              :style="{
-                left: trackLayout.segments.length > 0
-                  ? `${trackLayout.segments[trackLayout.segments.length - 1].left + trackLayout.segments[trackLayout.segments.length - 1].width}px`
-                  : '0px'
-              }"
-              @click.stop="handleAddAt(trackLayout.track, trackLayout.segments.length > 0 ? trackLayout.segments[trackLayout.segments.length - 1].segment.end : 0, undefined, $event)"
-            >
-              <span class="ve-track__add-icon i-creatly-add" aria-hidden="true" />
-            </div>
-          </template>
+        </template>
       </div><!-- .ve-track__body -->
 
       <!-- Row-level overlay (track controls), drawn above the track body -->
@@ -217,7 +225,7 @@ function getGapsForTrack(trackId: string) {
         :track="trackLayout.track"
         :index="trackLayout.trackIndex"
         :segments="trackLayout.segments"
-        :height="trackHeight"
+        :height="resolveTrackHeight(trackLayout.trackIndex)"
       />
     </div>
   </div>
@@ -227,7 +235,6 @@ function getGapsForTrack(trackId: string) {
 .ve-timeline__tracks {
   position: relative;
   z-index: 1;
-  padding-bottom: 0.75rem;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -235,12 +242,13 @@ function getGapsForTrack(trackId: string) {
 }
 
 .ve-timeline__tracks--with-rail {
-  width: calc(100% + var(--ve-track-rail-width, 28px));
+  /* The content box already includes the rail, so rows span it exactly. Adding
+     the rail width here made every row overhang by 24px. */
+  width: 100%;
 }
 
 .ve-track {
   position: relative;
-  background-color: var(--ve-track-background, var(--ve-surface-control-subtle));
   overflow: hidden;
 }
 
@@ -248,6 +256,7 @@ function getGapsForTrack(trackId: string) {
   display: flex;
   align-items: stretch;
   overflow: visible;
+  gap: 2px;
 }
 
 .ve-track__rail {
@@ -255,27 +264,39 @@ function getGapsForTrack(trackId: string) {
   left: 0;
   z-index: 25;
   display: flex;
-  flex: 0 0 var(--ve-track-rail-width, 28px);
+  flex: 0 0 var(--ve-track-rail-width, 24px);
   align-items: stretch;
-  width: var(--ve-track-rail-width, 28px);
+  width: var(--ve-track-rail-width, 24px);
   height: 100%;
-  background: inherit;
+  /* The rail is sticky, so it must stay opaque to occlude segments scrolling
+     underneath it. It used to `inherit` the row colour from `.ve-track`; now
+     that the row colour lives on `.ve-track__body`, the column needs its own
+     surface — which is also what the design shows (card surface, with the
+     rounded 5% cell drawn inside it). */
+  background: var(--ve-track-rail-column-background, #fff);
 }
 
-.ve-track--main {
-  background-color: var(--ve-track-main-background, var(--ve-surface-control-muted));
-}
-
-.ve-track--has-selection {
-  background-color: var(--ve-selection-background) !important;
-  box-shadow: inset 0 1px 0 0 var(--ve-selection-border), inset 0 -1px 0 0 var(--ve-selection-border);
-}
-
+/* Row colour lives on the body, not on `.ve-track` — the track element spans
+   the rail column too, and the rail is a separate surface. */
 .ve-track__body {
   position: relative;
   flex: 1 0 auto;
   min-width: 0;
   height: 100%;
+  background-color: var(--ve-track-background, #f5f5f5);
+}
+
+.ve-track--main .ve-track__body {
+  background-color: var(--ve-track-main-background, #f1f1f1);
+}
+
+/* Declared after `--main` so a selected main track reads as selected. The extra
+   class also outranks the base rule on specificity, so no `!important`. */
+.ve-track--has-selection .ve-track__body {
+  background-color: var(--ve-track-selected-background, rgba(90, 90, 255, 0.04));
+  box-shadow:
+    inset 0 1px 0 0 var(--ve-track-selected-border, rgba(90, 90, 255, 0.35)),
+    inset 0 -1px 0 0 var(--ve-track-selected-border, rgba(90, 90, 255, 0.35));
 }
 
 /* A hidden track keeps its layout but reads as inactive */
@@ -293,7 +314,10 @@ function getGapsForTrack(trackId: string) {
   display: flex;
   align-items: center;
   overflow: hidden;
-  transition: background-color 150ms, border-color 150ms, box-shadow 150ms;
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
 }
 
 .ve-segment__content {
@@ -329,10 +353,10 @@ function getGapsForTrack(trackId: string) {
   position: absolute;
   height: 100%;
   width: 4px;
-  background-color: var(--ve-primary);
+  background-color: var(--ve-segment-handle-color, #222226);
   cursor: ew-resize;
   pointer-events: auto;
-  border: 2px solid var(--ve-primary);
+  border: 2px solid var(--ve-segment-handle-color, #222226);
 }
 
 .ve-segment__handle--left {
@@ -361,7 +385,7 @@ function getGapsForTrack(trackId: string) {
 
 .ve-segment__handle-dot {
   border-radius: 9999px;
-  background-color: var(--ve-content-on-primary);
+  background-color: var(--ve-segment-handle-dot-color, #fff);
   width: 1px;
   height: 1px;
 }
@@ -371,21 +395,25 @@ function getGapsForTrack(trackId: string) {
   top: 50%;
   transform: translateY(-50%);
   margin-left: 0.5rem;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 0.5rem;
+  width: var(--ve-add-size, 40px);
+  height: var(--ve-add-size, 40px);
+  border: none;
+  border-radius: var(--ve-add-radius, 8px);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--ve-content-primary);
-  background-color: var(--ve-surface-elevated);
+  color: var(--ve-track-add-button-color, #222226);
+  border: 1px solid var(--ve-track-add-button-border, rgba(34, 34, 38, 0.08));
+  background-color: var(--ve-track-add-button-background, #fff);
   cursor: pointer;
-  transition: background-color 0.2s;
-  border: 1px solid var(--ve-border-subtle);
+  transition:
+    background-color 0.2s,
+    color 0.2s;
 }
 
 .ve-track__add-button:hover {
-  background-color: var(--ve-surface-control-hover);
+  color: var(--ve-track-add-button-color, #222226);
+  background-color: var(--ve-track-add-button-hover-background, #eee);
 }
 
 .ve-track__gap-add {
@@ -400,13 +428,13 @@ function getGapsForTrack(trackId: string) {
 }
 
 .ve-track__gap-add:hover {
-  background-color: var(--ve-surface-control-hover);
+  background-color: var(--ve-track-gap-add-hover-background, transparent);
 }
 
 .ve-track__gap-add-icon {
   display: none;
-  color: var(--ve-content-on-primary);
-  background-color: var(--ve-primary);
+  color: var(--ve-track-gap-add-icon-color, #fff);
+  background-color: var(--ve-track-gap-add-icon-background, #222226);
   padding: 4px;
   border-radius: 4px;
 }
@@ -415,9 +443,10 @@ function getGapsForTrack(trackId: string) {
   display: block;
 }
 
-.ve-track__add-icon {
+.ve-track__add-button .ve-track__add-icon,
+.ve-track__gap-add .ve-track__add-icon {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: var(--ve-btn-icon-size, 16px);
+  height: var(--ve-btn-icon-size, 16px);
 }
 </style>

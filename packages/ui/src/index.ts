@@ -2,14 +2,15 @@ import type { App } from 'vue'
 import PropertyInspector from './PropertyInspector/index.vue'
 import VideoEditorTimeline from './VideoEditorTimeline/index.vue'
 import VideoTimeline from './VideoTimeline/index.vue'
+import './theme.css'
 
-export * from './VideoTimeline/types'
+export type { EffectPreset, SegmentUpdater } from './PropertyInspector/types'
 
 export * from './VideoEditorTimeline/segments'
 
 export type { TransitionEditPayload, TransitionSeam } from './VideoEditorTimeline/types'
 
-export type { SegmentUpdater } from './PropertyInspector/types'
+export * from './VideoTimeline/types'
 
 // 导出单独组件
 export { PropertyInspector, VideoEditorTimeline, VideoTimeline }

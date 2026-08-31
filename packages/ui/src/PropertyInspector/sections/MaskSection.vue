@@ -151,36 +151,36 @@ function clamp(value: number, min: number, max: number) {
 </template>
 
 <style scoped>
-:where(.pi-mask) {
+.pi-mask {
   --at-apply: flex flex-col gap-1.5;
 }
 
-:where(.pi-mask .pi-mask__header) {
+.pi-mask .pi-mask__header {
   --at-apply: flex items-center justify-between;
 }
 
-:where(.pi-mask .pi-mask__title) {
+.pi-mask .pi-mask__title {
   --at-apply: text-[11px] font-semibold uppercase tracking-wide;
-  color: rgba(15, 23, 42, 0.5);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 
-:where(.pi-mask .pi-mask__toggle) {
+.pi-mask .pi-mask__toggle {
   --at-apply: flex items-center gap-1 text-[11px] cursor-pointer;
-  color: rgba(15, 23, 42, 0.6);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 
-:where(.pi-mask .pi-mask__row) {
+.pi-mask .pi-mask__row {
   --at-apply: flex items-center gap-2 text-[12px];
-  color: rgba(15, 23, 42, 0.75);
+  color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
 }
 
-:where(.pi-mask .pi-mask__label) {
+.pi-mask .pi-mask__label {
   --at-apply: w-16 shrink-0 whitespace-nowrap;
 }
 
-:where(.pi-mask .pi-mask__select) {
+.pi-mask .pi-mask__select {
   --at-apply: px-1.5 py-1 rounded-4px text-[12px];
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  background: #fff;
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
+  background: var(--ve-surface-elevated, #fff);
 }
 </style>

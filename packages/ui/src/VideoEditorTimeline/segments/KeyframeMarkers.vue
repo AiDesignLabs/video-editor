@@ -37,11 +37,11 @@ const markers = computed(() => {
 </template>
 
 <style scoped>
-:where(.keyframe-markers) {
+.keyframe-markers {
   --at-apply: absolute inset-x-0 top-0.5 h-2 pointer-events-none z-2;
 }
 
-:where(.keyframe-markers .keyframe-markers__diamond) {
+.keyframe-markers .keyframe-markers__diamond {
   --at-apply: absolute w-1.5 h-1.5;
   background: var(--ve-segment-accent, #222226);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9);

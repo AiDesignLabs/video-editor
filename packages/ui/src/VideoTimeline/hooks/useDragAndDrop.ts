@@ -1,7 +1,9 @@
 import type { Ref } from 'vue'
-import type { SegmentDragPayload, SegmentLayout, TimelineTrack } from '../types'
+import type { TrackMetrics } from '../metrics'
 import type { SnapResolution } from '../snap'
+import type { SegmentDragPayload, SegmentLayout, TimelineTrack } from '../types'
 import { ref } from 'vue'
+import { trackHeightAt, trackTopAt } from '../metrics'
 import { useDragDetection } from './useDragDetection'
 import { useDragVisualFeedback } from './useDragVisualFeedback'
 
@@ -15,8 +17,8 @@ interface DragState {
 export interface UseDragAndDropOptions {
   tracks: Ref<TimelineTrack[]>
   tracksRef: Ref<HTMLElement | null>
-  trackHeightPx: Ref<number>
-  trackGapPx: Ref<number>
+  /** Vertical geometry of the rows; see VideoTimeline/metrics.ts. */
+  metrics: Ref<TrackMetrics>
   pixelsPerMs: Ref<number>
   disableInteraction: Ref<boolean>
   /**
@@ -34,8 +36,7 @@ export function useDragAndDrop(options: UseDragAndDropOptions) {
   const {
     tracks,
     tracksRef,
-    trackHeightPx,
-    trackGapPx,
+    metrics,
     pixelsPerMs,
     disableInteraction,
     snap,
@@ -53,8 +54,7 @@ export function useDragAndDrop(options: UseDragAndDropOptions) {
   const { detectTrackGap, resolveTrackIndexFromClientY } = useDragDetection(
     tracksRef,
     tracks,
-    trackHeightPx,
-    trackGapPx,
+    metrics,
   )
 
   // 使用视觉反馈 hook
@@ -160,9 +160,8 @@ export function useDragAndDrop(options: UseDragAndDropOptions) {
       else {
         const rect = tracksRef.value.getBoundingClientRect()
         const relativeY = clientY - rect.top
-        const step = trackHeightPx.value + trackGapPx.value
-        const trackTop = mouseTrackIndex * step
-        const trackCenter = trackTop + trackHeightPx.value / 2
+        const trackTop = trackTopAt(metrics.value, mouseTrackIndex)
+        const trackCenter = trackTop + trackHeightAt(metrics.value, mouseTrackIndex) / 2
 
         // Determine if mouse is in upper or lower half of the track
         const isUpperHalf = relativeY < trackCenter

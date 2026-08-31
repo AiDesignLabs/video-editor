@@ -1,5 +1,7 @@
 import type { Ref } from 'vue'
+import type { TrackMetrics } from '../metrics'
 import type { TimelineTrack } from '../types'
+import { trackGapIndexAtY, trackIndexAtY } from '../metrics'
 
 export interface TrackGapInfo {
   isGap: boolean
@@ -9,56 +11,38 @@ export interface TrackGapInfo {
 export function useDragDetection(
   tracksRef: Ref<HTMLElement | null>,
   tracks: Ref<TimelineTrack[]>,
-  trackHeightPx: Ref<number>,
-  trackGapPx: Ref<number>,
+  metrics: Ref<TrackMetrics>,
 ) {
-  /**
-   * Detect if mouse is in the gap between tracks to determine if a new track should be created
-   */
-  function detectTrackGap(clientY: number): TrackGapInfo | null {
-    if (!tracksRef.value || !tracks.value.length)
+  function relativeY(clientY: number) {
+    const el = tracksRef.value
+    if (!el)
       return null
-
-    const rect = tracksRef.value.getBoundingClientRect()
-    const relativeY = clientY - rect.top
-    const step = trackHeightPx.value + trackGapPx.value
-    const gapSize = trackGapPx.value
-
-    // Check if mouse is before the first track (including negative area, i.e., above the ruler)
-    if (relativeY < gapSize / 2) {
-      return { isGap: true, insertIndex: 0 }
-    }
-
-    // Check gaps between tracks
-    for (let i = 0; i < tracks.value.length; i++) {
-      const trackEnd = (i + 1) * step - gapSize / 2
-      const nextTrackStart = (i + 1) * step + gapSize / 2
-
-      if (relativeY >= trackEnd && relativeY < nextTrackStart) {
-        return { isGap: true, insertIndex: i + 1 }
-      }
-    }
-
-    return null
+    return clientY - el.getBoundingClientRect().top
   }
 
   /**
-   * Resolve track index from mouse Y coordinate
+   * Detect whether the pointer sits in the gap between two tracks, which is
+   * what promotes a drop into "create a new track" rather than "move here".
    */
+  function detectTrackGap(clientY: number): TrackGapInfo | null {
+    if (!tracks.value.length)
+      return null
+    const y = relativeY(clientY)
+    if (y === null)
+      return null
+
+    const insertIndex = trackGapIndexAtY(metrics.value, y)
+    return insertIndex === null ? null : { isGap: true, insertIndex }
+  }
+
+  /** Resolve track index from a pointer Y coordinate. */
   function resolveTrackIndexFromClientY(clientY: number) {
-    if (!tracksRef.value)
-      return -1
     if (!tracks.value.length)
       return -1
-    const rect = tracksRef.value.getBoundingClientRect()
-    const relativeY = clientY - rect.top
-    const step = trackHeightPx.value + trackGapPx.value
-    if (relativeY < 0)
+    const y = relativeY(clientY)
+    if (y === null)
       return -1
-    return Math.min(
-      tracks.value.length - 1,
-      Math.max(0, Math.floor(relativeY / step)),
-    )
+    return trackIndexAtY(metrics.value, y)
   }
 
   return {

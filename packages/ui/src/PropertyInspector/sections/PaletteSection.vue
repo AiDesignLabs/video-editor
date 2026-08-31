@@ -79,23 +79,23 @@ function reset() {
 </template>
 
 <style scoped>
-:where(.pi-palette) {
+.pi-palette {
   --at-apply: flex flex-col gap-1.5;
 }
 
-:where(.pi-palette .pi-palette__header) {
+.pi-palette .pi-palette__header {
   --at-apply: flex items-center justify-between;
 }
 
-:where(.pi-palette .pi-palette__title) {
+.pi-palette .pi-palette__title {
   --at-apply: text-[11px] font-semibold uppercase tracking-wide;
-  color: rgba(15, 23, 42, 0.5);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 
-:where(.pi-palette .pi-palette__reset) {
+.pi-palette .pi-palette__reset {
   --at-apply: px-2 py-0.5 rounded-4px text-[11px] cursor-pointer;
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  background: #fff;
-  color: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
+  background: var(--ve-surface-elevated, #fff);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 </style>

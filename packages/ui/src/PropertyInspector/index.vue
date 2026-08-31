@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { IChromaKey, IFillMode, IKeyframeProperty, IMask, IPalette, ITextBasic, ITransform, SegmentUnion } from '@video-editor/shared'
 import type { DeepReadonly } from 'vue'
-import type { SegmentUpdater } from './types'
+import type { EffectPreset, SegmentUpdater } from './types'
 import { computed } from 'vue'
 import NumberField from './NumberField.vue'
 import ChromaKeySection from './sections/ChromaKeySection.vue'
+import EffectSection from './sections/EffectSection.vue'
 import MaskSection from './sections/MaskSection.vue'
 import PaletteSection from './sections/PaletteSection.vue'
 import TextSection from './sections/TextSection.vue'
@@ -17,6 +18,10 @@ const props = defineProps<{
   videoBasicInfo?: { width: number, height: number, fps: number }
   /** Playhead position; enables the add-keyframe row when inside the segment. */
   currentTimeMs?: number
+  /** Selectable presets for filter segments, supplied by the host. */
+  filterPresets?: EffectPreset[]
+  /** Selectable presets for effect segments, supplied by the host. */
+  effectPresets?: EffectPreset[]
 }>()
 
 const emit = defineEmits<{
@@ -123,6 +128,20 @@ function setIntensity(value: number | undefined) {
   update((draft) => {
     if (draft.segmentType === 'filter')
       draft.intensity = value === undefined ? undefined : Math.max(0, Math.min(1, value))
+  })
+}
+
+/** Writes both the id field and the display name, which the renderer falls back to. */
+function setEffectPreset(preset: EffectPreset) {
+  update((draft) => {
+    if (draft.segmentType === 'filter') {
+      draft.filterId = preset.id
+      draft.name = preset.label
+    }
+    else if (draft.segmentType === 'effect') {
+      draft.effectId = preset.id
+      draft.name = preset.label
+    }
   })
 }
 
@@ -335,20 +354,29 @@ function removeTextLine(index: number) {
             @update:model-value="value => setFade('fadeOutDuration', value)"
           />
         </template>
-
-        <NumberField
-          v-if="segment.segmentType === 'filter'"
-          label="强度"
-          :model-value="segment.intensity ?? 1"
-          :min="0" :max="1" :step="0.01" slider
-          @update:model-value="setIntensity"
-        />
-
-        <div v-if="segment.segmentType === 'effect'" class="property-inspector__row">
-          <span class="property-inspector__label">特效</span>
-          <span>{{ segment.name }}</span>
-        </div>
       </div>
+
+      <EffectSection
+        v-if="segment.segmentType === 'filter'"
+        class="property-inspector__section"
+        kind="filter"
+        :preset-id="segment.filterId"
+        :name="segment.name"
+        :intensity="segment.intensity ?? 1"
+        :presets="filterPresets"
+        @change-preset="setEffectPreset"
+        @change-intensity="setIntensity"
+      />
+
+      <EffectSection
+        v-else-if="segment.segmentType === 'effect'"
+        class="property-inspector__section"
+        kind="effect"
+        :preset-id="segment.effectId"
+        :name="segment.name"
+        :presets="effectPresets"
+        @change-preset="setEffectPreset"
+      />
 
       <TextSection
         v-if="segment.segmentType === 'text'"
@@ -396,7 +424,9 @@ function removeTextLine(index: number) {
             class="property-inspector__kf-clear"
             type="button"
             @click="clearKeyframes"
-          >清空</button>
+          >
+            清空
+          </button>
         </div>
         <div class="property-inspector__kf-buttons">
           <button
@@ -417,82 +447,82 @@ function removeTextLine(index: number) {
 </template>
 
 <style scoped>
-:where(.property-inspector) {
+.property-inspector {
   --at-apply: flex flex-col gap-3 p-3 rounded-8px w-full;
-  background: rgba(255, 255, 255, 0.85);
-  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+  background: var(--ve-surface-card, #fff);
+  box-shadow: inset 0 0 0 1px var(--ve-overlay-5, rgba(0, 0, 0, 0.05));
 }
 
-:where(.property-inspector .property-inspector__empty) {
+.property-inspector .property-inspector__empty {
   --at-apply: py-6 text-center text-[12px];
-  color: rgba(15, 23, 42, 0.45);
+  color: var(--ve-content-tertiary, rgba(0, 0, 0, 0.35));
 }
 
-:where(.property-inspector .property-inspector__header) {
+.property-inspector .property-inspector__header {
   --at-apply: flex items-center justify-between gap-2;
 }
 
-:where(.property-inspector .property-inspector__type) {
+.property-inspector .property-inspector__type {
   --at-apply: px-2 py-1 rounded-full text-[11px] font-semibold uppercase;
   background: rgba(34, 34, 38, 0.08);
-  color: #222226;
+  color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
 }
 
-:where(.property-inspector .property-inspector__time) {
+.property-inspector .property-inspector__time {
   --at-apply: text-[11px];
-  color: rgba(15, 23, 42, 0.55);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 
-:where(.property-inspector .property-inspector__section) {
+.property-inspector .property-inspector__section {
   --at-apply: flex flex-col gap-1.5 pt-2;
-  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  border-top: 1px solid var(--ve-overlay-5, rgba(0, 0, 0, 0.05));
 }
 
-:where(.property-inspector .property-inspector__row) {
+.property-inspector .property-inspector__row {
   --at-apply: flex items-center gap-2 text-[12px];
-  color: rgba(15, 23, 42, 0.75);
+  color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
 }
 
-:where(.property-inspector .property-inspector__label) {
+.property-inspector .property-inspector__label {
   --at-apply: w-16 shrink-0 whitespace-nowrap;
 }
 
-:where(.property-inspector .property-inspector__select) {
+.property-inspector .property-inspector__select {
   --at-apply: px-1.5 py-1 rounded-4px text-[12px];
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  background: #fff;
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
+  background: var(--ve-surface-elevated, #fff);
 }
 
-:where(.property-inspector .property-inspector__checkbox) {
+.property-inspector .property-inspector__checkbox {
   --at-apply: cursor-pointer;
   accent-color: #2563eb;
 }
 
-:where(.property-inspector .property-inspector__hint) {
+.property-inspector .property-inspector__hint {
   --at-apply: text-[11px];
-  color: rgba(15, 23, 42, 0.4);
+  color: var(--ve-content-tertiary, rgba(0, 0, 0, 0.35));
 }
 
-:where(.property-inspector .property-inspector__kf-buttons) {
+.property-inspector .property-inspector__kf-buttons {
   --at-apply: flex items-center gap-1.5 flex-wrap;
 }
 
-:where(.property-inspector .property-inspector__kf-button) {
+.property-inspector .property-inspector__kf-button {
   --at-apply: px-2 py-1 rounded-4px text-[11px] cursor-pointer;
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  background: #fff;
-  color: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
+  background: var(--ve-surface-elevated, #fff);
+  color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
 }
 
-:where(.property-inspector .property-inspector__kf-button:disabled) {
+.property-inspector .property-inspector__kf-button:disabled {
   --at-apply: cursor-not-allowed;
   opacity: 0.4;
 }
 
-:where(.property-inspector .property-inspector__kf-clear) {
+.property-inspector .property-inspector__kf-clear {
   --at-apply: ml-auto px-2 py-0.5 rounded-4px text-[11px] cursor-pointer;
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  background: #fff;
-  color: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
+  background: var(--ve-surface-elevated, #fff);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 </style>

@@ -83,14 +83,14 @@ defineExpose({
 </template>
 
 <style scoped>
-:where(.ve-root) {
+.ve-root {
   --at-apply: relative overflow-auto w-full;
   min-height: 100%;
   color: var(--ve-content-primary);
   background: var(--ve-surface-elevated);
 }
 
-:where(.ve-root .ve-root__content) {
+.ve-root .ve-root__content {
   --at-apply: relative min-h-full;
 }
 </style>

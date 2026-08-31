@@ -13,10 +13,10 @@ import type {
   SegmentUnion,
   TrackUnion,
 } from '@video-editor/shared'
-import { getMp4Meta } from '@video-editor/protocol'
-import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
 import type { SegmentDragPayload, SegmentLayout, SegmentResizePayload, TimelineOverlaySlotProps, TimelineTrack } from '../VideoTimeline/types'
 import type { TransitionEditPayload, TransitionSeam } from './types'
+import { getMp4Meta } from '@video-editor/protocol'
+import { isAudioSegment, isVideoFramesSegment } from '@video-editor/shared'
 import { computed, reactive, ref, watch, watchEffect } from 'vue'
 import VideoTimeline from '../VideoTimeline/index.vue'
 import { AudioSegment, FramesSegment, KeyframeMarkers, SegmentBase, TextSegment } from './segments'
@@ -32,6 +32,11 @@ const props = withDefaults(defineProps<{
   trackTypes?: ITrackType[]
   disableInteraction?: boolean
   showTrackRail?: boolean
+  /**
+   * Per-track-type row height overrides, e.g. `{ audio: 48 }`. Empty by
+   * default — every row is `trackHeight` (56px) unless a consumer opts in.
+   */
+  trackHeightByType?: Record<string, number>
 }>(), {
   protocol: null,
   snapStep: 0,
@@ -39,6 +44,7 @@ const props = withDefaults(defineProps<{
   trackTypes: undefined,
   disableInteraction: false,
   showTrackRail: false,
+  trackHeightByType: undefined,
 })
 
 const emit = defineEmits<{
@@ -49,9 +55,9 @@ const emit = defineEmits<{
   (e: 'segmentDragEnd', payload: SegmentDragPayload): void
   (e: 'segmentResizeEnd', payload: SegmentResizePayload): void
   (e: 'videoSegmentMuteToggle', payload: { segment: IVideoFramesSegment, track: TrackUnion, muted: boolean }): void
-  (e: 'add-segment', { track, startTime, endTime, event }: { track: TrackUnion, startTime: number, endTime?: number, event?: MouseEvent }): void
-  (e: 'transition-edit', payload: TransitionEditPayload): void
-  (e: 'track-toggle', payload: { trackId: string, field: 'hidden' | 'muted', value: boolean }): void
+  (e: 'addSegment', { track, startTime, endTime, event }: { track: TrackUnion, startTime: number, endTime?: number, event?: MouseEvent }): void
+  (e: 'transitionEdit', payload: TransitionEditPayload): void
+  (e: 'trackToggle', payload: { trackId: string, field: 'hidden' | 'muted', value: boolean }): void
 }>()
 
 const innerSelectedId = ref<string | null>(props.selectedSegmentId ?? null)
@@ -60,7 +66,6 @@ watch(() => props.selectedSegmentId, (value) => {
 })
 
 const PRIMARY_COLOR = '#222226'
-const SURFACE_ALPHA = 0.4
 
 const colorByType: Record<ITrackType, string> = {
   frames: PRIMARY_COLOR,
@@ -70,6 +75,17 @@ const colorByType: Record<ITrackType, string> = {
   effect: '#a855f7',
   filter: '#64748b',
 }
+
+/**
+ * No segment type tints its surface any more.
+ *
+ * Every segment component now paints its own token-driven background — media
+ * types from the design, the rest from the "no media" language in SegmentBase —
+ * so a tint behind them would only show through and mute those surfaces. Track
+ * identity travels as `--ve-segment-accent` instead, which the components use
+ * for their accent bar and icon.
+ */
+const SEGMENT_SURFACE = 'transparent'
 
 const filteredTracks = computed(() => {
   if (!props.protocol?.tracks?.length)
@@ -117,7 +133,7 @@ function ensureVideoDurationMs(url: string) {
 
 const timelineTracks = computed<TimelineTrack[]>(() => filteredTracks.value.map((track: TrackUnion, index: number) => {
   const accent = colorByType[track.trackType] || PRIMARY_COLOR
-  const surface = toAlphaColor(accent, SURFACE_ALPHA)
+  const surface = SEGMENT_SURFACE
   const isMain = track.trackType === 'frames' && track.isMain === true
   return {
     id: track.trackId || `${track.trackType}-${index}`,
@@ -159,17 +175,6 @@ const timelineDuration = computed(() => {
   const endTimes = props.protocol.tracks.flatMap(track => track.children.map(seg => seg.endTime))
   return endTimes.length ? Math.max(...endTimes) : 0
 })
-
-function toAlphaColor(hex: string, alpha: number) {
-  const normalized = hex.replace('#', '')
-  if (!(normalized.length === 3 || normalized.length === 6))
-    return hex
-  const full = normalized.length === 3 ? normalized.split('').map(ch => ch + ch).join('') : normalized
-  const r = Number.parseInt(full.slice(0, 2), 16)
-  const g = Number.parseInt(full.slice(2, 4), 16)
-  const b = Number.parseInt(full.slice(4, 6), 16)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}
 
 function resolveSegment(payload: unknown): SegmentUnion | null {
   if (payload && typeof payload === 'object' && 'segmentType' in (payload as SegmentUnion))
@@ -222,7 +227,7 @@ function handleSegmentResizeEnd(payload: SegmentResizePayload) {
 function handleAddSegment({ track, startTime, endTime, event }: { track: TimelineTrack, startTime: number, endTime?: number, event?: MouseEvent }) {
   const trackPayload = track.payload as TrackUnion
   if (trackPayload)
-    emit('add-segment', { track: trackPayload, startTime, endTime, event })
+    emit('addSegment', { track: trackPayload, startTime, endTime, event })
 }
 
 const transitionEdges = computed<ITransitionEdge[]>(() => props.protocol?.transitions ?? [])
@@ -245,8 +250,12 @@ function buildTransitionSeams(overlay: TimelineOverlaySlotProps): TransitionSeam
   if (!mainLayout || mainLayout.segments.length < 2)
     return []
 
-  const rowTop = overlay.rulerHeight + mainLayout.trackIndex * (overlay.trackHeight + overlay.trackGap) + overlay.trackGap
-  const top = rowTop + overlay.trackHeight / 2
+  // Rows can differ in height, so read the resolved geometry rather than
+  // multiplying out a uniform row.
+  const index = mainLayout.trackIndex
+  const rowHeight = overlay.trackHeights?.[index] ?? overlay.trackHeight
+  const rowTop = overlay.rulerHeight + (overlay.trackTops?.[index] ?? index * (overlay.trackHeight + overlay.trackGap) + overlay.trackGap)
+  const top = rowTop + rowHeight / 2
   const ordered = mainLayout.segments.slice().sort((a, b) => a.segment.start - b.segment.start)
 
   const seams: TransitionSeam[] = []
@@ -281,7 +290,21 @@ function handleTransitionSeamClick(seam: TransitionSeam) {
     boundaryTime: seam.boundaryTime,
     existing: seam.existing,
   }
-  emit('transition-edit', payload)
+  emit('transitionEdit', payload)
+}
+
+const RAIL_ICON_BY_TRACK_TYPE: Record<string, string> = {
+  frames: 'i-creatly-video',
+  audio: 'i-creatly-audio',
+  text: 'i-creatly-add-image',
+  sticker: 'i-creatly-add-image',
+  effect: 'i-creatly-background-video',
+  filter: 'i-creatly-background-video',
+}
+
+/** Icon shown in the track rail for a given track type. */
+function resolveRailIcon(track: TimelineTrack) {
+  return RAIL_ICON_BY_TRACK_TYPE[track.type ?? ''] ?? 'i-creatly-video'
 }
 
 /** Only tracks that can produce sound expose the mute toggle. */
@@ -295,7 +318,7 @@ function resolveTrackId(track: TimelineTrack) {
 }
 
 function handleTrackToggle(track: TimelineTrack, field: 'hidden' | 'muted') {
-  emit('track-toggle', {
+  emit('trackToggle', {
     trackId: resolveTrackId(track),
     field,
     value: !(track[field] === true),
@@ -320,6 +343,7 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
     :selected-segment-id="innerSelectedId ?? null"
     :disable-interaction="disableInteraction"
     :show-track-rail="showTrackRail"
+    :track-height-by-type="trackHeightByType"
     @update:current-time="emit('update:currentTime', $event)"
     @update:zoom="emit('update:zoom', $event)"
     @segment-click="handleTimelineSegmentClick"
@@ -335,6 +359,26 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
       <slot name="toolbar" v-bind="slotProps" />
     </template>
 
+    <!-- Per-zone toolbar overrides (keeps the default toolbar chrome) -->
+    <template v-if="$slots['toolbar-left']" #toolbar-left>
+      <slot name="toolbar-left" />
+    </template>
+    <template v-if="$slots['toolbar-center']" #toolbar-center>
+      <slot name="toolbar-center" />
+    </template>
+    <template v-if="$slots['toolbar-right']" #toolbar-right>
+      <slot name="toolbar-right" />
+    </template>
+    <template v-if="$slots['toolbar-right-leading']" #toolbar-right-leading>
+      <slot name="toolbar-right-leading" />
+    </template>
+    <template v-if="$slots['toolbar-right-trailing']" #toolbar-right-trailing>
+      <slot name="toolbar-right-trailing" />
+    </template>
+    <template v-if="$slots['toolbar-time']" #toolbar-time="s">
+      <slot name="toolbar-time" v-bind="s" />
+    </template>
+
     <!-- Pass through ruler slot -->
     <template v-if="$slots.ruler" #ruler="slotProps">
       <slot name="ruler" v-bind="slotProps" />
@@ -345,8 +389,52 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
       <slot name="playhead" v-bind="slotProps" />
     </template>
 
-    <template v-if="$slots['track-rail']" #track-rail="slotProps">
-      <slot name="track-rail" v-bind="slotProps" />
+    <!-- The rail has a real default, so consumers only override it when they
+         want something other than the stock design. It shows the track's type
+         icon at rest and swaps to the visibility / mute toggles on row hover —
+         the rail is the only 24px-wide column the design gives us, so the
+         toggles live here rather than floating over the first segment. -->
+    <template #track-rail="slotProps">
+      <slot name="track-rail" v-bind="slotProps">
+        <div class="ve-track-rail__cell">
+          <span
+            class="ve-track-rail__icon"
+            :class="resolveRailIcon(slotProps.track)"
+            aria-hidden="true"
+          />
+          <div class="ve-track-rail__controls">
+            <button
+              type="button"
+              class="ve-track-toggle"
+              :class="{ 've-track-toggle--off': slotProps.track.hidden }"
+              :title="slotProps.track.hidden ? '显示轨道' : '隐藏轨道'"
+              @mousedown.stop
+              @click.stop="handleTrackToggle(slotProps.track, 'hidden')"
+            >
+              <span
+                class="ve-track-toggle__icon"
+                :class="slotProps.track.hidden ? 'i-creatly-invisible' : 'i-creatly-visible'"
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              v-if="canMuteTrack(slotProps.track)"
+              type="button"
+              class="ve-track-toggle"
+              :class="{ 've-track-toggle--off': slotProps.track.muted }"
+              :title="slotProps.track.muted ? '取消静音' : '静音轨道'"
+              @mousedown.stop
+              @click.stop="handleTrackToggle(slotProps.track, 'muted')"
+            >
+              <span
+                class="ve-track-toggle__icon"
+                :class="slotProps.track.muted ? 'i-creatly-mute' : 'i-creatly-sound'"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+        </div>
+      </slot>
     </template>
 
     <!-- Transition seams on the main frames track -->
@@ -367,41 +455,6 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
       </button>
     </template>
 
-    <!-- Per-track visibility / mute toggles, pinned to the row's left edge -->
-    <template #track="{ track }">
-      <div class="ve-track-controls">
-        <button
-          type="button"
-          class="ve-track-toggle"
-          :class="{ 've-track-toggle--off': track.hidden }"
-          :title="track.hidden ? '显示轨道' : '隐藏轨道'"
-          @mousedown.stop
-          @click.stop="handleTrackToggle(track, 'hidden')"
-        >
-          <span
-            class="ve-track-toggle__icon"
-            :class="track.hidden ? 'i-creatly-invisible' : 'i-creatly-visible'"
-            aria-hidden="true"
-          />
-        </button>
-        <button
-          v-if="canMuteTrack(track)"
-          type="button"
-          class="ve-track-toggle"
-          :class="{ 've-track-toggle--off': track.muted }"
-          :title="track.muted ? '取消静音' : '静音轨道'"
-          @mousedown.stop
-          @click.stop="handleTrackToggle(track, 'muted')"
-        >
-          <span
-            class="ve-track-toggle__icon"
-            :class="track.muted ? 'i-creatly-mute' : 'i-creatly-sound'"
-            aria-hidden="true"
-          />
-        </button>
-      </div>
-    </template>
-
     <template #segment="{ layout }">
       <template v-for="segment in [resolveSegment(layout.segment.payload)]" :key="segment?.id || layout.segment.id">
         <div
@@ -417,7 +470,31 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
                 <FramesSegment
                   :segment="segment"
                   @toggle-video-mute="handleVideoSegmentMuteToggle(segment as IVideoFramesSegment, layout.track.payload as TrackUnion, $event)"
-                />
+                >
+                  <!-- Forward FramesSegment's inner slots so consumers can restyle
+                       one part without re-mounting the whole segment component. -->
+                  <template v-if="$slots['frames-image']" #image="s">
+                    <slot name="frames-image" v-bind="s" />
+                  </template>
+                  <template v-if="$slots['frames-video']" #video="s">
+                    <slot name="frames-video" v-bind="s" />
+                  </template>
+                  <template v-if="$slots['frames-loading']" #loading="s">
+                    <slot name="frames-loading" v-bind="s" />
+                  </template>
+                  <template v-if="$slots['frames-error']" #error="s">
+                    <slot name="frames-error" v-bind="s" />
+                  </template>
+                  <template v-if="$slots['frames-empty']" #empty="s">
+                    <slot name="frames-empty" v-bind="s" />
+                  </template>
+                  <template v-if="$slots['frames-fallback']" #fallback="s">
+                    <slot name="frames-fallback" v-bind="s" />
+                  </template>
+                  <template v-if="$slots['frames-overlay']" #overlay="s">
+                    <slot name="frames-overlay" v-bind="s" />
+                  </template>
+                </FramesSegment>
               </slot>
             </template>
             <template v-else-if="segment.segmentType === 'text'">
@@ -432,7 +509,23 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
             </template>
             <template v-else-if="segment.segmentType === 'audio'">
               <slot name="segment-audio" :segment="segment as IAudioSegment" :layout="layout">
-                <AudioSegment :segment="segment as IAudioSegment" />
+                <AudioSegment :segment="segment as IAudioSegment">
+                  <template v-if="$slots['audio-waveform']" #waveform="s">
+                    <slot name="audio-waveform" v-bind="s" />
+                  </template>
+                  <template v-if="$slots['audio-loading']" #loading="s">
+                    <slot name="audio-loading" v-bind="s" />
+                  </template>
+                  <template v-if="$slots['audio-error']" #error="s">
+                    <slot name="audio-error" v-bind="s" />
+                  </template>
+                  <template v-if="$slots['audio-empty']" #empty="s">
+                    <slot name="audio-empty" v-bind="s" />
+                  </template>
+                  <template v-if="$slots['audio-overlay']" #overlay="s">
+                    <slot name="audio-overlay" v-bind="s" />
+                  </template>
+                </AudioSegment>
               </slot>
             </template>
             <template v-else-if="segment.segmentType === 'effect'">
@@ -453,12 +546,12 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
 </template>
 
 <style scoped>
-:where(.ve-editor-segment) {
+.ve-editor-segment {
   --at-apply: relative flex flex-col gap-1.5 w-full h-full;
   color: var(--ve-content-primary);
 }
 
-:where(.ve-editor-segment .ve-editor-segment__preview) {
+.ve-editor-segment .ve-editor-segment__preview {
   --at-apply: flex items-stretch w-full min-h-14;
 }
 
@@ -472,7 +565,9 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
   font-size: 10px;
   line-height: 1;
   opacity: 0.28;
-  transition: opacity 0.12s ease, background-color 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease;
 }
 
 .ve-transition-seam:hover {
@@ -490,21 +585,27 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
   background: #4f46e5;
 }
 
-/* Track controls: faint until the row is hovered, always readable when active */
-.ve-track-controls {
+/* Rail cell: type icon at rest, controls on row hover. */
+.ve-track-rail__controls {
   position: absolute;
-  left: 4px;
-  top: 4px;
+  inset: 0;
   z-index: 30;
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 2px;
-  opacity: 0.25;
+  opacity: 0;
   transition: opacity 0.12s ease;
 }
 
-.ve-track:hover .ve-track-controls,
-.ve-track-controls:focus-within {
+.ve-track:hover .ve-track-rail__controls,
+.ve-track-rail__controls:focus-within {
   opacity: 1;
+}
+
+.ve-track:hover .ve-track-rail__icon {
+  opacity: 0;
 }
 
 .ve-track-toggle {

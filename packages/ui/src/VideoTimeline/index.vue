@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { SnapGuide } from './hooks'
+import type { TrackMetrics } from './metrics'
+import type { SnapResolution } from './snap'
 import type {
   SegmentDragPayload,
   SegmentLayout,
@@ -7,15 +10,15 @@ import type {
   TimelineTick,
   TimelineTrack,
 } from './types'
-import type { SnapResolution } from './snap'
-import type { SnapGuide } from './hooks'
 import { computed, onBeforeUnmount, onMounted, ref, toRef, useSlots, watch } from 'vue'
 import TimelinePlayhead from '../timeline/TimelinePlayhead.vue'
 import TimelineRuler from '../timeline/TimelineRuler.vue'
 import TimelineToolbar from '../timeline/TimelineToolbar.vue'
 import TimelineTracks from '../timeline/TimelineTracks.vue'
 import { useDragAndDrop } from './hooks'
+import { buildTrackMetrics, trackHeightAt, trackTopAt } from './metrics'
 import { collectSnapCandidates, quantizeToGrid, resolveSnapCandidates, SNAP_THRESHOLD_PX } from './snap'
+import { gestureZoomFactor, normalizeGestureScale, normalizeWheelDeltaY, pinchZoomFactor } from './zoom'
 
 defineOptions({ name: 'VideoTimeline' })
 
@@ -28,6 +31,8 @@ const props = withDefaults(defineProps<{
   maxZoom?: number
   snapStep?: number
   trackHeight?: number
+  /** Per-track-type height overrides, e.g. `{ audio: 48 }`. */
+  trackHeightByType?: Record<string, number>
   trackGap?: number
   rulerHeight?: number
   minSegmentDuration?: number
@@ -40,8 +45,9 @@ const props = withDefaults(defineProps<{
   maxZoom: 10,
   snapStep: 0,
   trackHeight: 56,
-  trackGap: 8,
-  rulerHeight: 28,
+  trackHeightByType: undefined,
+  trackGap: 2,
+  rulerHeight: 20,
   minSegmentDuration: 60,
   selectedSegmentId: null,
   disableInteraction: false,
@@ -60,10 +66,10 @@ const emit = defineEmits<{
   (e: 'segmentResize', payload: SegmentResizePayload): void
   (e: 'segmentResizeEnd', payload: SegmentResizePayload): void
   (e: 'backgroundClick', event: MouseEvent): void
-  (e: 'add-segment', { track, startTime, endTime, event }: { track: TimelineTrack, startTime: number, endTime?: number, event?: MouseEvent }): void
+  (e: 'addSegment', { track, startTime, endTime, event }: { track: TimelineTrack, startTime: number, endTime?: number, event?: MouseEvent }): void
 }>()
 
-const DEFAULT_TRACK_RAIL_WIDTH = 28
+const DEFAULT_TRACK_RAIL_WIDTH = 24
 const slots = useSlots()
 const hasTrackRailSlot = computed(() => props.showTrackRail || Boolean(slots['track-rail']))
 
@@ -72,7 +78,42 @@ const contentRef = ref<HTMLElement | null>(null)
 const tracksRef = ref<HTMLElement | null>(null)
 
 const viewportWidth = ref(0)
+/**
+ * Measured rail width. The rail is a sticky column that occupies real space at
+ * the left of the viewport, so the timeline area is `viewportWidth - railWidth`
+ * — see `timelineWidth`.
+ */
+const railWidthPx = ref(0)
+
+function getTimelineTrackRailWidth() {
+  return railWidthPx.value
+}
+
+/** Re-read `--ve-track-rail-width`, which a consumer may retheme at any time. */
+function syncRailWidth() {
+  if (!hasTrackRailSlot.value) {
+    railWidthPx.value = 0
+    return
+  }
+
+  const content = contentRef.value
+  if (!content) {
+    railWidthPx.value = DEFAULT_TRACK_RAIL_WIDTH
+    return
+  }
+
+  const value = Number.parseFloat(getComputedStyle(content).getPropertyValue('--ve-track-rail-width'))
+  railWidthPx.value = Number.isFinite(value) ? Math.max(value, 0) : DEFAULT_TRACK_RAIL_WIDTH
+}
+
+watch(hasTrackRailSlot, syncRailWidth)
 let resizeObserver: ResizeObserver | null = null
+
+/**
+ * Horizontal space actually available to the timeline: the rail is a sticky
+ * column inside the scroll viewport, so it consumes real width.
+ */
+const timelineWidth = computed(() => Math.max(viewportWidth.value - railWidthPx.value, 1))
 
 const innerZoom = ref(clampZoom(props.zoom ?? props.minZoom))
 const initialZoomSet = ref(false)
@@ -101,25 +142,34 @@ watch(computedDuration, (next, prev) => {
   if (!initialZoomSet.value || !viewportWidth.value)
     return
 
-  const previousPxPerMs = (viewportWidth.value * innerZoom.value) / prev
+  const previousPxPerMs = (timelineWidth.value * innerZoom.value) / prev
   if (!Number.isFinite(previousPxPerMs) || previousPxPerMs <= 0)
     return
 
-  const recalculatedZoom = clampZoom((previousPxPerMs * next) / viewportWidth.value)
+  const recalculatedZoom = clampZoom((previousPxPerMs * next) / timelineWidth.value)
   if (Math.abs(recalculatedZoom - innerZoom.value) > 1e-6)
     innerZoom.value = recalculatedZoom
 })
 
+/**
+ * Horizontal space actually available to the timeline.
+ *
+ * The rail is a sticky column inside the scroll viewport, so it consumes real
+ * width. Sizing the timeline to the full viewport and then widening the rows by
+ * the rail (the old `calc(100% + rail)`) overflowed the content box by exactly
+ * the rail width and produced a horizontal scrollbar at zoom 1.
+ */
+
 const pixelsPerMs = computed(() => {
   const duration = Math.max(computedDuration.value, 1)
-  const width = Math.max(viewportWidth.value, 1)
-  return (width * innerZoom.value) / duration
+  return (timelineWidth.value * innerZoom.value) / duration
 })
 
+/** Width of the timeline area alone; the rail is added on the element. */
 const contentWidthPx = computed(() => {
   const derived = computedDuration.value * pixelsPerMs.value
   const safeWidth = Number.isFinite(derived) ? Math.max(derived, 0) : 0
-  return Math.max(Math.ceil(safeWidth), Math.ceil(viewportWidth.value || 0))
+  return Math.max(Math.ceil(safeWidth), Math.ceil(timelineWidth.value))
 })
 
 const renderedDurationForTicks = computed(() => {
@@ -136,7 +186,28 @@ const frameDurationMs = computed(() => 1000 / Math.max(props.fps || 30, 1))
 
 const trackHeightPx = computed(() => props.trackHeight)
 const trackGapPx = computed(() => props.trackGap)
+
+/** Resolved height of every row, honouring per-type overrides. */
+const trackHeights = computed(() => props.tracks.map((track) => {
+  const override = track.type ? props.trackHeightByType?.[track.type] : undefined
+  return typeof override === 'number' && override > 0 ? override : props.trackHeight
+}))
+
+/** Single source of truth for vertical geometry — see ./metrics.ts. */
+const trackMetrics = computed<TrackMetrics>(() => buildTrackMetrics({
+  heights: trackHeights.value,
+  gap: trackGapPx.value,
+}))
+
 const rulerHeightPx = computed(() => props.rulerHeight)
+
+function rowTop(index: number) {
+  return rulerHeightPx.value + trackTopAt(trackMetrics.value, index)
+}
+
+function rowHeight(index: number) {
+  return trackHeightAt(trackMetrics.value, index)
+}
 
 const segmentLayouts = computed(() => props.tracks.map((track, trackIndex) => ({
   track,
@@ -173,8 +244,7 @@ const {
 } = useDragAndDrop({
   tracks: toRef(props, 'tracks'),
   tracksRef,
-  trackHeightPx,
-  trackGapPx,
+  metrics: trackMetrics,
   pixelsPerMs,
   disableInteraction: toRef(props, 'disableInteraction'),
   snap: (rawStartMs, durationMs, excludeId) => resolveSnap(rawStartMs, durationMs, { excludeId }),
@@ -228,7 +298,7 @@ const draggingSegmentLayout = computed(() => {
   const left = Math.max(0, layout.left + payload.mouseDeltaX)
 
   // Calculate vertical position - use raw mouse Y offset to let segment fully follow mouse
-  const originalTop = rulerHeightPx.value + payload.trackIndex * (trackHeightPx.value + trackGapPx.value) + trackGapPx.value
+  const originalTop = rowTop(payload.trackIndex)
   const top = originalTop + payload.mouseDeltaY
 
   return {
@@ -248,13 +318,13 @@ const placeholderTop = computed(() => {
     // New track - placeholder shows where new track will be created
     if (payload.newTrackInsertIndex === 0) {
       // Before first track - show below ruler
-      return rulerHeightPx.value + trackGapPx.value
+      return rowTop(0)
     }
     // Other positions - show at corresponding track index position
-    return rulerHeightPx.value + payload.targetTrackIndex * (trackHeightPx.value + trackGapPx.value) + trackGapPx.value
+    return rowTop(payload.targetTrackIndex)
   }
   // Not creating new track - normal calculation
-  return rulerHeightPx.value + payload.targetTrackIndex * (trackHeightPx.value + trackGapPx.value) + trackGapPx.value
+  return rowTop(payload.targetTrackIndex)
 })
 
 onMounted(() => {
@@ -262,13 +332,18 @@ onMounted(() => {
     resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0]
       viewportWidth.value = entry?.contentRect.width || viewportRef.value?.clientWidth || 0
+      syncRailWidth()
     })
     resizeObserver.observe(viewportRef.value)
     viewportWidth.value = viewportRef.value.clientWidth || 0
   }
+  syncRailWidth()
 
   window.addEventListener('mousemove', handleGlobalMouseMove)
   window.addEventListener('mouseup', handleGlobalMouseUp)
+
+  if (viewportRef.value)
+    bindPinchZoom(viewportRef.value)
 
   applyInitialZoom()
 })
@@ -276,6 +351,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
+  if (viewportRef.value)
+    unbindPinchZoom(viewportRef.value)
   window.removeEventListener('mousemove', handleGlobalMouseMove)
   window.removeEventListener('mouseup', handleGlobalMouseUp)
 })
@@ -407,18 +484,6 @@ function handleBackgroundClick(event: MouseEvent) {
   isMouseDownOnTimeline.value = true
 }
 
-function getTimelineTrackRailWidth() {
-  if (!hasTrackRailSlot.value)
-    return 0
-
-  const content = contentRef.value
-  if (!content)
-    return DEFAULT_TRACK_RAIL_WIDTH
-
-  const value = Number.parseFloat(getComputedStyle(content).getPropertyValue('--ve-track-rail-width'))
-  return Number.isFinite(value) ? Math.max(value, 0) : DEFAULT_TRACK_RAIL_WIDTH
-}
-
 function resolveTimelineClientX(clientX: number) {
   if (!contentRef.value)
     return 0
@@ -541,7 +606,7 @@ function handleSegmentClick(layout: SegmentLayout, event: MouseEvent) {
 function handleAddSegment({ track, startTime, endTime, event }: { track: TimelineTrack, startTime: number, endTime?: number, event?: MouseEvent }) {
   const trackLayout = segmentLayouts.value.find(t => t.track.id === track.id)
   if (trackLayout)
-    emit('add-segment', { track: trackLayout.track, startTime, endTime, event })
+    emit('addSegment', { track: trackLayout.track, startTime, endTime, event })
 }
 
 function handleGlobalMouseMove(event: MouseEvent) {
@@ -602,6 +667,81 @@ function zoomIn() {
 
 function zoomOut() {
   innerZoom.value = clampZoom(innerZoom.value / 1.25)
+}
+
+/** Absolute zoom set by the toolbar slider. */
+function setZoom(value: number) {
+  innerZoom.value = clampZoom(value)
+}
+
+function zoomByFactor(factor: number) {
+  if (!Number.isFinite(factor) || factor <= 0)
+    return
+  innerZoom.value = clampZoom(innerZoom.value * factor)
+}
+
+/**
+ * Trackpad pinch-to-zoom.
+ *
+ * Browsers deliver a macOS trackpad pinch as a `wheel` event with `ctrlKey`
+ * set. Safari additionally fires the non-standard `gesture*` events, which
+ * carry an absolute `scale`; both paths are handled so the gesture works in
+ * every browser the editor targets.
+ *
+ * The listeners are registered imperatively rather than in the template
+ * because they must be non-passive — a passive listener cannot call
+ * `preventDefault()`, and without that the browser zooms the whole page
+ * instead of the timeline.
+ */
+interface TimelineGestureEvent extends Event {
+  scale?: number
+}
+
+let lastGestureScale = 1
+
+function consumePinchEvent(event: Event) {
+  event.preventDefault()
+  event.stopPropagation()
+}
+
+function handleWheel(event: WheelEvent) {
+  // A plain wheel is a scroll; only ctrl+wheel is a pinch.
+  if (!event.ctrlKey)
+    return
+
+  consumePinchEvent(event)
+  zoomByFactor(pinchZoomFactor(normalizeWheelDeltaY(event, window.innerHeight)))
+}
+
+function handleGestureStart(event: TimelineGestureEvent) {
+  consumePinchEvent(event)
+  lastGestureScale = 1
+}
+
+function handleGestureChange(event: TimelineGestureEvent) {
+  consumePinchEvent(event)
+  const scale = normalizeGestureScale(event.scale)
+  zoomByFactor(gestureZoomFactor(scale, lastGestureScale))
+  lastGestureScale = scale
+}
+
+function handleGestureEnd(event: TimelineGestureEvent) {
+  consumePinchEvent(event)
+  lastGestureScale = 1
+}
+
+function bindPinchZoom(el: HTMLElement) {
+  el.addEventListener('wheel', handleWheel, { passive: false, capture: true })
+  el.addEventListener('gesturestart', handleGestureStart as EventListener, { passive: false, capture: true })
+  el.addEventListener('gesturechange', handleGestureChange as EventListener, { passive: false, capture: true })
+  el.addEventListener('gestureend', handleGestureEnd as EventListener, { passive: false, capture: true })
+}
+
+function unbindPinchZoom(el: HTMLElement) {
+  el.removeEventListener('wheel', handleWheel, { capture: true })
+  el.removeEventListener('gesturestart', handleGestureStart as EventListener, { capture: true })
+  el.removeEventListener('gesturechange', handleGestureChange as EventListener, { capture: true })
+  el.removeEventListener('gestureend', handleGestureEnd as EventListener, { capture: true })
 }
 
 const TICK_TARGET_SPACING_PX = 120
@@ -708,7 +848,29 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
         :format-time="formatTime"
         @zoom-in="zoomIn"
         @zoom-out="zoomOut"
-      />
+        @update:zoom="setZoom"
+      >
+        <!-- Zone-level overrides, so a consumer can replace one region of the
+             toolbar instead of the whole `toolbar` slot. -->
+        <template v-if="$slots['toolbar-left']" #left-actions>
+          <slot name="toolbar-left" />
+        </template>
+        <template v-if="$slots['toolbar-center']" #center>
+          <slot name="toolbar-center" />
+        </template>
+        <template v-if="$slots['toolbar-right']" #right-actions>
+          <slot name="toolbar-right" />
+        </template>
+        <template v-if="$slots['toolbar-right-leading']" #right-actions-leading>
+          <slot name="toolbar-right-leading" />
+        </template>
+        <template v-if="$slots['toolbar-right-trailing']" #right-actions-trailing>
+          <slot name="toolbar-right-trailing" />
+        </template>
+        <template v-if="$slots['toolbar-time']" #time="s">
+          <slot name="toolbar-time" v-bind="s" />
+        </template>
+      </TimelineToolbar>
     </slot>
 
     <div class="ve-timeline__body">
@@ -721,7 +883,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
           ref="contentRef"
           class="ve-timeline__content"
           :class="{ 've-timeline__content--with-track-rail': hasTrackRailSlot }"
-          :style="{ width: `${contentWidthPx}px` }"
+          :style="{ width: `calc(${contentWidthPx}px + ${railWidthPx}px)` }"
         >
           <div class="ve-timeline__ruler-layer">
             <slot name="ruler" :ticks="ticks" :pixels-per-ms="pixelsPerMs">
@@ -740,6 +902,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
             <TimelineTracks
               :tracks="segmentLayouts"
               :track-height="trackHeightPx"
+              :track-heights="trackHeights"
               :track-gap="trackGapPx"
               :selected-segment-id="props.selectedSegmentId"
               :show-track-rail="hasTrackRailSlot"
@@ -791,99 +954,101 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
               :pixels-per-ms="pixelsPerMs"
               :ruler-height="rulerHeightPx"
               :track-height="trackHeightPx"
+              :track-heights="trackHeights"
+              :track-tops="trackMetrics.tops"
               :track-gap="trackGapPx"
             />
           </div>
 
-        <!-- 拖拽中的 segment (提升到轨道外避免被 overflow 裁剪) -->
-        <template v-if="draggingSegmentLayout">
-          <div
-            class="ve-segment ve-segment--dragging"
-            :style="{
-              left: formatTimelineX(draggingSegmentLayout.left),
-              width: `${draggingSegmentLayout.width}px`,
-              top: `${draggingSegmentLayout.top}px`,
-              height: `${trackHeightPx}px`,
-              backgroundColor: draggingSegmentLayout.segment.color || 'var(--ve-primary)',
-            }"
-          >
-            <slot
-              name="segment"
-              :layout="draggingSegmentLayout"
-              :segment="draggingSegmentLayout.segment"
-              :track="draggingSegmentLayout.track"
-              :is-selected="draggingSegmentLayout.isSelected"
-            >
-              <div class="ve-segment__content">
-                <div class="ve-segment__title">
-                  {{ draggingSegmentLayout.segment.type || 'segment' }}
-                </div>
-                <div class="ve-segment__time">
-                  {{ formatTime(draggingSegmentLayout.segment.start) }} - {{ formatTime(draggingSegmentLayout.segment.end) }}
-                </div>
-              </div>
-            </slot>
-          </div>
-        </template>
-
-        <!-- Placeholder for final drop position (only show when not creating new track) -->
-        <template v-if="dragPreviewPayload && !dragPreviewPayload.isNewTrack">
-          <div
-            class="ve-segment ve-segment--placeholder"
-            :style="{
-              left: formatTimelineX(dragPreviewPayload.startTime * pixelsPerMs),
-              width: `${(dragPreviewPayload.endTime - dragPreviewPayload.startTime) * pixelsPerMs}px`,
-              top: `${placeholderTop}px`,
-              height: `${trackHeightPx}px`,
-            }"
-          >
+          <!-- 拖拽中的 segment (提升到轨道外避免被 overflow 裁剪) -->
+          <template v-if="draggingSegmentLayout">
             <div
-              class="ve-segment--placeholder-inner"
+              class="ve-segment ve-segment--dragging"
               :style="{
-                backgroundColor: dragPreviewPayload.segment.color || 'var(--ve-primary)',
+                left: formatTimelineX(draggingSegmentLayout.left),
+                width: `${draggingSegmentLayout.width}px`,
+                top: `${draggingSegmentLayout.top}px`,
+                height: `${rowHeight(draggingSegmentLayout.trackIndex)}px`,
+                backgroundColor: draggingSegmentLayout.segment.color || 'var(--ve-primary)',
+              }"
+            >
+              <slot
+                name="segment"
+                :layout="draggingSegmentLayout"
+                :segment="draggingSegmentLayout.segment"
+                :track="draggingSegmentLayout.track"
+                :is-selected="draggingSegmentLayout.isSelected"
+              >
+                <div class="ve-segment__content">
+                  <div class="ve-segment__title">
+                    {{ draggingSegmentLayout.segment.type || 'segment' }}
+                  </div>
+                  <div class="ve-segment__time">
+                    {{ formatTime(draggingSegmentLayout.segment.start) }} - {{ formatTime(draggingSegmentLayout.segment.end) }}
+                  </div>
+                </div>
+              </slot>
+            </div>
+          </template>
+
+          <!-- Placeholder for final drop position (only show when not creating new track) -->
+          <template v-if="dragPreviewPayload && !dragPreviewPayload.isNewTrack">
+            <div
+              class="ve-segment ve-segment--placeholder"
+              :style="{
+                left: formatTimelineX(dragPreviewPayload.startTime * pixelsPerMs),
+                width: `${(dragPreviewPayload.endTime - dragPreviewPayload.startTime) * pixelsPerMs}px`,
+                top: `${placeholderTop}px`,
+                height: `${rowHeight(dragPreviewPayload.targetTrackIndex)}px`,
+              }"
+            >
+              <div
+                class="ve-segment--placeholder-inner"
+                :style="{
+                  backgroundColor: dragPreviewPayload.segment.color || 'var(--ve-primary)',
+                }"
+              />
+            </div>
+          </template>
+
+          <template v-if="resizePreviewPayload">
+            <div
+              class="ve-segment ve-segment--preview"
+              :style="{
+                left: formatTimelineX(resizePreviewPayload.startTime * pixelsPerMs),
+                width: `${(resizePreviewPayload.endTime - resizePreviewPayload.startTime) * pixelsPerMs}px`,
+                top: `${rowTop(resizePreviewPayload.trackIndex)}px`,
+                height: `${rowHeight(resizePreviewPayload.trackIndex)}px`,
+                backgroundColor: resizePreviewPayload.segment.color || 'var(--ve-primary)',
               }"
             />
-          </div>
-        </template>
+          </template>
 
-        <template v-if="resizePreviewPayload">
-          <div
-            class="ve-segment ve-segment--preview"
-            :style="{
-              left: formatTimelineX(resizePreviewPayload.startTime * pixelsPerMs),
-              width: `${(resizePreviewPayload.endTime - resizePreviewPayload.startTime) * pixelsPerMs}px`,
-              top: `${rulerHeightPx + resizePreviewPayload.trackIndex * (trackHeightPx + trackGapPx) + trackGapPx}px`,
-              height: `${trackHeightPx}px`,
-              backgroundColor: resizePreviewPayload.segment.color || 'var(--ve-primary)',
-            }"
-          />
-        </template>
+          <!-- 吸附辅助线 -->
+          <template v-if="activeSnapGuides.length">
+            <div
+              v-for="guide in activeSnapGuides"
+              :key="`snap-${guide.time}`"
+              class="ve-snap-guide"
+              :style="{
+                left: formatTimelineX(guide.left),
+                top: `${rulerHeightPx}px`,
+                height: `calc(100% - ${rulerHeightPx}px)`,
+              }"
+            />
+          </template>
 
-        <!-- 吸附辅助线 -->
-        <template v-if="activeSnapGuides.length">
-          <div
-            v-for="guide in activeSnapGuides"
-            :key="`snap-${guide.time}`"
-            class="ve-snap-guide"
-            :style="{
-              left: formatTimelineX(guide.left),
-              top: `${rulerHeightPx}px`,
-              height: `calc(100% - ${rulerHeightPx}px)`,
-            }"
-          />
-        </template>
-
-        <!-- 新轨道创建提示 - 蓝色线 -->
-        <template v-if="dragPreview && dragPreview.isNewTrack">
-          <div
-            class="ve-new-track-line"
-            :style="{
-              top: `${rulerHeightPx + dragPreview.targetTrackIndex * (trackHeightPx + trackGapPx)}px`,
-              left: hasTrackRailSlot ? `var(--ve-track-rail-width, ${DEFAULT_TRACK_RAIL_WIDTH}px)` : '0',
-              right: '0',
-            }"
-          />
-        </template>
+          <!-- 新轨道创建提示 - 蓝色线 -->
+          <template v-if="dragPreview && dragPreview.isNewTrack">
+            <div
+              class="ve-new-track-line"
+              :style="{
+                top: `${rowTop(dragPreview.targetTrackIndex) - trackGapPx}px`,
+                left: hasTrackRailSlot ? `var(--ve-track-rail-width, ${DEFAULT_TRACK_RAIL_WIDTH}px)` : '0',
+                right: '0',
+              }"
+            />
+          </template>
         </div>
       </div>
     </div>
@@ -891,60 +1056,30 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 </template>
 
 <style scoped>
-:where(.ve-timeline) {
-  --ve-primary: #222226;
-  --ve-track-rail-width: 28px;
-  --ve-content-primary: rgba(0, 0, 0, 0.9);
-  --ve-content-secondary: rgba(0, 0, 0, 0.55);
-  --ve-content-tertiary: rgba(0, 0, 0, 0.35);
-  --ve-content-on-primary: rgba(255, 255, 255, 0.9);
-  --ve-surface-elevated: #fff;
-  --ve-surface-control-subtle: rgba(0, 0, 0, 0.05);
-  --ve-surface-control-muted: rgba(0, 0, 0, 0.08);
-  --ve-surface-control-hover: rgba(0, 0, 0, 0.1);
-  --ve-border-weak: rgba(0, 0, 0, 0.05);
-  --ve-border-subtle: rgba(0, 0, 0, 0.12);
-  --ve-selection-background: rgba(90, 90, 255, 0.12);
-  --ve-selection-border: #5a5aff;
-  --ve-shadow-floating: 0 8px 10px -5px rgba(0, 0, 0, 0.08), 0 6px 30px 5px rgba(0, 0, 0, 0.05);
-  color-scheme: light;
-  --at-apply: flex flex-col w-full max-w-full min-w-0 rounded-10px h-full;
+.ve-timeline {
+  /* All token values (light and dark) live in theme.css so a consumer can
+     redefine them on any ancestor. Declaring them here would shadow that and
+     make the package un-themeable. */
+  --at-apply: flex flex-col w-full max-w-full min-w-0 rounded-10px h-full '!p-2';
 }
 
-:where(.ve-theme-dark .ve-timeline),
-:where(.ve-timeline[data-theme='dark']) {
-  --ve-primary: #fff;
-  --ve-content-primary: rgba(255, 255, 255, 0.9);
-  --ve-content-secondary: rgba(255, 255, 255, 0.55);
-  --ve-content-tertiary: rgba(255, 255, 255, 0.35);
-  --ve-content-on-primary: rgba(0, 0, 0, 0.9);
-  --ve-surface-elevated: #1a1a1a;
-  --ve-surface-control-subtle: rgba(255, 255, 255, 0.05);
-  --ve-surface-control-muted: rgba(255, 255, 255, 0.08);
-  --ve-surface-control-hover: rgba(255, 255, 255, 0.1);
-  --ve-border-weak: rgba(255, 255, 255, 0.12);
-  --ve-border-subtle: rgba(255, 255, 255, 0.12);
-  --ve-selection-background: rgba(90, 90, 255, 0.18);
-  color-scheme: dark;
-}
-
-:where(.ve-timeline .ve-timeline__body) {
+.ve-timeline .ve-timeline__body {
   display: flex;
   flex: 1 1 0%;
   width: 100%;
   min-height: 0;
 }
 
-:where(.ve-timeline .ve-timeline__viewport) {
+.ve-timeline .ve-timeline__viewport {
   --at-apply: relative overflow-auto w-full flex-1 min-w-0 min-h-0;
   background: var(--ve-surface-elevated);
 }
 
-:where(.ve-timeline .ve-timeline__content) {
+.ve-timeline .ve-timeline__content {
   --at-apply: relative min-h-full min-w-full;
 }
 
-:where(.ve-timeline .ve-timeline__ruler-layer) {
+.ve-timeline .ve-timeline__ruler-layer {
   position: sticky;
   top: 0;
   z-index: 30;
@@ -952,83 +1087,90 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
   background: var(--ve-surface-elevated);
 }
 
-:where(.ve-timeline .ve-timeline__content--with-track-rail .ve-timeline__ruler-layer) {
-  margin-left: var(--ve-track-rail-width);
+.ve-timeline .ve-timeline__content--with-track-rail .ve-timeline__ruler-layer {
+  /* Offset past the rail and give back the same width, otherwise `width: 100%`
+     plus the margin overflows the content box by the rail width. */
+  margin-left: var(--ve-track-rail-width, 24px);
+  width: calc(100% - var(--ve-track-rail-width, 24px));
 }
 
-:where(.ve-timeline .ve-timeline__overlay-layer) {
+.ve-timeline .ve-timeline__overlay-layer {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
-:where(.ve-timeline .ve-timeline__overlay-layer--with-track-rail) {
+.ve-timeline .ve-timeline__overlay-layer--with-track-rail {
   left: var(--ve-track-rail-width);
 }
 
-:where(.ve-timeline .ve-timeline__overlay-layer > *) {
+.ve-timeline .ve-timeline__overlay-layer > * {
   pointer-events: auto;
 }
 
 /* Dragging segment (VideoTimeline specific) */
-:where(.ve-timeline .ve-segment--dragging) {
+.ve-timeline .ve-segment--dragging {
   --at-apply: absolute z-50 rounded-[4px] cursor-pointer flex items-center overflow-hidden pointer-events-none;
   color: var(--ve-content-primary);
-  box-shadow: var(--ve-shadow-floating), inset 0 0 0 1px var(--ve-border-weak);
+  box-shadow:
+    var(--ve-shadow-floating),
+    inset 0 0 0 1px var(--ve-border-weak);
   transition: none;
 }
 
 /* Resize preview (VideoTimeline specific) */
-:where(.ve-timeline .ve-segment--preview) {
+.ve-timeline .ve-segment--preview {
   --at-apply: absolute z-45 rounded-[4px] pointer-events-none;
   opacity: 0.7;
-  box-shadow: var(--ve-shadow-floating), inset 0 0 0 1px var(--ve-border-weak);
+  box-shadow:
+    var(--ve-shadow-floating),
+    inset 0 0 0 1px var(--ve-border-weak);
   transition: none;
 }
 
 /* Segment content for dragging segment */
-:where(.ve-timeline .ve-segment__content) {
+.ve-timeline .ve-segment__content {
   --at-apply: flex flex-col gap-1 px-2.5 py-1.5;
 }
 
-:where(.ve-timeline .ve-segment__title) {
+.ve-timeline .ve-segment__title {
   --at-apply: text-[12px] font-bold capitalize;
 }
 
-:where(.ve-timeline .ve-segment__time) {
+.ve-timeline .ve-segment__time {
   --at-apply: text-[11px] font-mono;
   color: var(--ve-content-secondary);
 }
 
 /* Drop placeholder (VideoTimeline specific) */
-:where(.ve-timeline .ve-segment--placeholder) {
+.ve-timeline .ve-segment--placeholder {
   --at-apply: absolute pointer-events-none rounded-[4px] z-24;
   background: var(--ve-selection-background);
   border: 1px solid var(--ve-selection-border);
   transition: none;
 }
 
-:where(.ve-timeline .ve-segment--placeholder-inner) {
+.ve-timeline .ve-segment--placeholder-inner {
   --at-apply: absolute inset-0 rounded-[2px];
   opacity: 0.2;
 }
 
-:where(.ve-timeline .ve-snap-guide) {
+.ve-timeline .ve-snap-guide {
   --at-apply: absolute pointer-events-none z-20;
   width: 1px;
   background: var(--ve-primary);
   opacity: 0.7;
 }
 
-:where(.ve-timeline .ve-new-track-line) {
+.ve-timeline .ve-new-track-line {
   --at-apply: absolute pointer-events-none z-25;
   height: 1px;
   background: var(--ve-primary);
   opacity: 0.8;
 }
 
-:where(.ve-timeline--interacting .ve-segment),
-:where(.ve-timeline--interacting .ve-track) {
+.ve-timeline--interacting .ve-segment,
+.ve-timeline--interacting .ve-track {
   transition: none !important;
 }
 </style>

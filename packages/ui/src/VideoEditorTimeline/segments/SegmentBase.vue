@@ -9,64 +9,81 @@ const props = withDefaults(defineProps<{
   trackType: string
   accentColor?: string
 }>(), {
-  accentColor: '#222226',
+  accentColor: '',
 })
 
+/**
+ * No design exists yet for sticker / effect / filter segments, so they follow
+ * the conventions the rest of the timeline already uses:
+ *
+ * - a neutral overlay surface (same family as the audio segment), never a
+ *   saturated fill — in the shipped design colour comes from media, not chrome;
+ * - track identity carried by a thin accent bar plus the icon, so the type is
+ *   readable at a glance without flooding the row;
+ * - 11px secondary label, 12px icon, 4px radius, 0.5px inset border.
+ *
+ * Everything is token-driven, so both themes work and a consumer can retune
+ * without touching markup.
+ */
+const ICON_BY_TRACK_TYPE: Record<string, string> = {
+  sticker: 'i-creatly-element',
+  effect: 'i-creatly-star',
+  filter: 'i-creatly-brush',
+  text: 'i-creatly-text',
+}
+
+const icon = computed(() => ICON_BY_TRACK_TYPE[props.trackType] ?? 'i-creatly-element')
+
+/** A host-supplied name wins over the raw segment type. */
 const label = computed(() => {
   const maybeLabel = (props.segment?.extra as Record<string, unknown> | null | undefined)?.label
-  return typeof maybeLabel === 'string' ? maybeLabel : null
+  if (typeof maybeLabel === 'string' && maybeLabel)
+    return maybeLabel
+
+  const named = (props.segment as { name?: unknown } | null)?.name
+  if (typeof named === 'string' && named)
+    return named
+
+  return props.segment.segmentType
 })
 </script>
 
 <template>
-  <div class="segment-base">
-    <div class="segment-base__content">
-      <span class="segment-base__pill segment-base__pill--primary">
-        {{ trackType }}
-      </span>
-      <span class="segment-base__pill segment-base__pill--muted">
-        {{ segment.segmentType }}
-      </span>
-    </div>
-
-    <!-- Label badge -->
-    <span v-if="label" class="segment-base__badge">
-      {{ label }}
-    </span>
+  <div class="segment-base" :style="accentColor ? { '--ve-segment-accent': accentColor } : undefined">
+    <span class="segment-base__accent" aria-hidden="true" />
+    <span class="segment-base__icon" :class="icon" aria-hidden="true" />
+    <span class="segment-base__label">{{ label }}</span>
   </div>
 </template>
 
 <style scoped>
-:where(.segment-base) {
-  --at-apply: relative flex items-center w-full h-full p-1.5 rounded-4px;
-  background: var(--ve-surface-control-subtle);
-  box-shadow: inset 0 0 0 1px var(--ve-border-weak);
+.segment-base {
+  --at-apply: relative flex items-center w-full h-full overflow-hidden;
+  gap: var(--ve-segment-meta-gap, 6px);
+  padding-inline: var(--ve-segment-meta-padding-x, 8px);
+  padding-left: calc(var(--ve-segment-accent-bar-width, 3px) + var(--ve-segment-meta-padding-x, 8px));
+  border-radius: var(--ve-segment-radius, 4px);
+  background: var(--ve-segment-meta-background, rgba(0, 0, 0, 0.05));
+  box-shadow: inset 0 0 0 var(--ve-stroke-width, 0.5px) var(--ve-segment-meta-border, rgba(34, 34, 38, 0.08));
 }
 
-:where(.segment-base .segment-base__content) {
-  --at-apply: flex items-center justify-start gap-1.5 w-full;
+/* Track identity, without tinting the whole segment. */
+.segment-base .segment-base__accent {
+  --at-apply: absolute left-0 top-0 bottom-0 pointer-events-none;
+  width: var(--ve-segment-accent-bar-width, 3px);
+  background: var(--ve-segment-accent, currentcolor);
 }
 
-:where(.segment-base .segment-base__pill) {
-  --at-apply: inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[11px] font-semibold whitespace-nowrap;
-  box-shadow: inset 0 0 0 1px var(--ve-border-weak);
+.segment-base .segment-base__icon {
+  --at-apply: block flex-shrink-0;
+  width: var(--ve-segment-meta-icon-size, 12px);
+  height: var(--ve-segment-meta-icon-size, 12px);
+  color: var(--ve-segment-accent, currentcolor);
 }
 
-:where(.segment-base .segment-base__pill--primary) {
-  color: var(--ve-segment-accent, #222226);
-  background: rgba(34, 34, 38, 0.08);
-}
-
-:where(.segment-base .segment-base__pill--muted) {
-  color: var(--ve-content-secondary);
-  background: rgba(34, 34, 38, 0.05);
-}
-
-:where(.segment-base .segment-base__badge) {
-  --at-apply: absolute top-1.5 left-2 px-1.5 py-0.5 text-[11px] rounded-4px pointer-events-none;
-  background: rgba(0, 0, 0, 0.25);
-  color: #fff;
-  transform-origin: left top;
-  transform: scale(0.9);
+.segment-base .segment-base__label {
+  --at-apply: truncate text-[11px] capitalize;
+  line-height: 16px;
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 </style>

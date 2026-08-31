@@ -104,41 +104,41 @@ function clamp(value: number, min: number, max: number) {
 </template>
 
 <style scoped>
-:where(.pi-chroma) {
+.pi-chroma {
   --at-apply: flex flex-col gap-1.5;
 }
 
-:where(.pi-chroma .pi-chroma__header) {
+.pi-chroma .pi-chroma__header {
   --at-apply: flex items-center justify-between;
 }
 
-:where(.pi-chroma .pi-chroma__title) {
+.pi-chroma .pi-chroma__title {
   --at-apply: text-[11px] font-semibold uppercase tracking-wide;
-  color: rgba(15, 23, 42, 0.5);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 
-:where(.pi-chroma .pi-chroma__toggle) {
+.pi-chroma .pi-chroma__toggle {
   --at-apply: flex items-center gap-1 text-[11px] cursor-pointer;
-  color: rgba(15, 23, 42, 0.6);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 
-:where(.pi-chroma .pi-chroma__row) {
+.pi-chroma .pi-chroma__row {
   --at-apply: flex items-center gap-2 text-[12px];
-  color: rgba(15, 23, 42, 0.75);
+  color: var(--ve-content-primary, rgba(0, 0, 0, 0.9));
 }
 
-:where(.pi-chroma .pi-chroma__label) {
+.pi-chroma .pi-chroma__label {
   --at-apply: w-16 shrink-0 whitespace-nowrap;
 }
 
-:where(.pi-chroma .pi-chroma__color) {
+.pi-chroma .pi-chroma__color {
   --at-apply: w-10 h-6 p-0 rounded-4px cursor-pointer;
-  border: 1px solid rgba(15, 23, 42, 0.15);
-  background: #fff;
+  border: 1px solid var(--ve-overlay-12, rgba(0, 0, 0, 0.12));
+  background: var(--ve-surface-elevated, #fff);
 }
 
-:where(.pi-chroma .pi-chroma__hex) {
+.pi-chroma .pi-chroma__hex {
   --at-apply: text-[11px] font-mono;
-  color: rgba(15, 23, 42, 0.5);
+  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
 }
 </style>

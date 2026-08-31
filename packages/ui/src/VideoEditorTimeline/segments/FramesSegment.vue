@@ -14,7 +14,7 @@ const props = defineProps<{
   segment: IFramesSegmentUnion
 }>()
 const emit = defineEmits<{
-  (e: 'toggle-video-mute', payload: { segmentId: string, muted: boolean }): void
+  (e: 'toggleVideoMute', payload: { segmentId: string, muted: boolean }): void
 }>()
 
 const containerRef = ref<HTMLElement | null>(null)
@@ -46,9 +46,13 @@ onMounted(() => {
   }
 })
 
+/** Monotonic id used to discard results from superseded waveform jobs. */
+let currentWaveformJobId = 0
+
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   cancelThumbnailWork()
+  // Invalidate any in-flight waveform job so a late resolve can't touch state.
   currentWaveformJobId += 1
 })
 
@@ -80,7 +84,6 @@ const waveformState = reactive<WaveformState>({
   loadedUrl: null,
 })
 let currentJobId = 0
-let currentWaveformJobId = 0
 let refreshTimer: number | undefined
 let pendingThumbnailRequest: VideoThumbnailRequest | null = null
 
@@ -272,7 +275,7 @@ const videoWaveformDisplay = computed(() => {
   const fullDurationMs = waveformState.data.duration * 1000
   const peaks = waveformState.data.peaks
   if (!Number.isFinite(fullDurationMs) || fullDurationMs <= 0 || peaks.length === 0)
-    return { peaks: new Array(barsByWidth).fill(0), coveragePercent: 100 }
+    return { peaks: Array.from({ length: barsByWidth }, () => 0), coveragePercent: 100 }
 
   const sourceStartMs = Math.max(segment.fromTime ?? 0, 0)
   const playRate = Math.max(segment.playRate ?? 1, 0.0001)
@@ -338,7 +341,7 @@ function handleMuteToggle(event: MouseEvent) {
     return
   const nextMuted = !isMuted.value
   mutedOverride.value = nextMuted
-  emit('toggle-video-mute', {
+  emit('toggleVideoMute', {
     segmentId: props.segment.id,
     muted: nextMuted,
   })
@@ -407,7 +410,6 @@ function handleMuteToggle(event: MouseEvent) {
                 <WaveformCanvasStrip
                   class="frames-segment__waveform-canvas"
                   :peaks="videoWaveformDisplay.peaks"
-                  bar-color="#3f3f46"
                   :min-bar-height="3"
                   :max-bar-width="4"
                   :bar-gap="1"
@@ -460,107 +462,132 @@ function handleMuteToggle(event: MouseEvent) {
 </template>
 
 <style scoped>
-:where(.frames-segment) {
-  --at-apply: relative flex items-stretch w-full h-full overflow-hidden rounded-4px;
+.frames-segment {
+  --at-apply: relative flex items-stretch w-full h-full overflow-hidden;
+  border-radius: var(--ve-segment-radius, 4px);
 }
 
-:where(.frames-segment .frames-segment__image) {
-  --at-apply: flex w-full h-full overflow-hidden rounded-4px;
-  background-color: color-mix(in srgb, var(--ve-segment-accent, #222226) 15%, transparent);
+.frames-segment .frames-segment__image {
+  --at-apply: flex w-full h-full overflow-hidden;
+  border-radius: var(--ve-segment-radius, 4px);
+  background-color: color-mix(in srgb, var(--ve-segment-accent, currentcolor) 15%, transparent);
 }
 
-:where(.frames-segment .frames-segment__image-item) {
-  --at-apply: flex-shrink-0 w-14 h-full bg-cover bg-left-center bg-no-repeat;
+.frames-segment .frames-segment__image-item {
+  --at-apply: flex-shrink-0 h-full bg-cover bg-left-center bg-no-repeat;
+  width: var(--ve-segment-thumbnail-size, 56px);
 }
 
-:where(.frames-segment .frames-segment__video) {
+.frames-segment .frames-segment__video {
   --at-apply: flex items-center w-full h-full overflow-hidden;
-  background: var(--ve-surface-control-subtle);
+  background: var(--ve-segment-video-background, #f1f1f1);
 }
 
-:where(.frames-segment .frames-segment__video-wrap) {
+.frames-segment .frames-segment__video-wrap {
   --at-apply: relative w-full h-full;
 }
 
-:where(.frames-segment .frames-segment__thumb) {
-  --at-apply: flex-1 min-w-14;
+.frames-segment .frames-segment__thumb {
+  --at-apply: flex-1;
+  min-width: var(--ve-segment-thumbnail-size, 56px);
   aspect-ratio: 1 / 1;
   background-size: cover;
   background-position: center;
 }
 
-:where(.frames-segment .frames-segment__waveform-strip) {
+.frames-segment .frames-segment__waveform-strip {
   --at-apply: absolute left-0 right-0 bottom-0 flex items-center w-full px-1 overflow-hidden;
-  height: 16px;
-  background: var(--ve-surface-control-muted);
+  height: var(--ve-segment-waveform-height, 16px);
+  background: var(--ve-segment-waveform-strip-background, #f1f1f1);
   z-index: 2;
 }
 
-:where(.frames-segment .frames-segment__waveform) {
+.frames-segment .frames-segment__waveform {
   --at-apply: absolute top-0 bottom-0 left-0 flex items-center gap-[1px];
   overflow: hidden;
 }
 
-:where(.frames-segment .frames-segment__waveform-canvas) {
+.frames-segment .frames-segment__waveform-canvas {
   --at-apply: w-full h-full;
 }
 
-:where(.frames-segment .frames-segment__waveform-pattern) {
+.frames-segment .frames-segment__waveform-pattern {
   width: 100%;
   height: 100%;
   background-image: linear-gradient(
     90deg,
     transparent 45%,
-    #52525b 45%,
-    #52525b 55%,
+    var(--ve-waveform-color, rgba(0, 0, 0, 0.9)) 45%,
+    var(--ve-waveform-color, rgba(0, 0, 0, 0.9)) 55%,
     transparent 55%
   );
   background-size: 4px 100%;
   background-position: 0 center;
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 10%,
-    black 35%,
-    black 65%,
-    transparent 90%
-  );
+  mask-image: linear-gradient(to bottom, transparent 10%, black 35%, black 65%, transparent 90%);
 }
 
-:where(.frames-segment .frames-segment__waveform-strip--muted .frames-segment__waveform) {
+.frames-segment .frames-segment__waveform-strip--muted .frames-segment__waveform {
   opacity: 0.25;
 }
 
-:where(.frames-segment .frames-segment__waveform-strip--muted .frames-segment__waveform-pattern) {
+.frames-segment .frames-segment__waveform-strip--muted .frames-segment__waveform-pattern {
   opacity: 0.25;
 }
 
-:where(.frames-segment .frames-segment__placeholder) {
+.frames-segment .frames-segment__placeholder {
   --at-apply: flex items-center justify-center w-full h-full text-[12px] rounded-4px whitespace-nowrap;
-  color: var(--ve-content-secondary);
-  background: var(--ve-surface-control-subtle);
+  color: var(--ve-segment-placeholder-color, rgba(0, 0, 0, 0.55));
+  background: var(--ve-segment-placeholder-background, #eee);
 }
 
-:where(.frames-segment .frames-segment__placeholder--video) {
+.frames-segment .frames-segment__placeholder--video {
   border-radius: 0;
 }
 
-:where(.frames-segment .frames-segment__overlay) {
-  --at-apply: absolute top-1.5 left-2 flex items-center gap-2 z-3;
+.frames-segment .frames-segment__overlay {
+  --at-apply: absolute flex items-center gap-1 z-3;
+  top: var(--ve-segment-label-inset-y, 6px);
+  left: var(--ve-segment-label-inset-x, 8px);
 }
 
-:where(.frames-segment .frames-segment__badge) {
-  --at-apply: px-1.5 py-0.5 text-[11px] rounded-4px pointer-events-none;
-  background: rgba(0, 0, 0, 0.25);
-  color: #fff;
+.frames-segment .frames-segment__badge {
+  --at-apply: px-1.5 py-0.5 text-[10px] whitespace-nowrap pointer-events-none;
+  border-radius: var(--ve-segment-radius, 4px);
+  background: var(--ve-segment-label-background, rgba(0, 0, 0, 0.25));
+  color: var(--ve-content-on-overlay, #fff);
   transform-origin: left top;
-  transform: scale(0.9);
 }
 
-:where(.frames-segment) .frames-segment__mute-btn {
-  --at-apply: flex items-center justify-center rounded-4px border-none p-0 cursor-pointer text-white w-5 h-5 bg-[rgba(0,0,0,0.25)] hover:bg-[rgba(0,0,0,0.35)] focus-visible:outline-[2px] focus-visible:outline-[rgba(255,255,255,0.85)] focus-visible:outline-offset-[1px];
+/* Plain CSS rather than `--at-apply` with arbitrary values: prettier reformats
+   `bg-[rgba(0,0,0,0.25)]` into `bg-[rgba(0, 0, 0, 0.25)]` and `hover:bg-` into
+   `hover: bg-`, neither of which UnoCSS can parse. */
+.frames-segment .frames-segment__mute-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--ve-segment-radius, 4px);
+  color: var(--ve-content-on-overlay, #fff);
+  background: var(--ve-segment-label-background, rgba(0, 0, 0, 0.25));
+  cursor: pointer;
 }
 
-:where(.frames-segment) .frames-segment__mute-icon {
-  --at-apply: block text-white w-3 h-3;
+.frames-segment .frames-segment__mute-btn:hover {
+  background: var(--ve-overlay-scrim-strong, rgba(0, 0, 0, 0.6));
+}
+
+.frames-segment .frames-segment__mute-btn:focus-visible {
+  outline: 2px solid var(--ve-content-on-overlay, #fff);
+  outline-offset: 1px;
+}
+
+.frames-segment .frames-segment__mute-icon {
+  --at-apply: block;
+  width: 0.75rem;
+  height: 0.75rem;
+  color: var(--ve-content-on-overlay, #fff);
 }
 </style>

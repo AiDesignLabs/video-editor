@@ -5,6 +5,11 @@ defineOptions({ name: 'WaveformCanvasStrip' })
 
 const props = withDefaults(defineProps<{
   peaks: number[]
+  /**
+   * Explicit bar colour. Left empty (the default) the strip paints with the
+   * container's resolved CSS `color`, which the stylesheet binds to
+   * `--ve-waveform-color` so the canvas follows the active theme.
+   */
   barColor?: string
   minBarHeight?: number
   maxBarWidth?: number
@@ -12,7 +17,7 @@ const props = withDefaults(defineProps<{
   maxBufferWidth?: number
   maxBufferHeight?: number
 }>(), {
-  barColor: '#2B2B2B',
+  barColor: '',
   minBarHeight: 3,
   maxBarWidth: 4,
   barGap: 1,
@@ -31,6 +36,17 @@ function clamp(value: number, min: number, max: number) {
 
 function clamp01(value: number) {
   return clamp(Number.isFinite(value) ? value : 0, 0, 1)
+}
+
+/** Canvas can't read CSS variables, so resolve the container's colour instead. */
+function resolveBarColor() {
+  if (props.barColor)
+    return props.barColor
+  const el = containerRef.value
+  if (!el)
+    return 'currentColor'
+  const color = getComputedStyle(el).color
+  return color || 'currentColor'
 }
 
 function updateSize() {
@@ -80,7 +96,7 @@ function drawWaveform() {
     return
 
   const gap = Math.min(props.barGap, Math.max(0, bandWidth - 0.1))
-  ctx.fillStyle = props.barColor
+  ctx.fillStyle = resolveBarColor()
 
   for (let i = 0; i < peaks.length; i++) {
     const bandStart = i * bandWidth
@@ -101,8 +117,25 @@ function drawWaveform() {
   }
 }
 
+let themeObserver: MutationObserver | null = null
+let colorSchemeQuery: MediaQueryList | null = null
+function handleThemeChange() {
+  drawWaveform()
+}
+
 onMounted(() => {
   updateSize()
+
+  // A theme swap changes the resolved colour but not any prop, so nothing else
+  // would repaint the canvas.
+  themeObserver = new MutationObserver(handleThemeChange)
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class', 'data-theme'],
+  })
+  colorSchemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  colorSchemeQuery.addEventListener('change', handleThemeChange)
+
   const el = containerRef.value
   if (!el)
     return
@@ -115,6 +148,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
+  themeObserver?.disconnect()
+  themeObserver = null
+  colorSchemeQuery?.removeEventListener('change', handleThemeChange)
+  colorSchemeQuery = null
 })
 
 watch(
@@ -146,6 +183,7 @@ watch(
 <style scoped>
 .waveform-canvas-strip {
   position: relative;
+  color: var(--ve-waveform-color, rgba(0, 0, 0, 0.9));
   width: 100%;
   height: 100%;
   overflow: hidden;

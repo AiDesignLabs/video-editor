@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { IAudioSegment } from '@video-editor/shared'
 import type { WaveformData } from '@video-editor/protocol'
+import type { IAudioSegment } from '@video-editor/shared'
 import { extractWaveform } from '@video-editor/protocol'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import WaveformCanvasStrip from './WaveformCanvasStrip.vue'
@@ -190,7 +190,6 @@ const waveformDisplay = computed(() => {
           <WaveformCanvasStrip
             class="audio-segment__waveform-canvas"
             :peaks="waveformDisplay.renderPeaks"
-            bar-color="#2B2B2B"
             :min-bar-height="4"
             :max-bar-width="4"
             :bar-gap="1"
@@ -222,52 +221,50 @@ const waveformDisplay = computed(() => {
 </template>
 
 <style scoped>
-:where(.audio-segment) {
-  --at-apply: relative flex items-center w-full h-full overflow-hidden rounded-4px;
-  background-color: var(--ve-surface-control-muted);
+.audio-segment {
+  --at-apply: relative flex items-center w-full h-full overflow-hidden;
+  border-radius: var(--ve-segment-radius, 4px);
+  background-color: var(--ve-segment-audio-background, #f1f1f1);
 }
 
-:where(.audio-segment .audio-segment__waveform) {
+.audio-segment .audio-segment__waveform {
   --at-apply: absolute top-0 bottom-0 left-0 flex items-center justify-start gap-[1px];
   overflow: hidden;
 }
 
-:where(.audio-segment .audio-segment__waveform-canvas) {
+.audio-segment .audio-segment__waveform-canvas {
   --at-apply: w-full h-full;
 }
 
-:where(.audio-segment .audio-segment__placeholder) {
+.audio-segment .audio-segment__placeholder {
   --at-apply: flex items-center justify-center w-full h-full text-xs;
-  color: var(--ve-content-primary);
+  color: var(--ve-segment-placeholder-color, rgba(0, 0, 0, 0.55));
   opacity: 0.6;
 }
 
-:where(.audio-segment .waveform-pattern) {
+.audio-segment .waveform-pattern {
   width: 100%;
   height: 100%;
   background-image: linear-gradient(
     90deg,
     transparent 45%,
-    #2B2B2B 45%,
-    #2B2B2B 55%,
+    var(--ve-waveform-color, rgba(0, 0, 0, 0.9)) 45%,
+    var(--ve-waveform-color, rgba(0, 0, 0, 0.9)) 55%,
     transparent 55%
   );
   background-size: 4px 100%;
   background-position: 0 center;
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 10%,
-    black 40%,
-    black 60%,
-    transparent 90%
-  );
+  mask-image: linear-gradient(to bottom, transparent 10%, black 40%, black 60%, transparent 90%);
   opacity: 0.4;
 }
 
-:where(.audio-segment .audio-segment__badge) {
-  --at-apply: absolute top-1.5 left-2 px-1.5 py-0.5 text-[11px] rounded-4px pointer-events-none;
-  background: rgba(0, 0, 0, 0.25);
-  color: #fff;
+.audio-segment .audio-segment__badge {
+  --at-apply: absolute inline-flex items-center px-1 text-[11px] whitespace-nowrap pointer-events-none;
+  top: var(--ve-segment-label-inset-y, 6px);
+  left: var(--ve-segment-label-inset-x, 8px);
+  border-radius: var(--ve-segment-radius, 4px);
+  background: var(--ve-segment-label-background, rgba(0, 0, 0, 0.25));
+  color: var(--ve-content-on-overlay, #fff);
   transform-origin: left top;
   transform: scale(0.9);
 }
