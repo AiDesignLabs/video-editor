@@ -1091,7 +1091,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
   /* All token values (light and dark) live in theme.css so a consumer can
      redefine them on any ancestor. Declaring them here would shadow that and
      make the package un-themeable. */
-  --at-apply: flex flex-col w-full max-w-full min-w-0 rounded-10px h-full p-2 pt-0;
+  --at-apply: flex flex-col w-full max-w-full min-w-0 rounded-2 h-full p-2 pt-0;
 }
 
 .ve-timeline .ve-timeline__body {
