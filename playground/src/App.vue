@@ -9,7 +9,7 @@ import type { GizmoTransformPatch } from './gizmo/types'
 import { createEditorCore } from '@video-editor/editor-core'
 import { createProjectStore, generateThumbnails } from '@video-editor/protocol'
 import { composeProtocol, createRenderer, listEffectDefinitions, listTransitionDefinitions } from '@video-editor/renderer'
-import { PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
+import { CanvasSizePanel, PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 import AssetPanel from './AssetPanel.vue'
 import { toComposeOptions } from './export-options'
@@ -404,6 +404,13 @@ const thumbnailSourceUrl = computed(() => {
   return videoSegment && 'url' in videoSegment ? videoSegment.url : swatches.video
 })
 
+/** Re-fit the preview whenever the project canvas changes. */
+let refitPreview: (() => void) | undefined
+watch(
+  () => [protocol.value?.width, protocol.value?.height].join('x'),
+  () => refitPreview?.(),
+)
+
 async function mountRendererInstance(options: {
   seekToMs?: number
   resumePlayback?: boolean
@@ -414,8 +421,11 @@ async function mountRendererInstance(options: {
     autoPlay: false,
     videoSourceMode: 'auto' as const,
     appOptions: {
-      width: host?.clientWidth || 1280,
-      height: host?.clientHeight || 720,
+      ...fitToAspectRatio(
+        host?.clientWidth || 1280,
+        host?.clientHeight || 720,
+        (protocol.value?.width ?? 16) / (protocol.value?.height ?? 9),
+      ),
       background: '#101116',
     },
   }
@@ -423,7 +433,7 @@ async function mountRendererInstance(options: {
   renderer.value = instance
   if (host) {
     host.replaceChildren(instance.app.canvas)
-    observeCanvasHostResize(host, instance)
+    refitPreview = observeCanvasHostResize(host, instance)
   }
 
   if (typeof options.seekToMs === 'number')
@@ -438,24 +448,52 @@ const PREVIEW_MAX_RESOLUTION = 3
 let hostResizeObserver: ResizeObserver | undefined
 let lastRendererResizeKey = ''
 
+/**
+ * Largest box with the project's aspect ratio that fits inside the host.
+ *
+ * The preview used to be sized to the host element, so the stage took the shape
+ * of its container and the project's own width/height only mattered on export.
+ * Letterboxing here is what makes "change the canvas size" visible in the
+ * preview at all.
+ */
+function fitToAspectRatio(hostWidth: number, hostHeight: number, ratio: number) {
+  const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 16 / 9
+  const width = Math.min(hostWidth, hostHeight * safeRatio)
+  const height = width / safeRatio
+  return {
+    width: Math.max(1, Math.round(width)),
+    height: Math.max(1, Math.round(height)),
+  }
+}
+
 function observeCanvasHostResize(host: HTMLElement, instance: Renderer) {
   hostResizeObserver?.disconnect()
   const applyResize = () => {
-    const width = Math.max(1, Math.round(host.clientWidth))
-    const height = Math.max(1, Math.round(host.clientHeight))
+    const ratio = (protocol.value?.width ?? 16) / (protocol.value?.height ?? 9)
+    const box = fitToAspectRatio(
+      Math.max(1, Math.round(host.clientWidth)),
+      Math.max(1, Math.round(host.clientHeight)),
+      ratio,
+    )
     const dpr = window.devicePixelRatio || 1
     const resolution = Math.min(Math.max(dpr, 1), PREVIEW_MAX_RESOLUTION)
-    const key = `${width}x${height}@${resolution}`
+    const key = `${box.width}x${box.height}@${resolution}`
     if (key === lastRendererResizeKey)
       return
     lastRendererResizeKey = key
-    instance.app.renderer.resize(width, height, resolution)
+
+    instance.app.renderer.resize(box.width, box.height, resolution)
+    // Pin the CSS box too, otherwise the canvas is stretched back to the host.
+    const canvas = instance.app.canvas
+    canvas.style.width = `${box.width}px`
+    canvas.style.height = `${box.height}px`
     // The ticker is paused while not playing; re-render one frame at the new size.
     void instance.renderAt(instance.currentTime.value)
   }
   applyResize()
   hostResizeObserver = new ResizeObserver(applyResize)
   hostResizeObserver.observe(host)
+  return applyResize
 }
 
 onMounted(async () => {
@@ -934,6 +972,15 @@ const effectPresets = computed(() => listEffectDefinitions()
   .filter(definition => !definition.id.startsWith('legacy:'))
   .map(definition => ({ id: definition.id, label: definition.label })))
 
+// --- canvas size -----------------------------------------------------------
+const canvasSizeError = ref<string | null>(null)
+
+function handleCanvasSizeChange(size: { width: number, height: number }) {
+  const result = commands.setCanvasSize(size)
+  // Surface the rejection instead of quietly snapping back to the old size.
+  canvasSizeError.value = result.success ? null : (result.error ?? '尺寸无效')
+}
+
 // --- theme -----------------------------------------------------------------
 // The spec requires light and dark; `data-theme` on <html> is what
 // @video-editor/ui's token layer keys off, so the shell and the timeline flip
@@ -1230,6 +1277,14 @@ function handleAddSegmentClick(data: {
       </div>
 
       <aside class="side">
+        <CanvasSizePanel
+          class="side__canvas-size"
+          :width="protocol.width"
+          :height="protocol.height"
+          :error="canvasSizeError"
+          @change="handleCanvasSizeChange"
+        />
+
         <PropertyInspector
           class="side__inspector"
           :segment="selectedSegment"

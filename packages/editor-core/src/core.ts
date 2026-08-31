@@ -1,6 +1,4 @@
-import { computed } from '@vue/reactivity'
 import type { ITrackType, TrackUnion } from '@video-editor/shared'
-import { createVideoProtocolManager } from '@video-editor/protocol'
 import type {
   EditorCore,
   EditorCoreCommands,
@@ -9,6 +7,8 @@ import type {
   EditorCoreSelectors,
   EditorCoreState,
 } from './types'
+import { createVideoProtocolManager } from '@video-editor/protocol'
+import { computed } from '@vue/reactivity'
 import { createPluginManager } from './plugin'
 import { createSegmentRegistry } from './segment'
 
@@ -60,6 +60,7 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     removeTransition: protocolManager.removeTransition,
     updateTransition: protocolManager.updateTransition,
     updateTrack: protocolManager.updateTrack,
+    setCanvasSize: protocolManager.setCanvasSize,
     replaceTrackId: protocolManager.replaceTrackId,
     replaceSegmentId: protocolManager.replaceSegmentId,
     undo: protocolManager.undo,

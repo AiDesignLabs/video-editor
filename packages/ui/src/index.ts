@@ -1,8 +1,12 @@
 import type { App } from 'vue'
+import CanvasSizePanel from './CanvasSizePanel/index.vue'
 import PropertyInspector from './PropertyInspector/index.vue'
 import VideoEditorTimeline from './VideoEditorTimeline/index.vue'
 import VideoTimeline from './VideoTimeline/index.vue'
 import './theme.css'
+
+export { CANVAS_SIZE_PRESETS, formatAspectRatio, matchPreset, orientationOf } from './CanvasSizePanel/presets'
+export type { CanvasSizePreset } from './CanvasSizePanel/presets'
 
 export type { EffectPreset, SegmentUpdater } from './PropertyInspector/types'
 
@@ -13,7 +17,7 @@ export type { TransitionEditPayload, TransitionSeam } from './VideoEditorTimelin
 export * from './VideoTimeline/types'
 
 // 导出单独组件
-export { PropertyInspector, VideoEditorTimeline, VideoTimeline }
+export { CanvasSizePanel, PropertyInspector, VideoEditorTimeline, VideoTimeline }
 
 export default {
   install(app: App): void {

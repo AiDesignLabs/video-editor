@@ -13,6 +13,89 @@ const protocol: IVideoProtocol = {
   transitions: [],
 }
 
+describe('setCanvasSize', () => {
+  const baseProtocol = () => structuredClone(protocol)
+
+  it('resizes the canvas and reports success', () => {
+    const { setCanvasSize, videoBasicInfo, exportProtocol } = createVideoProtocolManager(baseProtocol())
+
+    expect(setCanvasSize({ width: 1080, height: 1920 })).toEqual({ success: true })
+    expect(videoBasicInfo.width).toBe(1080)
+    expect(videoBasicInfo.height).toBe(1920)
+    expect(exportProtocol().width).toBe(1080)
+    expect(exportProtocol().height).toBe(1920)
+  })
+
+  it('records one undo step and restores both dimensions together', () => {
+    const { setCanvasSize, videoBasicInfo, undo, redo, undoCount } = createVideoProtocolManager(baseProtocol())
+    const before = undoCount.value
+
+    setCanvasSize({ width: 1080, height: 1920 })
+    expect(undoCount.value).toBe(before + 1)
+
+    undo()
+    expect(videoBasicInfo.width).toBe(1920)
+    expect(videoBasicInfo.height).toBe(1080)
+
+    redo()
+    expect(videoBasicInfo.width).toBe(1080)
+    expect(videoBasicInfo.height).toBe(1920)
+  })
+
+  it('does not push history for a no-op resize', () => {
+    const { setCanvasSize, undoCount } = createVideoProtocolManager(baseProtocol())
+    const before = undoCount.value
+
+    expect(setCanvasSize({ width: 1920, height: 1080 })).toEqual({ success: true })
+    expect(undoCount.value).toBe(before)
+  })
+
+  it.each([
+    ['zero', { width: 0, height: 1080 }],
+    ['negative', { width: -1920, height: 1080 }],
+    ['fractional', { width: 1920.5, height: 1080 }],
+    ['not finite', { width: Number.NaN, height: 1080 }],
+    ['above the maximum', { width: 99999, height: 1080 }],
+    ['invalid height', { width: 1920, height: 0 }],
+  ])('rejects %s input without touching the canvas', (_label, size) => {
+    const { setCanvasSize, videoBasicInfo, undoCount } = createVideoProtocolManager(baseProtocol())
+    const before = undoCount.value
+
+    const result = setCanvasSize(size)
+    expect(result.success).toBe(false)
+    expect(result.error).toBeTruthy()
+    // Rejected input must not silently fall back to a default.
+    expect(videoBasicInfo.width).toBe(1920)
+    expect(videoBasicInfo.height).toBe(1080)
+    expect(undoCount.value).toBe(before)
+  })
+
+  it('keeps segment transforms untouched, since they are canvas-relative', () => {
+    const source = baseProtocol()
+    source.tracks = [{
+      trackId: 'frames-1',
+      trackType: 'frames',
+      isMain: true,
+      children: [{
+        id: 'clip-1',
+        segmentType: 'frames',
+        type: 'image',
+        format: 'img',
+        url: 'https://example.com/a.png',
+        startTime: 0,
+        endTime: 1000,
+        transform: { position: [0.25, -0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      }],
+    }] as typeof source.tracks
+
+    const { setCanvasSize, exportProtocol } = createVideoProtocolManager(source)
+    setCanvasSize({ width: 1080, height: 1920 })
+
+    const segment = exportProtocol().tracks[0].children[0] as { transform?: { position: number[] } }
+    expect(segment.transform?.position).toEqual([0.25, -0.5, 0])
+  })
+})
+
 describe('video protocol basic info', () => {
   const { videoBasicInfo, exportProtocol } = createVideoProtocolManager(protocol)
 
@@ -52,7 +135,6 @@ describe('video protocol basic info', () => {
       })
     })
   })
-
 })
 
 describe('video protocol segment curd', () => {
@@ -1532,9 +1614,9 @@ describe('transition', () => {
 
       it('invalid transition', () => {
         const { addSegment, addTransition, curTime, exportProtocol } = createVideoProtocolManager(protocol)
-        addSegment(videoSegment).id
+        addSegment(videoSegment)
         curTime.value = 1000
-        addSegment(videoSegment).id
+        addSegment(videoSegment)
         expect(addTransition({} as any)).toBe(true)
         expect(exportProtocol().transitions).toEqual([])
       })
@@ -1563,7 +1645,7 @@ describe('transition', () => {
     const { addSegment, addTransition, removeTransition, curTime, exportProtocol } = createVideoProtocolManager(protocol)
     const id1 = addSegment(videoSegment).id
     curTime.value = 1000
-    addSegment(videoSegment).id
+    addSegment(videoSegment)
     addTransition(transition)
 
     it('exist id', () => {

@@ -1,6 +1,6 @@
-import type { ComputedRef, DeepReadonly } from '@vue/reactivity'
 import type { createVideoProtocolManager } from '@video-editor/protocol'
 import type { ITrackType, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
+import type { ComputedRef, DeepReadonly } from '@vue/reactivity'
 
 /** Internal protocol manager type used to align editor-core signatures with protocol behavior. */
 type ProtocolManager = ReturnType<typeof createVideoProtocolManager>
@@ -19,6 +19,9 @@ export type DuplicateSegmentResult = ReturnType<ProtocolManager['duplicateSegmen
 
 /** Optional flags accepted by removeSegment (e.g. ripple delete). */
 export type RemoveSegmentOptions = Parameters<ProtocolManager['removeSegment']>[1]
+
+/** Result payload returned by setCanvasSize. */
+export type SetCanvasSizeResult = ReturnType<ProtocolManager['setCanvasSize']>
 
 /** The mutable track fields exposed to an updateTrack updater. */
 export type TrackMutableFields = Parameters<Parameters<ProtocolManager['updateTrack']>[1]>[0]
@@ -86,6 +89,8 @@ export interface EditorCoreCommands {
   updateTransition: ProtocolManager['updateTransition']
   /** Update a track's mutable presentation fields (hidden / muted / extra). */
   updateTrack: ProtocolManager['updateTrack']
+  /** Resize the project canvas as a single undoable step. */
+  setCanvasSize: ProtocolManager['setCanvasSize']
   /** Replace a track id (useful for migrations). */
   replaceTrackId: ProtocolManager['replaceTrackId']
   /** Replace a segment id (useful for migrations). */
@@ -200,7 +205,7 @@ export type EditorCorePluginCreator = (ctx: EditorCoreContext) => EditorCorePlug
  */
 export interface EditorCorePluginManager {
   /** Register a plugin creator. */
-  register: (pluginCreator: EditorCorePluginCreator, options?: { autoInit?: boolean; override?: boolean }) => Promise<void>
+  register: (pluginCreator: EditorCorePluginCreator, options?: { autoInit?: boolean, override?: boolean }) => Promise<void>
   /** Initialize all registered plugins. */
   init: () => Promise<void>
   /** Fetch a plugin by name. */

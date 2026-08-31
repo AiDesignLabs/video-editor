@@ -8,8 +8,8 @@ export type {
   AssetLibraryOptions,
   AssetMeta,
 } from './assets'
-export { createVideoProtocolManager } from './manage'
-export type { TrackMutableFields } from './manage'
+export { createVideoProtocolManager, MAX_CANVAS_SIZE, MIN_CANVAS_SIZE } from './manage'
+export type { CanvasSize, SetCanvasSizeResult, TrackMutableFields } from './manage'
 export { parse } from './parse'
 export {
   createProjectStore,
@@ -22,16 +22,16 @@ export type {
   StoredProject,
 } from './project'
 export {
+  clearWaveformCache,
   createResourceManager,
   DEFAULT_RESOURCE_DIR,
-  generateThumbnails,
-  getResourceKey,
-  getMp4Meta,
   extractWaveform,
   extractWaveformFromBuffer,
-  clearWaveformCache,
-  peaksToSvgPath,
+  generateThumbnails,
+  getMp4Meta,
+  getResourceKey,
   peaksToBars,
+  peaksToSvgPath,
 } from './resource'
 export type { WaveformData, WaveformOptions } from './resource'
 export {

@@ -23,5 +23,6 @@ export type {
   SegmentPluginOps,
   SegmentPluginUI,
   SegmentRegistry,
+  SetCanvasSizeResult,
   TrackMutableFields,
 } from './types'

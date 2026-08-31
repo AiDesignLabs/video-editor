@@ -19,7 +19,7 @@ function cloneTrack(track: TrackUnion): TrackUnion {
   return JSON.parse(JSON.stringify(toRaw(track))) as TrackUnion
 }
 
-type ProtocolSnapshot = {
+interface ProtocolSnapshot {
   trackIds: Set<string>
   trackById: Map<string, TrackUnion>
   segments: Map<string, { signature: string, trackId: string, segment: SegmentUnion }>
@@ -180,6 +180,34 @@ function normalizeProtocolTransitions(protocol: IVideoProtocol) {
     return
   }
   syncProtocolTransitionEdges(protocol)
+}
+
+/** Smallest canvas a codec will accept; 0 passes the schema but encodes nothing. */
+export const MIN_CANVAS_SIZE = 2
+/** Guards against absurd values that would allocate an unusable render target. */
+export const MAX_CANVAS_SIZE = 8192
+
+export interface CanvasSize {
+  width: number
+  height: number
+}
+
+export interface SetCanvasSizeResult {
+  success: boolean
+  /** Present when the size was rejected; the canvas is left untouched. */
+  error?: string
+}
+
+function validateCanvasDimension(label: string, value: number): string | null {
+  if (!Number.isFinite(value))
+    return `${label} must be a finite number`
+  if (!Number.isInteger(value))
+    return `${label} must be a whole number of pixels, received ${value}`
+  if (value < MIN_CANVAS_SIZE)
+    return `${label} must be at least ${MIN_CANVAS_SIZE}, received ${value}`
+  if (value > MAX_CANVAS_SIZE)
+    return `${label} must be at most ${MAX_CANVAS_SIZE}, received ${value}`
+  return null
 }
 
 /** The subset of track fields that `updateTrack` is allowed to change. */
@@ -771,7 +799,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       const originalStartTime = segment.startTime
 
       let nextStartTime = options.startTime
-      let nextEndTime = options.endTime
+      const nextEndTime = options.endTime
       let nextDuration = nextEndTime - nextStartTime
       if (!Number.isFinite(nextDuration) || nextDuration < 0)
         return false
@@ -1095,6 +1123,30 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
    * structural fields (`trackId`, `trackType`, `children`, `isMain`) cannot be
    * changed through this command. Use `replaceTrackId` / segment commands for those.
    */
+  /**
+   * Resize the project canvas.
+   *
+   * Segment transforms are normalised (position/scale are relative to the
+   * canvas), so nothing else has to move — how a segment fills the new canvas
+   * stays a `fillMode` decision. Invalid input is reported rather than clamped,
+   * so a typo cannot silently reshape the project.
+   */
+  const setCanvasSize = ({ width, height }: CanvasSize): SetCanvasSizeResult => {
+    const error = validateCanvasDimension('width', width) ?? validateCanvasDimension('height', height)
+    if (error)
+      return { success: false, error }
+
+    // A no-op must not land on the undo stack.
+    if (protocolRef.value.width === width && protocolRef.value.height === height)
+      return { success: true }
+
+    updateProtocol((protocol) => {
+      protocol.width = width
+      protocol.height = height
+    })
+    return { success: true }
+  }
+
   const updateTrack = (trackId: string, updater: (track: TrackMutableFields) => void): boolean => {
     return updateProtocolWithTransitionSync((protocol) => {
       const track = protocol.tracks.find(t => t.trackId === trackId)
@@ -1168,7 +1220,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     return success
   }
 
-  type HistoryMutationResult = {
+  interface HistoryMutationResult {
     success: boolean
     affectedSegments: SegmentUnion[]
     affectedTracks: TrackUnion[]
@@ -1243,6 +1295,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     removeTransition,
     updateTransition,
     updateTrack,
+    setCanvasSize,
     replaceTrackId,
     replaceSegmentId,
 
@@ -1259,12 +1312,43 @@ function normalizedProtocol(protocol: IVideoProtocol) {
   const { state: protocolState, update: updateProtocol, enable, redo, undo, undoCount, redoCount } = useHistory(normalized)
   enable()
 
+  /**
+   * Writable view over the protocol's basic info.
+   *
+   * These used to be plain snapshots taken at construction, which left two
+   * sources of truth: `updateProtocol` (what undo/redo restores) and this
+   * object (what `exportProtocol` used to write back). A canvas resize made
+   * that split visible — history would restore one and export would clobber it
+   * with the other. They are writable computeds now, so a read always reflects
+   * the protocol and a write goes through history like any other edit.
+   */
   const videoBasicInfo = reactive({
     // version is readonly
     version: computed(() => protocolState.value.version),
-    width: protocolState.value.width,
-    height: protocolState.value.height,
-    fps: protocolState.value.fps,
+    width: computed({
+      get: () => protocolState.value.width,
+      set: (value: number) => {
+        updateProtocol((protocol) => {
+          protocol.width = value
+        })
+      },
+    }),
+    height: computed({
+      get: () => protocolState.value.height,
+      set: (value: number) => {
+        updateProtocol((protocol) => {
+          protocol.height = value
+        })
+      },
+    }),
+    fps: computed({
+      get: () => protocolState.value.fps,
+      set: (value: number) => {
+        updateProtocol((protocol) => {
+          protocol.fps = value
+        })
+      },
+    }),
   })
 
   const protocolRef = computed(() => protocolState.value)
@@ -1289,15 +1373,8 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     return map
   })
 
-  const exportProtocol = () => {
-    updateProtocol((protocol) => {
-      protocol.version = videoBasicInfo.version
-      protocol.width = videoBasicInfo.width
-      protocol.height = videoBasicInfo.height
-      protocol.fps = videoBasicInfo.fps
-    })
-    return toRaw(protocolState.value)
-  }
+  // No write-back needed: `videoBasicInfo` now reads straight from the protocol.
+  const exportProtocol = () => toRaw(protocolState.value)
 
   return {
     videoBasicInfo,
