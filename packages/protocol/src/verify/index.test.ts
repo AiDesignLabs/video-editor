@@ -65,14 +65,33 @@ describe('verify basic info of video protocol', () => {
         expect(() => verifyBasic(o2)).toThrowError(INVALID_VERSION)
       })
 
-      it('invalid width', () => {
-        const o = { ...videoProtocol, width: -1 }
-        expect(() => verifyBasic(o)).toThrowError(INVALID_WIDTH)
+      // The canvas bounds are enforced here, not only in `setCanvasSize`, so a
+      // protocol written directly cannot describe a canvas that fails to encode.
+      it.each([
+        ['negative', -1],
+        ['zero', 0],
+        ['below the minimum', 1],
+        ['fractional', 1920.5],
+        ['not finite', Number.NaN],
+        ['above the maximum', 99999],
+      ])('invalid width: %s', (_label, width) => {
+        expect(() => verifyBasic({ ...videoProtocol, width })).toThrowError(INVALID_WIDTH)
       })
 
-      it('invalid height', () => {
-        const o = { ...videoProtocol, height: -1 }
-        expect(() => verifyBasic(o)).toThrowError(INVALID_HEIGHT)
+      it.each([
+        ['negative', -1],
+        ['zero', 0],
+        ['below the minimum', 1],
+        ['fractional', 1080.5],
+        ['not finite', Number.NaN],
+        ['above the maximum', 99999],
+      ])('invalid height: %s', (_label, height) => {
+        expect(() => verifyBasic({ ...videoProtocol, height })).toThrowError(INVALID_HEIGHT)
+      })
+
+      it('accepts the canvas bounds themselves', () => {
+        expect(() => verifyBasic({ ...videoProtocol, width: 2, height: 2 })).not.toThrow()
+        expect(() => verifyBasic({ ...videoProtocol, width: 8192, height: 8192 })).not.toThrow()
       })
 
       it('invalid fps', () => {

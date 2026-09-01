@@ -1,6 +1,18 @@
 export const TYPE_ERROR_PREFIX = 'data must be'
 export const POSITIVE_NUMBER_SUFFIX = 'must be >= 0'
 
+/**
+ * Canvas bounds live here rather than next to `setCanvasSize` so that the
+ * schema is the single source of truth: a protocol written directly, without
+ * going through a command, must not be able to describe a canvas no encoder
+ * can produce.
+ */
+/** Smallest canvas a codec will accept; 0 used to pass the schema but encodes nothing. */
+export const MIN_CANVAS_SIZE = 2
+/** Guards against absurd values that would allocate an unusable render target. */
+export const MAX_CANVAS_SIZE = 8192
+export const CANVAS_SIZE_SUFFIX = `must be a whole number of pixels between ${MIN_CANVAS_SIZE} and ${MAX_CANVAS_SIZE}`
+
 export const INVALID_START_TIME = `startTime ${POSITIVE_NUMBER_SUFFIX}`
 export const INVALID_END_TIME = `endTime ${POSITIVE_NUMBER_SUFFIX}`
 export const INVALID_ID = 'id must be a string'
