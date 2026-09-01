@@ -1,7 +1,7 @@
 {
   "name": "@video-editor/media",
   "type": "module",
-  "version": "0.0.1-beta.34",
+  "version": "0.0.1-beta.35",
   "description": "Media decode/encode abstraction over mediabunny (WebCodecs)",
   "exports": {
     ".": {
