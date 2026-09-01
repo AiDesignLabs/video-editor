@@ -77,14 +77,20 @@ P0 拆成三个顺序交付的门槛，避免所有基础能力集中在一个�
 - 关键帧：新增或更新、移动、删除单个关键帧，以及修改缓动。
 - 批量操作入口，见下一节。
 
-**查询完备性。** `editor.selectors` 当前只有 `getSegment`、`getTrackById`、
-`getTrackBySegmentId`、`getTracks`。agent 必须先理解才能编辑，缺少查询层就只能拿整个协议
-自己解析 —— 等于把时间轴规则实现两遍，两边必然漂移。需要补齐：
+**查询完备性。已完成。** agent 必须先理解才能编辑，缺少查询层就只能拿整个协议自己解析 ——
+等于把时间轴规则实现两遍，两边必然漂移。`editor.selectors` 现已补齐：
 
-- 按时间点查询：某时刻有哪些片段、播放头落在哪个片段内。
-- 结构查询：轨道空隙、相邻片段、重叠冲突、总时长。
-- 属性采样：某时刻某属性的生效值，区分静态值、关键帧值和插值结果。
-- 选中态与可执行性查询：当前选中、某个命令此刻是否可执行及原因。
+- [x] 按时间点查询：`getSegmentsAt(timeMs, { trackType?, includeHidden? })` 回答「此刻画面
+      上有什么」，`getSegmentAt(trackId, timeMs)` 回答某轨此刻在放哪一段。片段区间是左闭右开，
+      边界时刻只归属一个片段。
+- [x] 结构查询：`getTrackGaps(trackId)`、`getAdjacentSegments(segmentId)`、
+      `getOverlaps(trackId?)`。总时长仍由 `state.duration` 提供，不重复一份。
+- [x] 属性采样：`sampleProperty(segmentId, property, timeMs)` 返回生效值和来源
+      （`keyframe` / `interpolated` / `static` / `default`），并标记查询时刻是否落在片段内。
+      复用 `@video-editor/shared` 的 `sampleKeyframes`，与预览、导出同一套纯函数。
+- [x] 选中态与可执行性查询：`getSelection()`；`canRun(check)` 回答某命令此刻是否可执行及
+      原因，覆盖 undo / redo / removeSegment / duplicateSegment / splitSegment / addTransition /
+      setCanvasSize。测试断言 `canRun` 的判断与命令的实际行为一致，两者不允许分歧。
 
 **语义化操作日志。** History 记录的是 immer patch，人类看不懂，无法据此审阅 agent 的提案。
 需要在事务上附带语义描述（例如 `split-segment`、`replace-source` 及其参数），用于：
@@ -108,7 +114,7 @@ P0 拆成三个顺序交付的门槛，避免所有基础能力集中在一个�
 验收标准：
 
 - 界面上能做到的每一个编辑操作，都有对应的命令，不需要直接改协议。
-- 给定一个协议和一个时间点，可以只通过 selectors 回答"此刻画面上有什么、能做什么"。
+- [x] 给定一个协议和一个时间点，可以只通过 selectors 回答"此刻画面上有什么、能做什么"。
 - 一次 agent 提案可以完整展示为人类可读的操作列表，并整体接受或整体拒绝。
 - 拒绝提案不会修改主协议、undo 栈或 redo 栈；接受提案只增加一个 History 项。
 - 审阅期间主协议发生变化时，旧提案不能直接覆盖新状态。

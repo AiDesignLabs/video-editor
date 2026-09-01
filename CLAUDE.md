@@ -199,6 +199,10 @@ The headless editor provides a minimal, stable API:
 - `editor.selectors.getSegment(id)` - Get segment by ID
 - `editor.selectors.getTrackById(id)` - Get track by ID
 - `editor.selectors.getTrackBySegmentId(id)` - Find parent track of segment
+- `editor.selectors.getSegmentsAt(timeMs, options?)` / `getSegmentAt(trackId, timeMs)` - What is playing at a moment (ranges are half-open)
+- `editor.selectors.getTrackGaps(id)` / `getAdjacentSegments(id)` / `getOverlaps(trackId?)` - Timeline structure
+- `editor.selectors.sampleProperty(id, property, timeMs)` - Effective value plus its source (keyframe/interpolated/static/default)
+- `editor.selectors.getSelection()` / `canRun(check)` - Current selection; whether a command would run, and why not
 
 ## Drag-Drop System (VideoTimeline)
 
