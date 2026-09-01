@@ -1,3 +1,4 @@
+import type { Postprocessor } from 'unocss'
 import {
   defineConfig,
   presetAttributify,
@@ -6,6 +7,11 @@ import {
   transformerDirectives,
   transformerVariantGroup,
 } from 'unocss'
+
+const lowerGlobalUtilitySpecificity: Postprocessor = (utility) => {
+  if (!utility.selector.trimStart().startsWith('@'))
+    utility.selector = `:where(${utility.selector})`
+}
 
 export default defineConfig({
   content: {
@@ -21,6 +27,14 @@ export default defineConfig({
   // page — so presetWind4's reset is switched off below. Its theme preflight
   // stays: the compiled `--at-apply` output reads `var(--spacing)` and friends.
   preflights: [],
+  // Library utilities are global because consumers load the compiled CSS. Keep
+  // them at zero specificity so the host's own utility classes always win,
+  // independent of stylesheet load order.
+  postprocess: [lowerGlobalUtilitySpecificity],
+  // Preserve UnoCSS's native layers in the published stylesheet. Consumers
+  // that also use UnoCSS can then keep icons below sizing utilities instead of
+  // having an unlayered library rule outrank every host layer.
+  outputToCssLayers: true,
   presets: [
     presetWind4({ preflights: { reset: false } }),
     presetAttributify({}),
