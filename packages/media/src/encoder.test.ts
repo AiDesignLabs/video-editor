@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { state } = vi.hoisted(() => ({
   state: {
-    outputs: [] as Array<{ format: { kind: string }, videoOptions?: Record<string, unknown>, audioOptions?: Record<string, unknown> }>,
+    outputs: [] as Array<{ format: { kind: string }, videoOptions?: Record<string, unknown>, audioOptions?: Record<string, unknown>, trackMetadata?: Record<string, unknown> }>,
   },
 }))
 
@@ -78,9 +78,9 @@ vi.mock('mediabunny', () => {
       this.format = options.format
     }
 
-    addVideoTrack(source: CanvasSource | VideoSampleSource) {
+    addVideoTrack(source: CanvasSource | VideoSampleSource, metadata?: Record<string, unknown>) {
       this.videoSource = source
-      state.outputs.push({ format: this.format, videoOptions: source.options })
+      state.outputs.push({ format: this.format, videoOptions: source.options, trackMetadata: metadata })
     }
 
     addAudioTrack(source: AudioBufferSource) {
@@ -186,5 +186,17 @@ describe('createMp4Encoder', () => {
     await handle.addFrame(0, 33)
     await handle.finalize()
     expect(handle.stream).toBeInstanceOf(ReadableStream)
+  })
+})
+
+describe('frameRate hint', () => {
+  it('reaches the video track metadata, where mediabunny reads the encoder framerate from', () => {
+    createEncoder({ canvas: fakeCanvas(), frameRate: 25 })
+    expect(state.outputs.at(-1)?.trackMetadata).toEqual({ frameRate: 25 })
+  })
+
+  it('passes no metadata when unset', () => {
+    createEncoder({ canvas: fakeCanvas() })
+    expect(state.outputs.at(-1)?.trackMetadata).toBeUndefined()
   })
 })

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { openMediaInput } from './input'
+
 const { state } = vi.hoisted(() => ({
   state: {
     videoTrack: undefined as Record<string, unknown> | undefined,
@@ -65,7 +67,7 @@ vi.mock('mediabunny', () => ({
   },
   CanvasSink: class {},
   AudioSampleSink: class {
-    async *samples(startSec: number, endSec: number) {
+    async* samples(startSec: number, endSec: number) {
       for (const sample of state.audioSamples) {
         if (sample.timestamp >= startSec && sample.timestamp < endSec) {
           yield {
@@ -78,8 +80,6 @@ vi.mock('mediabunny', () => ({
     }
   },
 }))
-
-import { openMediaInput } from './input'
 
 describe('openMediaInput', () => {
   beforeEach(() => {

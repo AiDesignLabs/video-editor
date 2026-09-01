@@ -72,6 +72,16 @@ export interface Mp4EncoderOptions {
    */
   hardwareAcceleration?: 'no-preference' | 'prefer-hardware' | 'prefer-software'
   /**
+   * Source frame rate, handed to the encoder as its rate-control hint.
+   *
+   * Without it Chrome assumes 30 fps and budgets bits per frame accordingly, so
+   * a 25 fps source lands 1/6 under the requested bitrate (measured: 2.07 Mbps
+   * out of 2.5). Passed as track metadata, which is the field mediabunny reads
+   * into the encoder config; it does *not* switch on mediabunny's constant-
+   * frame-rate padding, which keys off a different option.
+   */
+  frameRate?: number
+  /**
    * Called with the WebCodecs `VideoEncoderConfig` mediabunny ends up using —
    * codec string, dimensions, and whether an acceleration hint survived. The
    * browser never reports which implementation it picked, but this is the
@@ -201,7 +211,7 @@ export function createEncoder(options: EncoderOptions): EncoderHandle {
     ...(options.hardwareAcceleration ? { hardwareAcceleration: options.hardwareAcceleration } : {}),
     ...(options.onEncoderConfig ? { onEncoderConfig: options.onEncoderConfig } : {}),
   })
-  output.addVideoTrack(videoSource)
+  output.addVideoTrack(videoSource, options.frameRate ? { frameRate: options.frameRate } : undefined)
 
   let audioSource: AudioBufferSource | undefined
   if (options.withAudio) {

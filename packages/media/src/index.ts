@@ -28,6 +28,23 @@ export type {
   RenderCanvasToVideoProgress,
   RenderCanvasToVideoResult,
 } from './render-canvas-to-video'
+export { avcHighCodecString, measureDecodeThroughput, measureEncoderThroughput, probeCodecSupport, probeVideoStats, transcode } from './transcode'
+export type {
+  AccelerationPreference,
+  CodecSupportProbe,
+  DecoderOptions,
+  DecodeThroughput,
+  DecodeThroughputOptions,
+  EncoderThroughput,
+  EncoderThroughputOptions,
+  Rendition,
+  RenditionResult,
+  TranscodeOptions,
+  TranscodeProgress,
+  TranscodeResult,
+  TranscodeStages,
+  VideoStats,
+} from './transcode'
 export { trimVideo } from './trim-video'
 export type {
   TrimVideoOptions,
