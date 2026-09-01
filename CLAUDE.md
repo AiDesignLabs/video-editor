@@ -95,6 +95,7 @@ UI → editor-core.commands → protocol manager → reactive protocol → rende
 | Headless editor API | `packages/editor-core/src/core.ts`       | `createEditorCore()`                         |
 | Timeline drag-drop  | `packages/ui/src/VideoTimeline/hooks/`   | 3 specialized composables                    |
 | Pixi rendering      | `packages/renderer/src/renderer-core.ts` | ~860 lines, main hotspot                     |
+| Export tasks        | `packages/renderer/src/export-task.ts`   | `createExportTask()` lifecycle               |
 | Demo integration    | `playground/src/App.vue`                 | Full stack example                           |
 
 ## Critical Conventions
