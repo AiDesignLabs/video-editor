@@ -280,7 +280,9 @@ function getGapsForTrack(trackId: string) {
    the rail column too, and the rail is a separate surface. */
 .ve-track__body {
   position: relative;
-  flex: 1 0 auto;
+  /* Fill all space after the sticky rail. An auto basis can preserve the
+     body's intrinsic width and leave an unused strip at the row end. */
+  flex: 1 1 0%;
   min-width: 0;
   height: 100%;
   background-color: var(--ve-track-background, #f5f5f5);
