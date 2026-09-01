@@ -50,6 +50,16 @@ vi.mock('mediabunny', () => {
     add = vi.fn(async () => {})
   }
 
+  class VideoSampleSource {
+    constructor(public options: Record<string, unknown>) {}
+    add = vi.fn(async () => {})
+  }
+
+  class VideoSample {
+    constructor(public data: unknown, public init?: Record<string, unknown>) {}
+    close() {}
+  }
+
   class AudioBufferSource {
     constructor(public options: Record<string, unknown>) {}
     add = vi.fn(async () => {})
@@ -61,14 +71,14 @@ vi.mock('mediabunny', () => {
 
   class Output {
     format: { kind: string }
-    videoSource?: CanvasSource
+    videoSource?: CanvasSource | VideoSampleSource
     audioSource?: AudioBufferSource
 
     constructor(options: { format: { kind: string }, target: unknown }) {
       this.format = options.format
     }
 
-    addVideoTrack(source: CanvasSource) {
+    addVideoTrack(source: CanvasSource | VideoSampleSource) {
       this.videoSource = source
       state.outputs.push({ format: this.format, videoOptions: source.options })
     }
@@ -88,6 +98,8 @@ vi.mock('mediabunny', () => {
   return {
     AudioBufferSource,
     CanvasSource,
+    VideoSample,
+    VideoSampleSource,
     MkvOutputFormat,
     Mp4OutputFormat,
     Output,
@@ -103,6 +115,12 @@ const { createEncoder, createMp4Encoder } = await import('./encoder')
 function fakeCanvas() {
   return { width: 16, height: 16 } as unknown as HTMLCanvasElement
 }
+
+// Node has no WebCodecs; `addFrame()` captures the canvas with `new VideoFrame()`.
+vi.stubGlobal('VideoFrame', class {
+  constructor(public source: unknown, public init: unknown) {}
+  close() {}
+})
 
 describe('createEncoder', () => {
   beforeEach(() => {
