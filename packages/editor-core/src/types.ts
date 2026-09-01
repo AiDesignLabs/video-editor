@@ -33,6 +33,25 @@ export type MoveSegmentOptions = Parameters<ProtocolManager['moveSegment']>[0]
 export type ResizeSegmentOptions = Parameters<ProtocolManager['resizeSegment']>[0]
 
 /**
+ * Outcome of a batch command.
+ *
+ * A batch is atomic: either every step landed and `success` is true, or nothing
+ * did and `error` says which step refused. The resulting protocol is read from
+ * `editor.state`, which is reactive — the batch reports what it operated on, not
+ * a snapshot that later steps in the same transaction may already have moved.
+ */
+export interface BatchResult {
+  success: boolean
+  /** Why the batch was rejected. Absent on success. */
+  error?: string
+  /**
+   * The segments the batch operated on, in call order. For
+   * `duplicateSegments` these are the new copies, not the sources.
+   */
+  segmentIds: string[]
+}
+
+/**
  * Read-only editor state derived from the reactive protocol.
  * All mutations should go through commands.
  */
@@ -99,6 +118,24 @@ export interface EditorCoreCommands {
   replaceTrackId: ProtocolManager['replaceTrackId']
   /** Replace a segment id (useful for migrations). */
   replaceSegmentId: ProtocolManager['replaceSegmentId']
+  /**
+   * Move several segments as one undo step. Moves are applied in the order
+   * given; if any is refused the whole batch is rolled back.
+   */
+  moveSegments: (moves: readonly MoveSegmentOptions[]) => BatchResult
+  /**
+   * Remove several segments as one undo step. Later segments are removed first,
+   * since a ripple delete shifts the ones after it left.
+   */
+  removeSegments: (ids: readonly string[], options?: RemoveSegmentOptions) => BatchResult
+  /**
+   * Apply the same edit to several segments as one undo step — the entry point
+   * for adjusting a property across a multi-selection. An edit the protocol
+   * rejects fails the whole batch rather than being silently skipped.
+   */
+  updateSegments: (ids: readonly string[], updater: (segment: SegmentUnion) => void) => BatchResult
+  /** Duplicate several segments as one undo step; reports the new ids. */
+  duplicateSegments: (ids: readonly string[]) => BatchResult
   /**
    * Run a batch of commands as one atomic undo step.
    *

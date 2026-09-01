@@ -9,6 +9,7 @@ import type {
 } from './types'
 import { createVideoProtocolManager } from '@video-editor/protocol'
 import { computed } from '@vue/reactivity'
+import { createBatchCommands } from './batch'
 import { createPluginManager } from './plugin'
 import { createSegmentRegistry } from './segment'
 
@@ -46,6 +47,15 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     transactionDepth: protocolManager.transactionDepth,
   }
 
+  const batch = createBatchCommands({
+    transaction: protocolManager.transaction,
+    moveSegment: protocolManager.moveSegment,
+    removeSegment: protocolManager.removeSegment,
+    duplicateSegment: protocolManager.duplicateSegment,
+    updateSegment: protocolManager.updateSegment,
+    getSegment: protocolManager.getSegment,
+  })
+
   const commands: EditorCoreCommands = {
     setCurrentTime: (time) => {
       protocolManager.curTime.value = time
@@ -65,6 +75,10 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     setCanvasSize: protocolManager.setCanvasSize,
     replaceTrackId: protocolManager.replaceTrackId,
     replaceSegmentId: protocolManager.replaceSegmentId,
+    moveSegments: batch.moveSegments,
+    removeSegments: batch.removeSegments,
+    updateSegments: batch.updateSegments,
+    duplicateSegments: batch.duplicateSegments,
     transaction: protocolManager.transaction,
     beginTransaction: protocolManager.beginTransaction,
     undo: protocolManager.undo,
