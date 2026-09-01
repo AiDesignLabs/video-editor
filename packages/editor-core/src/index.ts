@@ -2,9 +2,12 @@ export { createBatchCommands } from './batch'
 export { createEditorCore } from './core'
 export { createPluginManager } from './plugin'
 export { createSegmentRegistry } from './segment'
+export { createStructuralSelectors } from './selectors'
 export type {
   AddSegmentResult,
   BatchResult,
+  CommandCheck,
+  CommandCheckResult,
   DuplicateSegmentResult,
   EditorCore,
   EditorCoreCommands,
@@ -16,15 +19,22 @@ export type {
   EditorCoreSelectors,
   EditorCoreServices,
   EditorCoreState,
+  EditorSelection,
   MoveSegmentOptions,
   RemoveSegmentOptions,
   ResizeSegmentOptions,
+  SampledProperty,
   SegmentInput,
   SegmentMutationResult,
+  SegmentNeighbours,
+  SegmentOverlap,
+  SegmentPlacement,
   SegmentPlugin,
   SegmentPluginOps,
   SegmentPluginUI,
   SegmentRegistry,
+  SegmentsAtOptions,
   SetCanvasSizeResult,
+  TrackGap,
   TrackMutableFields,
 } from './types'

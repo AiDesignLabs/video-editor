@@ -5,7 +5,7 @@ export function createPluginManager(ctx: EditorCoreContext): EditorCorePluginMan
   const pluginsMap = new Map<string, EditorCorePlugin>()
   let initialized = false
 
-  const register = async (pluginCreator: EditorCorePluginCreator, options?: { autoInit?: boolean; override?: boolean }) => {
+  const register = async (pluginCreator: EditorCorePluginCreator, options?: { autoInit?: boolean, override?: boolean }) => {
     const plugin = pluginCreator(ctx)
     const { name: pluginName } = plugin
 

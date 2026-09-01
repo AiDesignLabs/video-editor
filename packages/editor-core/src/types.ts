@@ -1,5 +1,5 @@
 import type { createVideoProtocolManager } from '@video-editor/protocol'
-import type { ITrackType, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
+import type { IKeyframeProperty, ITrackType, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
 import type { ComputedRef, DeepReadonly } from '@vue/reactivity'
 
 /** Internal protocol manager type used to align editor-core signatures with protocol behavior. */
@@ -31,6 +31,79 @@ export type MoveSegmentOptions = Parameters<ProtocolManager['moveSegment']>[0]
 
 /** Options for resizing a segment on a track. */
 export type ResizeSegmentOptions = Parameters<ProtocolManager['resizeSegment']>[0]
+
+/** Where a segment sits: the segment itself plus the track carrying it. */
+export interface SegmentPlacement {
+  segment: SegmentUnion
+  trackId: string
+  trackType: ITrackType
+}
+
+export interface SegmentsAtOptions {
+  /** Only look at tracks of this type. */
+  trackType?: ITrackType
+  /** Pass `false` to skip hidden tracks — what is actually on screen. */
+  includeHidden?: boolean
+}
+
+/** A bounded stretch of empty time on a track. */
+export interface TrackGap {
+  startTime: number
+  endTime: number
+}
+
+export interface SegmentNeighbours {
+  trackId?: string
+  previous?: SegmentUnion
+  next?: SegmentUnion
+}
+
+/** Two segments of one track sharing time, which the timeline rules forbid. */
+export interface SegmentOverlap {
+  trackId: string
+  a: SegmentUnion
+  b: SegmentUnion
+  /** The overlapping stretch itself. */
+  startTime: number
+  endTime: number
+}
+
+/**
+ * A property's effective value at a moment, and where it came from — a curve,
+ * the segment's own field, or the documented fallback. An agent reviewing a
+ * value needs to know which, since only an interpolated one is changing here.
+ *
+ * `keyframe` covers a value read straight off a frame, including one held at
+ * either end of the curve; `interpolated` means strictly between two frames.
+ */
+export interface SampledProperty {
+  value: number
+  source: 'keyframe' | 'interpolated' | 'static' | 'default'
+  /** False when the queried time lies outside the segment's own range. */
+  withinSegment: boolean
+}
+
+export interface EditorSelection {
+  segmentId?: string
+  segment?: SegmentUnion
+  trackId?: string
+}
+
+/** The commands `canRun` can answer for, with the arguments each needs. */
+export type CommandCheck
+  = | { command: 'undo' }
+    | { command: 'redo' }
+    | { command: 'removeSegment', segmentId: string }
+    | { command: 'duplicateSegment', segmentId: string }
+    | { command: 'splitSegment', segmentId: string, timelineMs: number }
+    | { command: 'addTransition' }
+    | { command: 'setCanvasSize', width: number, height: number }
+
+export interface CommandCheckResult {
+  ok: boolean
+  /** Why the command would refuse. Absent when `ok`. */
+  reason?: string
+}
 
 /**
  * Outcome of a batch command.
@@ -171,6 +244,33 @@ export interface EditorCoreSelectors {
   getTrackBySegmentId: (segmentId: string) => DeepReadonly<TrackUnion> | undefined
   /** List tracks, optionally filtered by type. */
   getTracks: (trackType?: ITrackType) => DeepReadonly<TrackUnion>[]
+  /**
+   * Every segment playing at `timeMs`, in track order — the answer to "what is
+   * on screen right now". Segment ranges are half-open, so a segment ending at
+   * `timeMs` and the one starting there are never both returned.
+   */
+  getSegmentsAt: (timeMs: number, options?: SegmentsAtOptions) => SegmentPlacement[]
+  /** The segment playing on one track at `timeMs`. */
+  getSegmentAt: (trackId: string, timeMs: number) => SegmentUnion | undefined
+  /**
+   * Bounded empty stretches on a track, in order. The open range after the last
+   * segment is not a gap — nothing bounds it.
+   */
+  getTrackGaps: (trackId: string) => TrackGap[]
+  /** The segments either side of one, on its own track. */
+  getAdjacentSegments: (segmentId: string) => SegmentNeighbours
+  /** Segments of one track (or every track) that share time, which is invalid. */
+  getOverlaps: (trackId?: string) => SegmentOverlap[]
+  /**
+   * A property's effective value at a moment, and whether it came from a
+   * keyframe, an interpolation between two, the segment's static field, or the
+   * documented default. Uses the same pure sampler as the renderer and export.
+   */
+  sampleProperty: (segmentId: string, property: IKeyframeProperty, timeMs: number) => SampledProperty | undefined
+  /** The current selection, resolved against the protocol. */
+  getSelection: () => EditorSelection
+  /** Whether a command would do anything right now, and why not when it would not. */
+  canRun: (check: CommandCheck) => CommandCheckResult
 }
 
 /**

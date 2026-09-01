@@ -12,6 +12,7 @@ import { computed } from '@vue/reactivity'
 import { createBatchCommands } from './batch'
 import { createPluginManager } from './plugin'
 import { createSegmentRegistry } from './segment'
+import { createStructuralSelectors } from './selectors'
 
 function computeDuration(tracks: TrackUnion[]) {
   let max = 0
@@ -86,7 +87,15 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     exportProtocol: protocolManager.exportProtocol,
   }
 
+  const structural = createStructuralSelectors({
+    protocol: () => protocolManager.exportProtocol(),
+    selectedSegmentId: () => selectedSegmentId.value,
+    undoCount: () => protocolManager.undoCount.value,
+    redoCount: () => protocolManager.redoCount.value,
+  })
+
   const selectors: EditorCoreSelectors = {
+    ...structural,
     getSegment: protocolManager.getSegment,
     getTrackById: (trackId: string) => state.protocol.value.tracks.find(track => track.trackId === trackId),
     getTrackBySegmentId: (segmentId: string) => state.protocol.value.tracks.find(track => track.children.some(segment => segment.id === segmentId)),
