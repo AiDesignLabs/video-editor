@@ -188,6 +188,7 @@ The headless editor provides a minimal, stable API:
 - `editor.commands.moveSegment(id, trackId, startTime)` - Move segment
 - `editor.commands.resizeSegment({ segmentId, trackId, startTime, endTime })` - Resize segment
 - `editor.commands.splitSegment(segmentId, timelineMs)` - Split a segment at a timeline position (single undo step)
+- `editor.commands.moveSegments(moves)` / `removeSegments(ids, options?)` / `updateSegments(ids, updater)` / `duplicateSegments(ids)` - Batch entry points; each is one atomic undo step
 - `editor.commands.transaction(body, options?)` - Run a batch of commands as one atomic undo step; the body's `tx.cancel()` discards it, a throw rolls back and rethrows
 - `editor.commands.beginTransaction(options?)` - Open a transaction across multiple events (drag down → move → up); `commit()` / `cancel()` close it
 - `editor.commands.undo()` / `redo()` - History navigation
