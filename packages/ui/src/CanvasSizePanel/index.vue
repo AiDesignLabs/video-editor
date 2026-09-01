@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CanvasSizePreset } from './presets'
 import { computed, ref, watch } from 'vue'
-import { CANVAS_SIZE_PRESETS, formatAspectRatio, matchPreset } from './presets'
+import { CANVAS_SIZE_PRESETS, matchPreset } from './presets'
 
 defineOptions({ name: 'CanvasSizePanel' })
 
@@ -38,7 +38,6 @@ watch(() => [props.width, props.height], ([width, height]) => {
 })
 
 const activePresetId = computed(() => matchPreset(props.width, props.height, props.presets)?.id ?? null)
-const aspectRatio = computed(() => formatAspectRatio(props.width, props.height))
 
 const isDirty = computed(() => (
   draftWidth.value !== String(props.width) || draftHeight.value !== String(props.height)
@@ -67,13 +66,6 @@ function swapOrientation() {
 
 <template>
   <section class="canvas-size">
-    <header class="canvas-size__header">
-      <h3 class="canvas-size__title">
-        画布尺寸
-      </h3>
-      <span class="canvas-size__ratio" :title="`${width} × ${height}`">{{ aspectRatio }}</span>
-    </header>
-
     <div class="canvas-size__presets" role="radiogroup" aria-label="画布尺寸预设">
       <button
         v-for="preset in presets"
@@ -147,25 +139,6 @@ function swapOrientation() {
   box-shadow: inset 0 0 0 var(--ve-stroke-width, 0.5px) var(--ve-panel-border, rgba(34, 34, 38, 0.12));
 }
 
-.canvas-size .canvas-size__header {
-  --at-apply: flex items-center justify-between gap-2;
-}
-
-.canvas-size .canvas-size__title {
-  --at-apply: m-0 font-medium;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
-}
-
-.canvas-size .canvas-size__ratio {
-  --at-apply: whitespace-nowrap;
-  font-family: var(--ve-font-numeric, ui-monospace, monospace);
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--ve-content-primary, #222226);
-}
-
 .canvas-size .canvas-size__presets {
   --at-apply: grid gap-0.5;
   grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
@@ -177,7 +150,7 @@ function swapOrientation() {
   padding: 0 var(--ve-option-padding-x, 8px);
   border-radius: var(--ve-option-radius, 8px);
   font-size: 12px;
-  line-height: 20px;
+  line-height: 16px;
   color: var(--ve-content-primary, #222226);
   background: var(--ve-option-background, transparent);
   transition: background-color 150ms;
