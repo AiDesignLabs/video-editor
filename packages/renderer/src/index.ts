@@ -5,8 +5,14 @@ export type {
   ComposeProtocolResult,
 } from './compose'
 
-export { createRenderer } from './renderer-core'
-export type { Renderer, RendererOptions } from './renderer-core'
+export { createExportTask } from './export-task'
+export type {
+  ExportTask,
+  ExportTaskOptions,
+  ExportTaskResult,
+  ExportTaskState,
+  ExportTaskStatus,
+} from './export-task'
 
 export {
   GIZMO_POSITION_MAX,
@@ -22,6 +28,9 @@ export {
   toBoxLocalPoint,
 } from './gizmo-math'
 export type { GizmoBox, VisualBox } from './gizmo-math'
+
+export { createRenderer } from './renderer-core'
+export type { Renderer, RendererOptions } from './renderer-core'
 
 export { listEffectDefinitions, registerEffect, unregisterEffect } from './timeline'
 export type { EffectDefinition, ShaderEffectContext, VisualEffectParam } from './timeline'

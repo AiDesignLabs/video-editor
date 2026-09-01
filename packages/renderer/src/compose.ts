@@ -30,6 +30,11 @@ export interface ComposeProtocolOptions {
   audioBitrate?: number
   /** Pass `false` to skip the audio track entirely. */
   audio?: false
+  /**
+   * Aborts the export. Resource loads in flight are cancelled, each phase
+   * boundary re-checks it, and the encode stops at the next frame.
+   */
+  signal?: AbortSignal
 }
 
 export interface ComposeProtocolResult {
@@ -91,9 +96,16 @@ function normalizeVolume(volume?: number): number {
   return Math.max(0, Math.min(1, volume))
 }
 
-async function fetchBlob(url: string, timeoutMs: number = RESOURCE_TIMEOUT_MS): Promise<Blob> {
+function throwIfAborted(signal: AbortSignal | undefined, phase: string) {
+  if (signal?.aborted)
+    throw abortError(`composeProtocol: export was cancelled while ${phase}`)
+}
+
+async function fetchBlob(url: string, signal?: AbortSignal, timeoutMs: number = RESOURCE_TIMEOUT_MS): Promise<Blob> {
   const controller = new AbortController()
   const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs)
+  const onAbort = () => controller.abort()
+  signal?.addEventListener('abort', onAbort)
   try {
     const response = await fetch(url, { signal: controller.signal })
     if (!response.ok)
@@ -101,17 +113,20 @@ async function fetchBlob(url: string, timeoutMs: number = RESOURCE_TIMEOUT_MS): 
     return await response.blob()
   }
   catch (err) {
+    if (signal?.aborted)
+      throw abortError(`composeProtocol: export was cancelled while loading ${url}`)
     if (controller.signal.aborted)
       throw new Error(`composeProtocol: loading resource timed out (${timeoutMs}ms): ${url}`)
     throw err
   }
   finally {
     globalThis.clearTimeout(timeoutId)
+    signal?.removeEventListener('abort', onAbort)
   }
 }
 
-async function decodeInputAudioSlice(input: ComposeAudioInput): Promise<AudioBuffer | undefined> {
-  const blob = await fetchBlob(input.url)
+async function decodeInputAudioSlice(input: ComposeAudioInput, signal?: AbortSignal): Promise<AudioBuffer | undefined> {
+  const blob = await fetchBlob(input.url, signal)
   const handle = openMediaInput(blob)
   try {
     if (!(await handle.canDecodeAudio()))
@@ -135,7 +150,7 @@ async function decodeInputAudioSlice(input: ComposeAudioInput): Promise<AudioBuf
 }
 
 /** Mix every audible segment into one buffer on an offline 48kHz stereo bus. */
-async function renderAudioMix(protocol: IVideoProtocol, durationMs: number): Promise<AudioBuffer | undefined> {
+async function renderAudioMix(protocol: IVideoProtocol, durationMs: number, signal?: AbortSignal): Promise<AudioBuffer | undefined> {
   const inputs = createComposeAudioInputs(protocol)
   if (!inputs.length)
     return undefined
@@ -147,7 +162,7 @@ async function renderAudioMix(protocol: IVideoProtocol, durationMs: number): Pro
   let scheduled = 0
 
   const settled = await Promise.allSettled(inputs.map(async (input) => {
-    const buffer = await decodeInputAudioSlice(input)
+    const buffer = await decodeInputAudioSlice(input, signal)
     if (!buffer)
       return
 
@@ -214,9 +229,12 @@ async function renderAudioMix(protocol: IVideoProtocol, durationMs: number): Pro
   // Silently dropping it produces a file that plays, so nobody notices the
   // missing audio until it ships. A source with no audio track at all is a
   // different case: `decodeInputAudioSlice` returns undefined and we skip it.
+  throwIfAborted(signal, 'mixing audio')
   const failure = settled.find(item => item.status === 'rejected')
   if (failure?.status === 'rejected') {
     const reason = failure.reason
+    if (reason instanceof Error && reason.name === 'AbortError')
+      throw reason
     throw new Error(
       `composeProtocol: audio input failed to load; pass audio: false to export without audio (${reason instanceof Error ? reason.message : String(reason)})`,
       { cause: reason },
@@ -253,6 +271,8 @@ export async function composeProtocol(
   if (unsupported)
     throw new Error(`composeProtocol: ${unsupported}`)
 
+  throwIfAborted(opts.signal, 'starting up')
+
   const app = new Application()
   await app.init({
     width,
@@ -283,13 +303,17 @@ export async function composeProtocol(
       manualRender: true,
     })
 
+    throwIfAborted(opts.signal, 'preparing the renderer')
+
     const durationMs = renderer.duration.value
     if (!durationMs)
       throw new Error('composeProtocol: protocol has no duration')
 
     const audioBuffer = opts.audio === false
       ? undefined
-      : await renderAudioMix(protocol, durationMs)
+      : await renderAudioMix(protocol, durationMs, opts.signal)
+
+    throwIfAborted(opts.signal, 'preparing the encoder')
 
     const encoder = createEncoder({
       format: opts.format,
@@ -354,7 +378,14 @@ export async function composeProtocol(
       void encoder.abort(error).catch(() => {})
       failCompletion(error)
       destroyRenderer()
+      opts.signal?.removeEventListener('abort', destroy)
     }
+
+    // An abort raised after the encode loop started stops it at the next frame.
+    if (opts.signal?.aborted)
+      destroy()
+    else
+      opts.signal?.addEventListener('abort', destroy)
 
     return {
       stream: encoder.stream,

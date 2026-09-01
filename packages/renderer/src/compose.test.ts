@@ -221,6 +221,32 @@ describe('composeProtocol', () => {
     vi.unstubAllGlobals()
   })
 
+  it('refuses to start when the signal is already aborted', async () => {
+    encoderCalls.addFrame.length = 0
+    rendererCalls.renderAt.length = 0
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(composeProtocol(createProtocol(), { audio: false, signal: controller.signal }))
+      .rejects
+      .toMatchObject({ name: 'AbortError' })
+    expect(rendererCalls.renderAt).toHaveLength(0)
+  })
+
+  it('stops a running encode when the signal aborts', async () => {
+    encoderCalls.addFrame.length = 0
+    encoderCalls.abort.mockClear()
+    encoderCalls.addFrameImpl = undefined
+    const controller = new AbortController()
+
+    const result = await composeProtocol(createProtocol(), { audio: false, signal: controller.signal })
+    controller.abort()
+
+    await expect(result.completion).rejects.toMatchObject({ name: 'AbortError' })
+    expect(encoderCalls.abort).toHaveBeenCalled()
+    expect(rendererCalls.destroyed).toBe(true)
+  })
+
   it('destroy aborts the encoder and rejects completion with an AbortError', async () => {
     encoderCalls.addFrame.length = 0
     encoderCalls.abort.mockClear()
