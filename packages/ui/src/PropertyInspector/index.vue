@@ -2,7 +2,7 @@
 import type { IChromaKey, IFillMode, IKeyframeProperty, IMask, IPalette, ITextBasic, ITransform, SegmentUnion } from '@video-editor/shared'
 import type { DeepReadonly } from 'vue'
 import type { EffectPreset, SegmentUpdater } from './types'
-import { computed } from 'vue'
+import { computed, onBeforeUnmount } from 'vue'
 import NumberField from './NumberField.vue'
 import ChromaKeySection from './sections/ChromaKeySection.vue'
 import EffectSection from './sections/EffectSection.vue'
@@ -26,6 +26,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:segment', updater: SegmentUpdater): void
+  /**
+   * A continuous edit began — a slider drag, a colour pick, typing in a field.
+   * Every step of it emits `update:segment`, so a host that turns each one into
+   * a protocol edit would otherwise land dozens of undo steps for one gesture.
+   * Wrap everything between these two events in a single history transaction.
+   */
+  (e: 'interactionStart'): void
+  (e: 'interactionEnd'): void
 }>()
 
 const segment = computed(() => props.segment)
@@ -68,6 +76,41 @@ const chromaKeyValue = computed(() => (segment.value as { chromaKey?: DeepReadon
 function formatMs(value: number) {
   return `${(value / 1000).toFixed(2)}s`
 }
+
+/**
+ * Rather than threading start/end handlers through every field in every
+ * section, the inspector watches the events its own subtree bubbles: an
+ * interaction opens on the first `input` and closes once the value is committed
+ * (`change`) or focus leaves the control. Controls that emit a single discrete
+ * edit still pass through here — they just produce a transaction of one edit.
+ *
+ * The `input` listener runs in the capture phase on purpose: a field's own
+ * handler emits `update:segment` synchronously, so a bubbling listener would
+ * open the interaction *after* the gesture's first edit had already escaped it.
+ */
+let interactionOpen = false
+
+function openInteraction() {
+  if (interactionOpen)
+    return
+  interactionOpen = true
+  emit('interactionStart')
+}
+
+function closeInteraction() {
+  if (!interactionOpen)
+    return
+  interactionOpen = false
+  emit('interactionEnd')
+}
+
+onBeforeUnmount(closeInteraction)
+
+/**
+ * Lets the host close an open interaction before it runs something that must
+ * not land inside it — undo/redo, or switching the selected segment.
+ */
+defineExpose({ endInteraction: closeInteraction })
 
 function update(updater: SegmentUpdater) {
   emit('update:segment', updater)
@@ -280,7 +323,12 @@ function removeTextLine(index: number) {
 </script>
 
 <template>
-  <aside class="property-inspector">
+  <aside
+    class="property-inspector"
+    @input.capture="openInteraction"
+    @change="closeInteraction"
+    @focusout="closeInteraction"
+  >
     <div v-if="!segment" class="property-inspector__empty">
       选择一个片段以编辑属性
     </div>
