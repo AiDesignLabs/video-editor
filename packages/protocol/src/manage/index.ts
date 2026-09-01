@@ -1,12 +1,23 @@
 import type { IAudioSegment, ITrack, ITrackType, ITransition, ITransitionEdge, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
 import type { DeepReadonly } from '@vue/reactivity'
+import type { Patch } from 'immer'
 import type { PartialByKeys } from './utils'
 import { isAudioSegment, isVideoFramesSegment, sampleKeyframes } from '@video-editor/shared'
 import { computed, reactive, readonly, ref, toRaw } from '@vue/reactivity'
 import { createValidator } from '../verify'
+import { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE } from '../verify/rules'
 import { useHistory } from './immer'
 import { checkSegment, handleSegmentUpdate } from './segment'
 import { clone, findInsertFramesSegmentIndex, findInsertSegmentIndex, genRandomId } from './utils'
+
+export type {
+  TransactionHandle,
+  TransactionMeta,
+  TransactionOptions,
+  TransactionResult,
+  TransactionStatus,
+  UndoStackItem,
+} from './immer'
 
 function cloneAffectedSegments(segments: SegmentUnion | SegmentUnion[]) {
   const toPlain = (segment: SegmentUnion) => JSON.parse(JSON.stringify(toRaw(segment))) as SegmentUnion
@@ -182,10 +193,13 @@ function normalizeProtocolTransitions(protocol: IVideoProtocol) {
   syncProtocolTransitionEdges(protocol)
 }
 
-/** Smallest canvas a codec will accept; 0 passes the schema but encodes nothing. */
-export const MIN_CANVAS_SIZE = 2
-/** Guards against absurd values that would allocate an unusable render target. */
-export const MAX_CANVAS_SIZE = 8192
+/**
+ * Re-exported from the schema rules: the canvas bounds are enforced by the
+ * protocol schema itself, so writing the protocol directly cannot bypass them.
+ * `setCanvasSize` only exists to turn a rejection into a readable message
+ * instead of a thrown validation error.
+ */
+export { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE }
 
 export interface CanvasSize {
   width: number
@@ -247,6 +261,10 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     segments,
     tracks,
     updateProtocol,
+    beginTransaction,
+    transaction,
+    isTransactionActive,
+    transactionDepth,
     undo: undoHistory,
     redo: redoHistory,
     exportProtocol,
@@ -997,26 +1015,51 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
   }
 
   function updateSegment<T extends ITrackType>(updater: (segment: TrackTypeMapSegment[T]) => void, id?: string, type?: T) {
+    const segmentId = id ?? selectedSegment.value?.id
+
+    // The edit and the ripple it causes on later segments belong to one undo
+    // step, and a rejected edit must leave no trace at all. Both are the
+    // transaction's job: rolling back used to mean calling `undo()` from
+    // inside the update callback, which popped whatever happened to be on top
+    // of the stack.
+    const tx = beginTransaction({ label: 'update-segment', data: { segmentId } })
+
+    let patches: Patch[] = []
+    let inversePatches: Patch[] = []
     updateProtocol((protocol) => {
-      const _id = id ?? selectedSegment.value?.id
-      if (_id === undefined)
+      if (segmentId === undefined)
         return
-      const segment = getTrackBySegmentId(_id, protocol)
+      const segment = getTrackBySegmentId(segmentId, protocol)
       if (segment && (!type || segment.segmentType === type))
         // @ts-expect-error type is correct
         updater(segment)
-    }, (patches, inversePatches, effect) => {
-      effect((draft) => {
-        // verify all modified segments
-        if (checkSegment(patches, inversePatches, draft, validator)) {
-          handleSegmentUpdate(patches, inversePatches, draft, undoHistory)
-        }
-        else {
-          // rollback all changes
-          undoHistory()
-        }
-      })
+    }, (nextPatches, nextInversePatches) => {
+      patches = nextPatches
+      inversePatches = nextInversePatches
     })
+
+    if (!patches.length) {
+      tx.commit()
+      return
+    }
+
+    let valid = true
+    updateProtocol((draft) => {
+      // verify all modified segments
+      if (checkSegment(patches, inversePatches, draft, validator)) {
+        handleSegmentUpdate(patches, inversePatches, draft, () => {
+          valid = false
+        })
+      }
+      else {
+        valid = false
+      }
+    })
+
+    if (valid)
+      tx.commit()
+    else
+      tx.cancel()
   }
 
   const addTransition = (transition: ITransition, addTime?: number) => {
@@ -1246,7 +1289,9 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
   const takeSnapshot = () => snapshotProtocolState(clone(toRaw(protocolRef.value)) as IVideoProtocol)
 
   const undo = (): HistoryMutationResult => {
-    if (undoCount.value <= 0)
+    // Undoing into a half-applied transaction would desync the transaction's
+    // snapshot from the state it is about to commit.
+    if (isTransactionActive.value || undoCount.value <= 0)
       return emptyHistoryResult
     const prev = takeSnapshot()
     undoHistory()
@@ -1263,7 +1308,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
   }
 
   const redo = (): HistoryMutationResult => {
-    if (redoCount.value <= 0)
+    if (isTransactionActive.value || redoCount.value <= 0)
       return emptyHistoryResult
     const prev = takeSnapshot()
     redoHistory()
@@ -1308,13 +1353,30 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     redo,
     redoCount,
     undoCount,
+
+    beginTransaction,
+    transaction,
+    isTransactionActive,
+    transactionDepth,
   }
 }
 
 function normalizedProtocol(protocol: IVideoProtocol) {
   const normalized = normalizeProtocolTracks(clone(protocol))
   normalizeProtocolTransitions(normalized)
-  const { state: protocolState, update: updateProtocol, enable, redo, undo, undoCount, redoCount } = useHistory(normalized)
+  const {
+    state: protocolState,
+    update: updateProtocol,
+    enable,
+    redo,
+    undo,
+    undoCount,
+    redoCount,
+    beginTransaction,
+    transaction,
+    isTransactionActive,
+    transactionDepth,
+  } = useHistory(normalized)
   enable()
 
   /**
@@ -1384,6 +1446,10 @@ function normalizedProtocol(protocol: IVideoProtocol) {
   return {
     videoBasicInfo,
     updateProtocol,
+    beginTransaction,
+    transaction,
+    isTransactionActive,
+    transactionDepth,
     protocol: protocolRef,
     segments,
     tracks,

@@ -57,6 +57,10 @@ export interface EditorCoreState {
   undoCount: ProtocolManager['undoCount']
   /** Redo stack size. */
   redoCount: ProtocolManager['redoCount']
+  /** Whether a history transaction is currently open. */
+  isTransactionActive: ProtocolManager['isTransactionActive']
+  /** Nesting depth of the open transaction; 0 when none is open. */
+  transactionDepth: ProtocolManager['transactionDepth']
 }
 
 /**
@@ -95,6 +99,21 @@ export interface EditorCoreCommands {
   replaceTrackId: ProtocolManager['replaceTrackId']
   /** Replace a segment id (useful for migrations). */
   replaceSegmentId: ProtocolManager['replaceSegmentId']
+  /**
+   * Run a batch of commands as one atomic undo step.
+   *
+   * Every command inside still updates state immediately, so previews stay
+   * live, but only one history item is pushed when the batch commits. If the
+   * body throws, the protocol is restored and the error is rethrown; calling
+   * `tx.cancel()` discards the batch without touching the undo/redo stacks.
+   */
+  transaction: ProtocolManager['transaction']
+  /**
+   * Open a transaction that spans multiple events, for continuous interactions
+   * such as a canvas or timeline drag. Commit on pointer up, cancel to restore
+   * the state captured at pointer down.
+   */
+  beginTransaction: ProtocolManager['beginTransaction']
   /** Undo the last mutation. */
   undo: ProtocolManager['undo']
   /** Redo the last undone mutation. */

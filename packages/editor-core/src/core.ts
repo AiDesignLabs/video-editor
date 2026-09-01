@@ -42,6 +42,8 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     duration,
     undoCount: protocolManager.undoCount,
     redoCount: protocolManager.redoCount,
+    isTransactionActive: protocolManager.isTransactionActive,
+    transactionDepth: protocolManager.transactionDepth,
   }
 
   const commands: EditorCoreCommands = {
@@ -63,6 +65,8 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     setCanvasSize: protocolManager.setCanvasSize,
     replaceTrackId: protocolManager.replaceTrackId,
     replaceSegmentId: protocolManager.replaceSegmentId,
+    transaction: protocolManager.transaction,
+    beginTransaction: protocolManager.beginTransaction,
     undo: protocolManager.undo,
     redo: protocolManager.redo,
     exportProtocol: protocolManager.exportProtocol,

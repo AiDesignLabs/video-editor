@@ -9,7 +9,18 @@ export type {
   AssetMeta,
 } from './assets'
 export { createVideoProtocolManager, MAX_CANVAS_SIZE, MIN_CANVAS_SIZE } from './manage'
-export type { CanvasSize, HistoryMutationResult, SetCanvasSizeResult, TrackMutableFields } from './manage'
+export type {
+  CanvasSize,
+  HistoryMutationResult,
+  SetCanvasSizeResult,
+  TrackMutableFields,
+  TransactionHandle,
+  TransactionMeta,
+  TransactionOptions,
+  TransactionResult,
+  TransactionStatus,
+  UndoStackItem,
+} from './manage'
 export { parse } from './parse'
 export {
   createProjectStore,
