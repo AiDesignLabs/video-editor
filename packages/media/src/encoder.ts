@@ -1,6 +1,8 @@
 import type { AudioCodec, OutputFormat, VideoCodec } from 'mediabunny'
 import {
   AudioBufferSource,
+  canEncodeAudio,
+  canEncodeVideo,
   Mp4OutputFormat,
   Output,
   QUALITY_HIGH,
@@ -126,6 +128,15 @@ export interface Mp4EncoderHandle {
   setAudio: (buffer: AudioBuffer) => Promise<void>
   finalize: () => Promise<void>
   cancel: () => Promise<void>
+  /**
+   * Fail the output stream instead of closing it.
+   *
+   * `cancel()` closes `stream` cleanly, so a consumer that only reads the
+   * stream cannot tell a finished encode from one that died halfway and gets a
+   * truncated file that still looks valid. Use this whenever the encode ends
+   * for any reason other than the caller asking it to stop.
+   */
+  abort: (reason: Error) => Promise<void>
 }
 
 export interface EncoderHandle extends Mp4EncoderHandle {
@@ -133,6 +144,50 @@ export interface EncoderHandle extends Mp4EncoderHandle {
   mimeType: string
   /** Container file extension including the dot, e.g. `.mp4`. */
   fileExtension: string
+}
+
+export interface EncoderSupportQuery {
+  format?: EncoderFormat
+  videoCodec?: Mp4VideoCodec
+  width: number
+  height: number
+  /** Check the container's audio codec too. */
+  withAudio?: boolean
+}
+
+/**
+ * Check that this browser can actually produce the requested output.
+ *
+ * Meant to run before any expensive work starts: an export that discovers a
+ * missing codec after decoding and rendering half a timeline has wasted the
+ * user's time and still has nothing to show for it.
+ *
+ * Returns `null` when the combination is supported, or a readable reason.
+ */
+export async function checkEncoderSupport(query: EncoderSupportQuery): Promise<string | null> {
+  const format = query.format ?? 'mp4'
+
+  if (typeof VideoEncoder === 'undefined')
+    return 'WebCodecs VideoEncoder is not available in this environment'
+
+  let videoCodec: VideoCodec
+  try {
+    videoCodec = resolveVideoCodec(format, query.videoCodec)
+  }
+  catch (err) {
+    return err instanceof Error ? err.message : String(err)
+  }
+
+  if (!(await canEncodeVideo(videoCodec, { width: query.width, height: query.height })))
+    return `this browser cannot encode ${videoCodec} video at ${query.width}x${query.height}`
+
+  if (query.withAudio) {
+    const audioCodec = AUDIO_CODEC[format]
+    if (!(await canEncodeAudio(audioCodec)))
+      return `this browser cannot encode ${audioCodec} audio`
+  }
+
+  return null
 }
 
 function createOutputFormat(format: EncoderFormat): OutputFormat {
@@ -290,6 +345,16 @@ export function createEncoder(options: EncoderOptions): EncoderHandle {
       }
       catch {
         // Already closed by the target.
+      }
+    },
+
+    async abort(reason: Error) {
+      await output.cancel().catch(() => {})
+      try {
+        streamController?.error(reason)
+      }
+      catch {
+        // Already closed or errored.
       }
     },
   }

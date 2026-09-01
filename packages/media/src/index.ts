@@ -7,13 +7,14 @@ export type {
   EncoderFormat,
   EncoderHandle,
   EncoderOptions,
+  EncoderSupportQuery,
   FrameTiming,
   Mp4EncoderHandle,
   Mp4EncoderOptions,
   Mp4VideoCodec,
   WriteStats,
 } from './encoder'
-export { createEncoder, createMp4Encoder } from './encoder'
+export { checkEncoderSupport, createEncoder, createMp4Encoder } from './encoder'
 export type {
   MediaInputHandle,
   MediaMeta,

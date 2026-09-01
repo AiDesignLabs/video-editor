@@ -1,6 +1,8 @@
 import type { IVideoProtocol } from '@video-editor/shared'
 import { describe, expect, it, vi } from 'vitest'
 
+import { composeProtocol } from './compose'
+
 const { encoderCalls, rendererCalls } = vi.hoisted(() => ({
   encoderCalls: {
     options: undefined as Record<string, unknown> | undefined,
@@ -8,6 +10,10 @@ const { encoderCalls, rendererCalls } = vi.hoisted(() => ({
     setAudio: vi.fn(),
     finalize: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
+    abort: vi.fn(async () => {}),
+    unsupportedReason: null as string | null,
+    audioInputs: [] as unknown[],
+    addFrameImpl: undefined as undefined | ((timestampMs: number, durationMs: number) => Promise<void>),
   },
   rendererCalls: {
     renderAt: [] as number[],
@@ -16,6 +22,7 @@ const { encoderCalls, rendererCalls } = vi.hoisted(() => ({
 }))
 
 vi.mock('@video-editor/media', () => ({
+  checkEncoderSupport: vi.fn(async () => encoderCalls.unsupportedReason),
   openMediaInput: () => ({
     meta: vi.fn(async () => ({ durationMs: 0 })),
     canDecodeVideo: vi.fn(async () => false),
@@ -37,10 +44,12 @@ vi.mock('@video-editor/media', () => ({
       }),
       addFrame: vi.fn(async (timestampMs: number, durationMs: number) => {
         encoderCalls.addFrame.push([timestampMs, durationMs])
+        await encoderCalls.addFrameImpl?.(timestampMs, durationMs)
       }),
       setAudio: encoderCalls.setAudio,
       finalize: encoderCalls.finalize,
       cancel: encoderCalls.cancel,
+      abort: encoderCalls.abort,
     }
   },
 }))
@@ -54,6 +63,14 @@ vi.mock('pixi.js', () => ({
   },
 }))
 
+vi.mock('./timeline', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    createComposeAudioInputs: vi.fn(() => encoderCalls.audioInputs),
+  }
+})
+
 vi.mock('./renderer-core', () => ({
   createRenderer: vi.fn(async () => ({
     duration: { value: 100 },
@@ -66,8 +83,6 @@ vi.mock('./renderer-core', () => ({
     app: { canvas: {} },
   })),
 }))
-
-import { composeProtocol } from './compose'
 
 function createProtocol(): IVideoProtocol {
   return {
@@ -140,14 +155,81 @@ describe('composeProtocol', () => {
     expect(result.fileExtension).toBe('.mp4')
   })
 
-  it('destroy cancels the encoder', async () => {
+  it('fails before rendering when the browser cannot encode the request', async () => {
     encoderCalls.addFrame.length = 0
-    encoderCalls.cancel.mockClear()
+    rendererCalls.renderAt.length = 0
+    encoderCalls.unsupportedReason = 'this browser cannot encode av1 video at 1280x720'
+
+    await expect(composeProtocol(createProtocol(), { audio: false })).rejects.toThrow('this browser cannot encode av1 video at 1280x720')
+    expect(rendererCalls.renderAt).toHaveLength(0)
+    expect(encoderCalls.addFrame).toHaveLength(0)
+
+    encoderCalls.unsupportedReason = null
+  })
+
+  it('resolves completion once every frame is written', async () => {
+    encoderCalls.addFrame.length = 0
+    encoderCalls.addFrameImpl = undefined
+
+    const result = await composeProtocol(createProtocol(), { audio: false })
+
+    await expect(result.completion).resolves.toBeUndefined()
+    expect(encoderCalls.finalize).toHaveBeenCalled()
+  })
+
+  it('propagates a background encoding failure instead of only logging it', async () => {
+    encoderCalls.addFrame.length = 0
+    encoderCalls.abort.mockClear()
+    encoderCalls.addFrameImpl = async (timestampMs) => {
+      if (timestampMs > 0)
+        throw new Error('encoder exploded')
+    }
+
+    const result = await composeProtocol(createProtocol(), { audio: false })
+
+    await expect(result.completion).rejects.toThrow('encoder exploded')
+    // The stream must fail too: a consumer reading only the stream would
+    // otherwise keep a truncated file and call it a success.
+    expect(encoderCalls.abort).toHaveBeenCalled()
+    expect(rendererCalls.destroyed).toBe(true)
+
+    encoderCalls.addFrameImpl = undefined
+  })
+
+  it('fails the export when a requested audio track cannot be loaded', async () => {
+    encoderCalls.audioInputs = [{
+      url: 'https://example.com/audio.mp3',
+      startTime: 0,
+      endTime: 1000,
+      fromTime: 0,
+    }]
+    vi.stubGlobal('OfflineAudioContext', class {
+      constructor(..._args: unknown[]) {}
+      async startRendering() {
+        return {}
+      }
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('network down')
+    }))
+
+    // Silently exporting a soundless video here is the failure mode this guards
+    // against: the file plays, so nobody notices until it ships.
+    await expect(composeProtocol(createProtocol())).rejects.toThrow(/audio input failed to load/)
+
+    encoderCalls.audioInputs = []
+    vi.unstubAllGlobals()
+  })
+
+  it('destroy aborts the encoder and rejects completion with an AbortError', async () => {
+    encoderCalls.addFrame.length = 0
+    encoderCalls.abort.mockClear()
+    encoderCalls.addFrameImpl = undefined
 
     const result = await composeProtocol(createProtocol(), { audio: false })
     result.destroy()
-    await waitForEncoding()
 
-    expect(encoderCalls.cancel).toHaveBeenCalled()
+    await expect(result.completion).rejects.toMatchObject({ name: 'AbortError' })
+    expect(encoderCalls.abort).toHaveBeenCalled()
   })
 })

@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { state } = vi.hoisted(() => ({
   state: {
     outputs: [] as Array<{ format: { kind: string }, videoOptions?: Record<string, unknown>, audioOptions?: Record<string, unknown>, trackMetadata?: Record<string, unknown> }>,
+    canEncodeVideo: true,
+    canEncodeAudio: true,
+    encodeVideoCalls: [] as Array<[string, Record<string, unknown>]>,
   },
 }))
 
@@ -96,6 +99,11 @@ vi.mock('mediabunny', () => {
   }
 
   return {
+    canEncodeAudio: async () => state.canEncodeAudio,
+    canEncodeVideo: async (codec: string, options: Record<string, unknown>) => {
+      state.encodeVideoCalls.push([codec, options])
+      return state.canEncodeVideo
+    },
     AudioBufferSource,
     CanvasSource,
     VideoSample,
@@ -110,7 +118,7 @@ vi.mock('mediabunny', () => {
   }
 })
 
-const { createEncoder, createMp4Encoder } = await import('./encoder')
+const { checkEncoderSupport, createEncoder, createMp4Encoder } = await import('./encoder')
 
 function fakeCanvas() {
   return { width: 16, height: 16 } as unknown as HTMLCanvasElement
@@ -198,5 +206,62 @@ describe('frameRate hint', () => {
   it('passes no metadata when unset', () => {
     createEncoder({ canvas: fakeCanvas() })
     expect(state.outputs.at(-1)?.trackMetadata).toBeUndefined()
+  })
+})
+
+describe('checkEncoderSupport', () => {
+  beforeEach(() => {
+    state.canEncodeVideo = true
+    state.canEncodeAudio = true
+    state.encodeVideoCalls.length = 0
+    vi.stubGlobal('VideoEncoder', class {})
+  })
+
+  it('returns null when the requested output is supported', async () => {
+    await expect(checkEncoderSupport({ width: 1280, height: 720, withAudio: true })).resolves.toBeNull()
+    expect(state.encodeVideoCalls[0]).toEqual(['avc', { width: 1280, height: 720 }])
+  })
+
+  it('reports a missing WebCodecs encoder', async () => {
+    vi.stubGlobal('VideoEncoder', undefined)
+
+    await expect(checkEncoderSupport({ width: 1280, height: 720 })).resolves.toMatch(/VideoEncoder is not available/)
+  })
+
+  it('reports an unsupported video codec for the resolution', async () => {
+    state.canEncodeVideo = false
+
+    await expect(checkEncoderSupport({ format: 'webm', width: 7680, height: 4320 })).resolves.toMatch(/cannot encode vp9 video at 7680x4320/)
+  })
+
+  it('reports an unsupported audio codec only when audio was requested', async () => {
+    state.canEncodeAudio = false
+
+    await expect(checkEncoderSupport({ width: 1280, height: 720 })).resolves.toBeNull()
+    await expect(checkEncoderSupport({ width: 1280, height: 720, withAudio: true })).resolves.toMatch(/cannot encode aac audio/)
+  })
+
+  it('reports a codec the container cannot carry', async () => {
+    await expect(checkEncoderSupport({ format: 'webm', videoCodec: 'hevc', width: 1280, height: 720 })).resolves.toBeTruthy()
+  })
+})
+
+describe('encoder abort', () => {
+  it('errors the stream instead of closing it', async () => {
+    const handle = createEncoder({ canvas: fakeCanvas() })
+    const reader = handle.stream.getReader()
+
+    await handle.abort(new Error('encode failed'))
+
+    await expect(reader.read()).rejects.toThrow('encode failed')
+  })
+
+  it('closes the stream on cancel', async () => {
+    const handle = createEncoder({ canvas: fakeCanvas() })
+    const reader = handle.stream.getReader()
+
+    await handle.cancel()
+
+    await expect(reader.read()).resolves.toMatchObject({ done: true })
   })
 })

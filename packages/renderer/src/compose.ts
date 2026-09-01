@@ -3,7 +3,7 @@ import type { IVideoProtocol } from '@video-editor/shared'
 import type { ApplicationOptions } from 'pixi.js'
 import type { RendererOptions } from './renderer-core'
 import type { ComposeAudioInput } from './timeline'
-import { createEncoder, openMediaInput } from '@video-editor/media'
+import { checkEncoderSupport, createEncoder, openMediaInput } from '@video-editor/media'
 import { normalizePlayRate, sourceSpanMs } from '@video-editor/shared'
 import { Application } from 'pixi.js'
 import { reverseAudioBufferInPlace } from './helpers'
@@ -33,6 +33,11 @@ export interface ComposeProtocolOptions {
 }
 
 export interface ComposeProtocolResult {
+  /**
+   * Container bytes. The stream is *errored*, not closed, when the encode
+   * fails, so a consumer that only reads the stream still sees the failure
+   * rather than a truncated file that looks valid.
+   */
   stream: ReadableStream<Uint8Array>
   width: number
   height: number
@@ -41,7 +46,23 @@ export interface ComposeProtocolResult {
   mimeType: string
   /** Container file extension including the dot, e.g. `.mp4`. */
   fileExtension: string
+  /**
+   * Settles when encoding ends. Resolves only once the video, the requested
+   * audio and every frame have been written; rejects with the encoding error
+   * otherwise, and with an `AbortError` when `destroy()` stopped the export.
+   *
+   * Encoding runs in the background after `composeProtocol` resolves, so this
+   * is the only way to observe an error raised after that point.
+   */
+  completion: Promise<void>
+  /** Stop the export, release resources and reject `completion` with an `AbortError`. */
   destroy: () => void
+}
+
+function abortError(message: string): Error {
+  const error = new Error(message)
+  error.name = 'AbortError'
+  return error
 }
 
 const RESOURCE_TIMEOUT_MS = 12000
@@ -189,9 +210,17 @@ async function renderAudioMix(protocol: IVideoProtocol, durationMs: number): Pro
     scheduled += 1
   }))
 
-  for (const item of settled) {
-    if (item.status === 'rejected')
-      console.error('[compose] skip audio input due to load failure', item.reason)
+  // A track the caller asked for that cannot be loaded must fail the export.
+  // Silently dropping it produces a file that plays, so nobody notices the
+  // missing audio until it ships. A source with no audio track at all is a
+  // different case: `decodeInputAudioSlice` returns undefined and we skip it.
+  const failure = settled.find(item => item.status === 'rejected')
+  if (failure?.status === 'rejected') {
+    const reason = failure.reason
+    throw new Error(
+      `composeProtocol: audio input failed to load; pass audio: false to export without audio (${reason instanceof Error ? reason.message : String(reason)})`,
+      { cause: reason },
+    )
   }
 
   if (!scheduled)
@@ -211,6 +240,18 @@ export async function composeProtocol(
     throw new Error('composeProtocol: output width/height is required')
 
   const fps = opts.fps ?? protocol.fps ?? 30
+
+  // Fail before decoding or rendering anything: discovering a missing codec
+  // halfway through a long export costs the user the whole run.
+  const unsupported = await checkEncoderSupport({
+    format: opts.format,
+    videoCodec: opts.videoCodec,
+    width,
+    height,
+    withAudio: opts.audio !== false,
+  })
+  if (unsupported)
+    throw new Error(`composeProtocol: ${unsupported}`)
 
   const app = new Application()
   await app.init({
@@ -248,10 +289,7 @@ export async function composeProtocol(
 
     const audioBuffer = opts.audio === false
       ? undefined
-      : await renderAudioMix(protocol, durationMs).catch((err) => {
-          console.error('[compose] audio mix failed, composing without audio', err)
-          return undefined
-        })
+      : await renderAudioMix(protocol, durationMs)
 
     const encoder = createEncoder({
       format: opts.format,
@@ -265,6 +303,17 @@ export async function composeProtocol(
     let cancelled = false
     const totalFrames = Math.max(1, Math.ceil(durationMs / 1000 * fps))
     const frameDurationMs = 1000 / fps
+
+    let settleCompletion: () => void = () => {}
+    let failCompletion: (reason: Error) => void = () => {}
+    const completion = new Promise<void>((resolve, reject) => {
+      settleCompletion = resolve
+      failCompletion = reject
+    })
+    // Nobody is required to await `completion`; without this an export that
+    // fails while the caller only reads the stream would surface as an
+    // unhandled rejection.
+    completion.catch(() => {})
 
     void (async () => {
       try {
@@ -280,11 +329,16 @@ export async function composeProtocol(
         }
         await encoder.finalize()
         onProgress?.(1)
+        settleCompletion()
       }
       catch (err) {
         if (!cancelled) {
-          console.error('[compose] encoding failed', err)
-          await encoder.cancel().catch(() => {})
+          const error = err instanceof Error ? err : new Error(String(err))
+          // Error the stream rather than closing it: a consumer reading only
+          // the stream must not end up with a truncated file it believes is
+          // complete.
+          await encoder.abort(error).catch(() => {})
+          failCompletion(error)
         }
       }
       finally {
@@ -296,7 +350,9 @@ export async function composeProtocol(
       if (cancelled)
         return
       cancelled = true
-      void encoder.cancel().catch(() => {})
+      const error = abortError('composeProtocol: export was cancelled')
+      void encoder.abort(error).catch(() => {})
+      failCompletion(error)
       destroyRenderer()
     }
 
@@ -307,6 +363,7 @@ export async function composeProtocol(
       durationMs,
       mimeType: encoder.mimeType,
       fileExtension: encoder.fileExtension,
+      completion,
       destroy,
     }
   }
