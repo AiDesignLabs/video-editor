@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@video-editor/editor-core": "workspace:*",
+    "@video-editor/media": "workspace:*",
     "@video-editor/protocol": "workspace:*",
     "@video-editor/renderer": "workspace:*",
     "@video-editor/shared": "workspace:*",

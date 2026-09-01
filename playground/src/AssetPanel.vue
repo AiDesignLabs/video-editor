@@ -302,7 +302,9 @@ onBeforeUnmount(revokePreviews)
   border-radius: 8px;
   background: var(--panel);
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .asset-card:hover {
