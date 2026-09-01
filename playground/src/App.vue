@@ -603,6 +603,23 @@ function handleInspectorUpdate(updater: SegmentUpdater) {
   commands.updateSegment(updater, selected.id, selected.segmentType)
 }
 
+/**
+ * A slider drag or a burst of typing in the inspector emits one
+ * `update:segment` per step. The inspector brackets those with
+ * interactionStart/End so the whole gesture collapses into one undo step.
+ */
+let inspectorTransaction: ReturnType<typeof commands.beginTransaction> | null = null
+
+function handleInspectorInteractionStart() {
+  inspectorTransaction?.commit()
+  inspectorTransaction = commands.beginTransaction({ label: 'edit-segment-property' })
+}
+
+function handleInspectorInteractionEnd() {
+  inspectorTransaction?.commit()
+  inspectorTransaction = null
+}
+
 type TransformableSegment = SegmentUnion & { transform?: ITransform }
 
 function isTransformable(segment: SegmentUnion): segment is TransformableSegment {
@@ -629,6 +646,30 @@ function upsertKeyframe(draft: SegmentUnion, property: IKeyframeProperty, value:
 
 function handleGizmoSelect(segmentId: string | null) {
   commands.setSelectedSegment(segmentId ?? undefined)
+}
+
+/**
+ * The gizmo emits a `transform` patch on every animation frame of a drag, and
+ * each one is a protocol edit. Wrapping the gesture in a transaction keeps the
+ * preview live while collapsing the whole drag into one undo step; cancelling
+ * restores the transform captured at pointer down.
+ */
+let gizmoTransaction: ReturnType<typeof commands.beginTransaction> | null = null
+
+function handleGizmoTransformStart() {
+  gizmoTransaction?.cancel()
+  gizmoTransaction = commands.beginTransaction({ label: 'transform-segment' })
+}
+
+function handleGizmoTransformEnd(payload: { cancelled: boolean }) {
+  const transaction = gizmoTransaction
+  gizmoTransaction = null
+  if (!transaction)
+    return
+  if (payload.cancelled)
+    transaction.cancel()
+  else
+    transaction.commit()
 }
 
 function handleGizmoTransform(patch: GizmoTransformPatch) {
@@ -945,13 +986,16 @@ async function runCompose(settings: ExportSettings) {
   clearComposeOutput()
 
   try {
-    const { stream, durationMs, fileExtension } = await composeProtocol(protocol.value, {
+    const { stream, durationMs, fileExtension, completion } = await composeProtocol(protocol.value, {
       ...toComposeOptions(settings),
       onProgress: (progress) => {
         composeState.progress = progress
       },
     })
-    const blob = await new Response(stream).blob()
+    // Encoding continues after `composeProtocol` resolves; awaiting the
+    // completion promise is what turns a background failure into a visible
+    // error instead of a truncated file we would happily offer for download.
+    const [blob] = await Promise.all([new Response(stream).blob(), completion])
     composeState.blobUrl = URL.createObjectURL(blob)
     composeState.size = blob.size
     composeState.durationMs = durationMs
@@ -1061,8 +1105,16 @@ const timelineToolbarActions = computed(() => mergeToolbarActions(
     onAdd: () => openDrawer('assets'),
     onDelete: () => removeSelectedSegment(),
     onSplit: splitSelectedSegment,
-    onUndo: () => commands.undo(),
-    onRedo: () => commands.redo(),
+    onUndo: () => {
+      // An open transaction blocks history navigation; commit what the user
+      // has already typed or dragged, then undo that as one step.
+      handleInspectorInteractionEnd()
+      commands.undo()
+    },
+    onRedo: () => {
+      handleInspectorInteractionEnd()
+      commands.redo()
+    },
     onTogglePlay: togglePlay,
     onStepBackward: () => stepFrame(-1),
     onStepForward: () => stepFrame(1),
@@ -1299,6 +1351,8 @@ function handleAddSegmentClick(data: {
             :is-playing="isPlaying"
             @select="handleGizmoSelect"
             @transform="handleGizmoTransform"
+            @transform-start="handleGizmoTransformStart"
+            @transform-end="handleGizmoTransformEnd"
           />
           <div v-if="loading" class="stage__placeholder">
             正在初始化 Pixi 渲染器…
@@ -1325,6 +1379,8 @@ function handleAddSegmentClick(data: {
           :filter-presets="effectPresets"
           :effect-presets="effectPresets"
           @update:segment="handleInspectorUpdate"
+          @interaction-start="handleInspectorInteractionStart"
+          @interaction-end="handleInspectorInteractionEnd"
         />
       </aside>
     </section>

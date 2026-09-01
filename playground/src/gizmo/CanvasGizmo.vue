@@ -22,6 +22,13 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'select', segmentId: string | null): void
   (e: 'transform', patch: GizmoTransformPatch): void
+  /**
+   * A drag started or ended. The host uses these to wrap the whole gesture in
+   * one history transaction: `transform` fires once per animation frame while
+   * dragging, so without them a single drag lands dozens of undo steps.
+   */
+  (e: 'transformStart'): void
+  (e: 'transformEnd', payload: { cancelled: boolean }): void
 }>()
 
 const ROTATION_SNAP_DEG = 15
@@ -117,6 +124,15 @@ function refresh() {
   boxes.value = next
 }
 
+interface DragState {
+  mode: DragMode
+  start: VisualBox
+  startPointer: { x: number, y: number }
+  pointerId: number
+}
+
+let drag: DragState | null = null
+
 const pollTimer = window.setInterval(() => {
   if (!drag)
     refresh()
@@ -144,14 +160,6 @@ function toStagePoint(event: PointerEvent) {
   }
 }
 
-interface DragState {
-  mode: DragMode
-  start: VisualBox
-  startPointer: { x: number, y: number }
-  pointerId: number
-}
-
-let drag: DragState | null = null
 let pendingPatch: GizmoTransformPatch | null = null
 let rafId = 0
 
@@ -188,6 +196,7 @@ function beginDrag(event: PointerEvent, mode: DragMode) {
   event.stopPropagation()
   drag = { mode, start: { ...box }, startPointer: pointer, pointerId: event.pointerId }
   previewBox.value = { ...box }
+  emit('transformStart')
   window.addEventListener('pointermove', handleDragMove)
   window.addEventListener('pointerup', handleDragEnd)
   window.addEventListener('pointercancel', handleDragEnd)
@@ -280,6 +289,9 @@ function handleDragEnd(event: PointerEvent) {
   flushPatch()
   previewBox.value = null
   refresh()
+  // A cancelled pointer (OS gesture, focus loss) should leave the segment where
+  // it started rather than half-dragged.
+  emit('transformEnd', { cancelled: event.type === 'pointercancel' })
 }
 
 /** Rotate a stage point into the unrotated local space of `box`. */
@@ -309,6 +321,11 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointercancel', handleDragEnd)
   if (rafId)
     window.cancelAnimationFrame(rafId)
+  // Unmounting mid-drag must not strand the host's open transaction.
+  if (drag) {
+    drag = null
+    emit('transformEnd', { cancelled: true })
+  }
 })
 </script>
 
