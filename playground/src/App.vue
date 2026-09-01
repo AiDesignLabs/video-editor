@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AssetMeta, ProjectMeta } from '@video-editor/protocol'
-import type { Renderer } from '@video-editor/renderer'
+import type { ExportTask, Renderer } from '@video-editor/renderer'
 import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageFramesSegment, IKeyframeProperty, IStickerSegment, ITextSegment, ITransform, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
 import type { SegmentUpdater, TransitionEditPayload } from '@video-editor/ui'
 import type { Ref } from 'vue'
@@ -8,7 +8,7 @@ import type { ExportSettings } from './export-options'
 import type { GizmoTransformPatch } from './gizmo/types'
 import { createEditorCore } from '@video-editor/editor-core'
 import { createProjectStore, generateThumbnails } from '@video-editor/protocol'
-import { composeProtocol, createRenderer, listEffectDefinitions, listTransitionDefinitions } from '@video-editor/renderer'
+import { createExportTask, createRenderer, listEffectDefinitions, listTransitionDefinitions } from '@video-editor/renderer'
 import { CanvasSizePanel, createDefaultToolbarActions, mergeToolbarActions, PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 import AssetPanel from './AssetPanel.vue'
@@ -212,15 +212,21 @@ const thumbnailsState = reactive({
   loading: false,
   error: null as string | null,
 })
+/**
+ * View state derived from the export task. The task itself owns the lifecycle;
+ * this only holds what the drawer needs on top of it — the object URL and the
+ * download name, which are presentation concerns the library stays out of.
+ */
+const exportTask = shallowRef<ExportTask | null>(null)
 const composeState = reactive({
-  loading: false,
-  error: null as string | null,
-  progress: 0,
   blobUrl: null as string | null,
-  size: 0,
-  durationMs: 0,
   fileName: 'export.mp4',
 })
+const exportStatus = computed(() => exportTask.value?.state.value.status ?? 'pending')
+const exportProgress = computed(() => exportTask.value?.state.value.progress ?? 0)
+const exportError = computed(() => exportTask.value?.state.value.error?.message ?? null)
+const exportResult = computed(() => exportTask.value?.state.value.result ?? null)
+const isExporting = computed(() => exportStatus.value === 'running')
 const loading = ref(true)
 const error = ref<string | null>(null)
 const captionShifted = ref(false)
@@ -937,8 +943,6 @@ function clearComposeOutput() {
     URL.revokeObjectURL(composeState.blobUrl)
   }
   composeState.blobUrl = null
-  composeState.size = 0
-  composeState.durationMs = 0
 }
 
 async function runThumbnailDemo() {
@@ -980,34 +984,57 @@ async function runCompose(settings: ExportSettings) {
   exportDialogOpen.value = false
   drawerTab.value = 'compose'
   drawerOpen.value = true
-  composeState.error = null
-  composeState.loading = true
-  composeState.progress = 0
   clearComposeOutput()
+  exportTask.value?.destroy()
 
-  try {
-    const { stream, durationMs, fileExtension, completion } = await composeProtocol(protocol.value, {
-      ...toComposeOptions(settings),
-      onProgress: (progress) => {
-        composeState.progress = progress
-      },
-    })
-    // Encoding continues after `composeProtocol` resolves; awaiting the
-    // completion promise is what turns a background failure into a visible
-    // error instead of a truncated file we would happily offer for download.
-    const [blob] = await Promise.all([new Response(stream).blob(), completion])
-    composeState.blobUrl = URL.createObjectURL(blob)
-    composeState.size = blob.size
-    composeState.durationMs = durationMs
-    composeState.fileName = `export-${exportTimestamp()}${fileExtension}`
-  }
-  catch (err) {
-    composeState.error = err instanceof Error ? err.message : String(err)
-  }
-  finally {
-    composeState.loading = false
-  }
+  // The task snapshots the protocol, so edits made while it runs cannot land
+  // half-way through the file.
+  exportTask.value = createExportTask(protocol.value, toComposeOptions(settings))
+  await awaitExport(task => task.start())
 }
+
+/** Runs `run` on the current task and turns a success into a downloadable file. */
+async function awaitExport(run: (task: ExportTask) => Promise<unknown>) {
+  const task = exportTask.value
+  if (!task)
+    return
+  clearComposeOutput()
+  await run(task)
+
+  const result = task.state.value.result
+  if (task.state.value.status !== 'success' || !result)
+    return
+  composeState.blobUrl = URL.createObjectURL(result.blob)
+  composeState.fileName = `export-${exportTimestamp()}${result.fileExtension}`
+}
+
+function retryExport() {
+  void awaitExport(task => task.retry())
+}
+
+function cancelExport() {
+  exportTask.value?.cancel()
+}
+
+/**
+ * A running export holds a decoder, a renderer and an encoder, and its result
+ * only exists in this tab. Leaving without a word would silently throw all of
+ * it away.
+ */
+function guardUnload(event: BeforeUnloadEvent) {
+  if (!isExporting.value)
+    return
+  event.preventDefault()
+  // Chrome ignores the message but still shows its own prompt when this is set.
+  event.returnValue = ''
+}
+
+window.addEventListener('beforeunload', guardUnload)
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', guardUnload)
+  exportTask.value?.destroy()
+  clearComposeOutput()
+})
 
 /**
  * Presets offered by the filter/effect designer. `@video-editor/ui` cannot
@@ -1333,9 +1360,9 @@ function handleAddSegmentClick(data: {
         <button class="tool" :class="{ 'tool--active': drawerOpen && drawerTab === 'demo' }" @click="openDrawer('demo')">
           演示
         </button>
-        <button class="export" :disabled="composeState.loading" @click="exportDialogOpen = true">
-          <span v-if="!composeState.loading" class="export__icon i-creatly-download" aria-hidden="true" />
-          {{ composeState.loading ? `导出中 ${Math.round(composeState.progress * 100)}%` : '导出视频' }}
+        <button class="export" :disabled="isExporting" @click="exportDialogOpen = true">
+          <span v-if="!isExporting" class="export__icon i-creatly-download" aria-hidden="true" />
+          {{ isExporting ? `导出中 ${Math.round(exportProgress * 100)}%` : '导出视频' }}
         </button>
       </div>
     </header>
@@ -1484,20 +1511,41 @@ function handleAddSegmentClick(data: {
         </div>
 
         <div v-else-if="drawerTab === 'compose'" class="drawer__pane">
-          <div v-if="composeState.loading" class="compose-progress">
+          <div v-if="exportStatus === 'running'" class="compose-progress">
             <div class="compose-progress__bar">
-              <div class="compose-progress__fill" :style="{ width: `${composeState.progress * 100}%` }" />
+              <div class="compose-progress__fill" :style="{ width: `${exportProgress * 100}%` }" />
             </div>
-            <span class="mono">{{ Math.round(composeState.progress * 100) }}%</span>
+            <span class="mono">{{ Math.round(exportProgress * 100) }}%</span>
+            <button class="tool" @click="cancelExport">
+              取消导出
+            </button>
           </div>
-          <p v-else-if="composeState.error" class="drawer__error">
-            合成失败：{{ composeState.error }}
-          </p>
-          <template v-else-if="composeState.blobUrl">
+          <template v-else-if="exportStatus === 'failed'">
+            <p class="drawer__error">
+              合成失败：{{ exportError }}
+            </p>
+            <div class="drawer__meta">
+              <span class="drawer__hint">导出参数已保留，可直接重试。</span>
+              <button class="tool" @click="retryExport">
+                重试导出
+              </button>
+            </div>
+          </template>
+          <template v-else-if="exportStatus === 'cancelled'">
+            <p class="drawer__empty">
+              导出已取消。
+            </p>
+            <div class="drawer__meta">
+              <button class="tool" @click="retryExport">
+                重新导出
+              </button>
+            </div>
+          </template>
+          <template v-else-if="exportResult && composeState.blobUrl">
             <video class="compose-video" :src="composeState.blobUrl" controls />
             <div class="drawer__meta">
-              <span class="mono">{{ formatTimecode(composeState.durationMs) }}</span>
-              <span class="mono">{{ formatBytes(composeState.size) }}</span>
+              <span class="mono">{{ formatTimecode(exportResult.durationMs) }}</span>
+              <span class="mono">{{ formatBytes(exportResult.byteLength) }}</span>
               <span class="drawer__hint mono">{{ composeState.fileName }}</span>
               <a class="tool" :href="composeState.blobUrl" :download="composeState.fileName">下载文件</a>
             </div>
