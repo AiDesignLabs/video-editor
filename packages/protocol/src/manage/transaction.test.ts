@@ -348,3 +348,82 @@ describe('canvas constraints', () => {
     expect(manager.setCanvasSize({ width: MIN_CANVAS_SIZE, height: MIN_CANVAS_SIZE }).success).toBe(true)
   })
 })
+
+describe('moveSegment target resolution', () => {
+  it('keeps the segment on its own track when no target is given', () => {
+    const manager = createManager()
+    const [a] = seedOverlaySegments(manager, [0])
+    const trackId = manager.protocol.value.tracks.find(track => track.children.some(s => s.id === a))?.trackId
+
+    expect(trackId).toBeDefined()
+
+    // An omitted `targetTrackId` used to remove the segment from its track and
+    // never re-add it, while still reporting success.
+    const result = manager.moveSegment({
+      segmentId: a,
+      sourceTrackId: trackId!,
+      startTime: 1000,
+      endTime: 1500,
+    })
+
+    expect(result.success).toBe(true)
+    expect(manager.segmentMap.value[a]).toBeDefined()
+    expect(manager.segmentMap.value[a]?.startTime).toBe(1000)
+    expect(manager.segmentMap.value[a]?.endTime).toBe(1500)
+  })
+
+  it('refuses to create a track without an insert position', () => {
+    const manager = createManager()
+    const [a] = seedOverlaySegments(manager, [0])
+    const trackId = manager.protocol.value.tracks.find(track => track.children.some(s => s.id === a))?.trackId
+
+    const result = manager.moveSegment({
+      segmentId: a,
+      sourceTrackId: trackId!,
+      startTime: 1000,
+      endTime: 1500,
+      isNewTrack: true,
+    })
+
+    expect(result.success).toBe(false)
+    expect(manager.segmentMap.value[a]?.startTime).toBe(0)
+  })
+})
+
+describe('refused commands and history', () => {
+  it('leaves history untouched when a command refuses', () => {
+    const manager = createManager()
+    seedOverlaySegments(manager, [0])
+    const undoBefore = manager.undoCount.value
+    const snapshot = structuredClone(manager.exportProtocol())
+
+    // The transition sync runs even when the updater bails out, and its write
+    // to `protocol.transitions` used to be enough to record a history item for
+    // a command that changed nothing.
+    expect(manager.updateTrack('missing', (track) => {
+      track.hidden = true
+    })).toBe(false)
+    expect(manager.removeSegment('missing').success).toBe(false)
+    expect(manager.replaceTrackId('missing', 'other')).toBe(false)
+    expect(manager.addTransition({ id: 'fade', name: 'fade', duration: 300 }, 0)).toBe(false)
+
+    expect(manager.undoCount.value).toBe(undoBefore)
+    expect(manager.exportProtocol()).toEqual(snapshot)
+  })
+
+  it('does not clear the redo stack when a command refuses', () => {
+    const manager = createManager()
+    const [a] = seedOverlaySegments(manager, [0])
+    manager.updateSegment((segment) => {
+      segment.endTime = 800
+    }, a)
+    manager.undo()
+    const redoBefore = manager.redoCount.value
+
+    expect(manager.updateTrack('missing', (track) => {
+      track.hidden = true
+    })).toBe(false)
+
+    expect(manager.redoCount.value).toBe(redoBefore)
+  })
+})

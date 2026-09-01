@@ -284,12 +284,26 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     selectedSegmentId.value = id
   }
 
-  const updateProtocolWithTransitionSync = <T>(updater: (protocol: IVideoProtocol) => T) => {
-    return updateProtocol((protocol) => {
-      const result = updater(protocol)
+  /**
+   * Runs a command and keeps the transition edges consistent with the tracks.
+   *
+   * An updater that returns `false` means the command refused, and must leave
+   * no trace. That needs a transaction: the transition sync below runs even
+   * when the updater bailed out, and its write to `protocol.transitions` was by
+   * itself enough to push a history item for an operation that changed nothing.
+   */
+  const updateProtocolWithTransitionSync = <T>(updater: (protocol: IVideoProtocol) => T): T => {
+    const tx = beginTransaction()
+    let result!: T
+    updateProtocol((protocol) => {
+      result = updater(protocol)
       syncProtocolTransitionEdges(protocol)
-      return result
     })
+    if ((result as unknown) === false)
+      tx.cancel()
+    else
+      tx.commit()
+    return result
   }
 
   const addSegmentToTrack = <T extends SegmentUnion>(segment: T, tracks: IVideoProtocol['tracks']) => {
@@ -691,8 +705,17 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
 
       const segment = sourceTrack.children[segmentIndex]
 
+      // Creating a track without saying where to put it has no defined result,
+      // and used to drop the segment on the floor while reporting success.
+      if (moveOptions.isNewTrack === true && moveOptions.newTrackInsertIndex === undefined)
+        return false
+
+      // An omitted target means "stay on this track". Without the fallback the
+      // segment was removed from the source track and never re-added anywhere.
+      const targetTrackId = moveOptions.targetTrackId ?? moveOptions.sourceTrackId
+
       // Check if moving within same track (same trackId and not creating new track)
-      const isSameTrack = moveOptions.targetTrackId === moveOptions.sourceTrackId && moveOptions.isNewTrack !== true
+      const isSameTrack = targetTrackId === moveOptions.sourceTrackId && moveOptions.isNewTrack !== true
 
       if (isSameTrack) {
         // Moving within same track - just update time and rebuild to avoid overlaps
@@ -756,9 +779,9 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
           affectedTrackIds.add(newTrack.trackId)
           createdTracks.push(cloneTrack(newTrack))
         }
-        else if (moveOptions.targetTrackId) {
+        else {
           // Add to existing target track
-          const targetTrack = protocol.tracks.find(t => t.trackId === moveOptions.targetTrackId)
+          const targetTrack = protocol.tracks.find(t => t.trackId === targetTrackId)
           if (!targetTrack || targetTrack.trackType !== segment.segmentType)
             return false
 
@@ -1014,7 +1037,12 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     }
   }
 
-  function updateSegment<T extends ITrackType>(updater: (segment: TrackTypeMapSegment[T]) => void, id?: string, type?: T) {
+  /**
+   * Returns whether the edit was kept. A rejected edit leaves no trace, so a
+   * caller batching several of them can tell one was dropped instead of
+   * assuming they all landed.
+   */
+  function updateSegment<T extends ITrackType>(updater: (segment: TrackTypeMapSegment[T]) => void, id?: string, type?: T): boolean {
     const segmentId = id ?? selectedSegment.value?.id
 
     // The edit and the ripple it causes on later segments belong to one undo
@@ -1040,7 +1068,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
 
     if (!patches.length) {
       tx.commit()
-      return
+      return true
     }
 
     let valid = true
@@ -1056,10 +1084,12 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       }
     })
 
-    if (valid)
+    if (valid) {
       tx.commit()
-    else
-      tx.cancel()
+      return true
+    }
+    tx.cancel()
+    return false
   }
 
   const addTransition = (transition: ITransition, addTime?: number) => {
