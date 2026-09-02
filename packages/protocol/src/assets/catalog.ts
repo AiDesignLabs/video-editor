@@ -2,9 +2,11 @@ import type { IVideoProtocol } from '@video-editor/shared'
 import type { GenerateThumbnailsOptions, Thumbnail } from '../resource/thumbnails'
 import type { WaveformData, WaveformOptions } from '../resource/waveform'
 import type { AssetKind, AssetLibrary, AssetMeta } from './index'
+import type { GeneratedPreviewFile, GenerateVideoPreviewFileOptions } from './preview'
 import { generateThumbnails } from '../resource/thumbnails'
 import { extractWaveform } from '../resource/waveform'
 import { createAssetLibrary } from './index'
+import { generateVideoPreviewFile } from './preview'
 
 export type MediaAssetProxyStatus = 'none' | 'ready' | 'stale'
 
@@ -41,6 +43,28 @@ export interface MediaAssetCatalogOptions {
   getProtectedProtocols?: () => readonly IVideoProtocol[] | Promise<readonly IVideoProtocol[]>
 }
 
+export interface MediaAssetPreviewProgress {
+  framesDone: number
+  framesTotal: number
+  ratio: number
+  elapsedMs: number
+}
+
+export interface GenerateMediaAssetPreviewOptions {
+  /** Output height in pixels. Width follows the source aspect ratio. */
+  height?: number
+  /** Video bitrate in bits per second. */
+  videoBitrate?: number
+  /** Maximum interval between key frames. */
+  keyFrameIntervalMs?: number
+  onProgress?: (progress: MediaAssetPreviewProgress) => void
+  signal?: AbortSignal
+}
+
+export interface MediaAssetPreviewResolveContext {
+  media: 'visual' | 'audio'
+}
+
 export interface MediaAssetCatalog {
   import: (file: File) => Promise<MediaAsset>
   list: () => Promise<MediaAsset[]>
@@ -49,7 +73,8 @@ export interface MediaAssetCatalog {
   getPreviewBlob: (id: string) => Promise<Blob | undefined>
   getThumbnails: (id: string, options?: GenerateThumbnailsOptions) => Promise<Thumbnail[]>
   getWaveform: (id: string, options?: WaveformOptions) => Promise<WaveformData>
-  resolveForPreview: (id: string) => Promise<string | undefined>
+  generatePreviewVersion: (id: string, options?: GenerateMediaAssetPreviewOptions) => Promise<MediaAsset>
+  resolveForPreview: (id: string, fallbackUrl?: string, context?: MediaAssetPreviewResolveContext) => Promise<string | undefined>
   resolveForExport: (id: string) => Promise<string | undefined>
   remove: (id: string) => Promise<void>
 }
@@ -82,11 +107,21 @@ export function createMediaAssetCatalog(options: MediaAssetCatalogOptions = {}):
   return createMediaAssetCatalogFromLibrary(createAssetLibrary(options), options)
 }
 
+interface MediaAssetCatalogDependencies {
+  generatePreviewFile: (
+    source: Blob | string,
+    sourceName: string,
+    options: GenerateVideoPreviewFileOptions,
+  ) => Promise<GeneratedPreviewFile>
+}
+
 /** Internal dependency-injection entry used by focused tests. */
 export function createMediaAssetCatalogFromLibrary(
   library: AssetLibrary,
   options: Pick<MediaAssetCatalogOptions, 'getProtectedProtocols'> = {},
+  dependencies: MediaAssetCatalogDependencies = { generatePreviewFile: generateVideoPreviewFile },
 ): MediaAssetCatalog {
+  const activePreviewGenerations = new Set<string>()
   async function listOriginals() {
     return (await library.listAssets()).filter(asset => !asset.derivation)
   }
@@ -151,6 +186,66 @@ export function createMediaAssetCatalogFromLibrary(
     return await extractWaveform(asset.url, options)
   }
 
+  async function generatePreviewVersion(
+    id: string,
+    options: GenerateMediaAssetPreviewOptions = {},
+  ): Promise<MediaAsset> {
+    const assets = await library.listAssets()
+    const asset = assets.find(candidate => candidate.id === id && !candidate.derivation)
+    if (!asset)
+      throw new Error(`No media asset with id ${id}`)
+    if (asset.kind !== 'video')
+      throw new Error(`Media asset ${id} is not a video`)
+    if (getProxyStatus(asset, assets) === 'ready')
+      return toMediaAsset(asset, assets)
+    if (activePreviewGenerations.has(id))
+      throw new Error(`Preview generation is already running for media asset ${id}`)
+    if (options.signal?.aborted)
+      throw new DOMException('Preview generation aborted', 'AbortError')
+
+    const height = options.height ?? Math.min(asset.height ?? 360, 360)
+    const videoBitrate = options.videoBitrate ?? 600_000
+    const keyFrameIntervalMs = options.keyFrameIntervalMs ?? 1000
+    if (!Number.isFinite(height) || height <= 0)
+      throw new TypeError('Preview height must be greater than 0')
+    if (!Number.isFinite(videoBitrate) || videoBitrate <= 0)
+      throw new TypeError('Preview video bitrate must be greater than 0')
+    if (!Number.isFinite(keyFrameIntervalMs) || keyFrameIntervalMs <= 0)
+      throw new TypeError('Preview key frame interval must be greater than 0')
+
+    activePreviewGenerations.add(id)
+    try {
+      const originalFile = await library.getAssetFile(id)
+      const source = originalFile ?? await library.resolveAssetUrl(id)
+      if (!source)
+        throw new Error(`No source data for media asset ${id}`)
+
+      const generated = await dependencies.generatePreviewFile(source, asset.name, {
+        height,
+        videoBitrate,
+        keyFrameIntervalMs,
+        onProgress: options.onProgress,
+        signal: options.signal,
+      })
+      try {
+        await library.importProxy(id, generated.file)
+      }
+      finally {
+        // Cleanup must not replace a more useful import/revision error.
+        await generated.cleanup().catch(() => {})
+      }
+
+      const updatedAssets = await library.listAssets()
+      const updated = updatedAssets.find(candidate => candidate.id === id && !candidate.derivation)
+      if (!updated)
+        throw new Error(`Media asset ${id} disappeared after preview generation`)
+      return toMediaAsset(updated, updatedAssets)
+    }
+    finally {
+      activePreviewGenerations.delete(id)
+    }
+  }
+
   async function remove(id: string): Promise<void> {
     if (!options.getProtectedProtocols)
       throw new Error('Media asset removal requires getProtectedProtocols')
@@ -166,7 +261,10 @@ export function createMediaAssetCatalogFromLibrary(
     getPreviewBlob,
     getThumbnails,
     getWaveform,
-    resolveForPreview: id => library.resolveAssetUrl(id, { preferProxy: true }),
+    generatePreviewVersion,
+    resolveForPreview: (id, _fallbackUrl, context) => library.resolveAssetUrl(id, {
+      preferProxy: context?.media !== 'audio',
+    }),
     resolveForExport: id => library.resolveAssetUrl(id),
     remove,
   }

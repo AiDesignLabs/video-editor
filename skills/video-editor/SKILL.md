@@ -18,6 +18,7 @@ shared -> protocol -> editor-core -> renderer / ui -> application
 - Query `editor.selectors` and `canRun()` before constructing non-trivial edits.
 - Use `editor.proposals.create()` for agent-generated edits that need human review. Accepting a proposal must remain one undo step.
 - Use `MediaAssetCatalog` for normal media integration. Do not make application code manage OPFS files, proxy IDs, asset revisions, or PixiJS textures.
+- Generate video preview versions through `MediaAssetCatalog.generatePreviewVersion()`. Pass an `AbortSignal`, surface non-cancellation errors, and call `renderer.refreshAssets()` after completion.
 - Pass an `AbortSignal` to thumbnail and waveform requests when their UI or project can be replaced or destroyed.
 - Do not import `AssetLibrary` from the package entry. It is internal to `protocol`; touch it only when the task explicitly changes storage, proxy generation, cache behavior, or asset diagnostics.
 - Keep PixiJS objects inside the renderer. Protocol and editor-core code must not depend on PixiJS.

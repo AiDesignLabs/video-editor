@@ -48,4 +48,14 @@ describe('resolveProtocolAssetUrls', () => {
       .rejects
       .toThrow('empty URL for asset asset-1')
   })
+
+  it('passes the requested media role to the resolver', async () => {
+    const contexts: unknown[] = []
+    await resolveProtocolAssetUrls(protocol, (_assetId, fallbackUrl, context) => {
+      contexts.push(context)
+      return fallbackUrl
+    }, { media: 'audio' })
+
+    expect(contexts).toEqual([{ media: 'audio' }])
+  })
 })

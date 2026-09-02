@@ -129,9 +129,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const validator = createValidator()
   const protocolInput: Ref<IVideoProtocol> | ShallowRef<IVideoProtocol>
     = isRef(opts.protocol) ? opts.protocol : shallowRef(opts.protocol)
-  const validatedProtocol: ShallowRef<IVideoProtocol> = shallowRef(
-    validator.verify(await resolveProtocolAssetUrls(unref(protocolInput), opts.resolveAssetUrl)),
-  )
+  const [initialVisualProtocol, initialAudioProtocol] = await Promise.all([
+    resolveProtocolAssetUrls(unref(protocolInput), opts.resolveAssetUrl, { media: 'visual' }),
+    resolveProtocolAssetUrls(unref(protocolInput), opts.resolveAssetUrl, { media: 'audio' }),
+  ])
+  const validatedProtocol: ShallowRef<IVideoProtocol> = shallowRef(validator.verify(initialVisualProtocol))
+  const validatedAudioProtocol: ShallowRef<IVideoProtocol> = shallowRef(validator.verify(initialAudioProtocol))
 
   const app = opts.app ?? await create2dApp(opts.appOptions)
   // All renders go through queueRender. Keep Pixi's application ticker from
@@ -183,7 +186,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const duration = computed(() => computeDuration(validatedProtocol.value))
   const mediaElementObjectUrls = new Map<string, string>()
   const mediaElementObjectUrlLoading = new Map<string, Promise<string | undefined>>()
-  const audioManager: AudioManagerApi = new AudioManager(validatedProtocol.value, {
+  const audioManager: AudioManagerApi = new AudioManager(validatedAudioProtocol.value, {
     resolveMediaElementUrl,
     loadAudioBuffer,
   }) as unknown as AudioManagerApi
@@ -198,7 +201,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const previewAudioTicker = createPreviewAudioTicker({
     transport,
     runner: previewRunner,
-    getProtocol: () => validatedProtocol.value,
+    getProtocol: () => validatedAudioProtocol.value,
     onPlan: (plan) => {
       applyAudioPlan(plan)
     },
@@ -370,11 +373,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   let assetResolutionRevision = 0
   let rendererDestroyed = false
-  const applyProtocol = (nextProtocol: IVideoProtocol, revision: number) => {
+  const applyProtocol = (nextProtocol: IVideoProtocol, nextAudioProtocol: IVideoProtocol, revision: number) => {
     if (rendererDestroyed || revision !== assetResolutionRevision)
       return
     validatedProtocol.value = nextProtocol
-    audioManager.setProtocol(validatedProtocol.value)
+    validatedAudioProtocol.value = nextAudioProtocol
+    audioManager.setProtocol(validatedAudioProtocol.value)
     resetSchedulerState()
     if (isPlaying.value)
       previewAudioTicker.tick()
@@ -394,11 +398,21 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const syncProtocol = (protocol: IVideoProtocol): void | Promise<void> => {
     const revision = ++assetResolutionRevision
     if (!opts.resolveAssetUrl) {
-      applyProtocol(validator.verify(cloneProtocol(protocol)), revision)
+      applyProtocol(
+        validator.verify(cloneProtocol(protocol)),
+        validator.verify(cloneProtocol(protocol)),
+        revision,
+      )
       return
     }
-    return resolveProtocolAssetUrls(protocol, opts.resolveAssetUrl)
-      .then(resolved => applyProtocol(validator.verify(resolved), revision))
+    return Promise.all([
+      resolveProtocolAssetUrls(protocol, opts.resolveAssetUrl, { media: 'visual' }),
+      resolveProtocolAssetUrls(protocol, opts.resolveAssetUrl, { media: 'audio' }),
+    ]).then(([visual, audio]) => applyProtocol(
+      validator.verify(visual),
+      validator.verify(audio),
+      revision,
+    ))
   }
 
   const refreshAssets = async () => {

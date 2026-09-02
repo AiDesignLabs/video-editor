@@ -29,11 +29,23 @@ const assets = createMediaAssetCatalog({
 
 const asset = await assets.import(file)
 const binding = await assets.bindForSegment(asset.id)
+
+if (asset.kind === 'video') {
+  const controller = new AbortController()
+  await assets.generatePreviewVersion(asset.id, {
+    signal: controller.signal,
+    onProgress: ({ ratio }) => console.log(`Preview: ${Math.round(ratio * 100)}%`),
+  })
+  await renderer.refreshAssets()
+}
 ```
 
 Use `MediaAssetCatalog` in application code. It hides OPFS files, proxy records, revisions, and changing
 resource URLs. `AssetLibrary` is an internal implementation used by storage, proxy generation, and diagnostics;
 it is not exported from the package entry.
+
+Pass `assets.resolveForPreview` to the renderer and `assets.resolveForExport` to compose. Preview video frames
+use the current generated preview version, while video audio and exports keep using the original source.
 
 ### Audio Waveform Extraction
 

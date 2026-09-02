@@ -948,6 +948,10 @@ function handleAssetAdd(asset: SegmentAssetBinding) {
   commands.setSelectedSegment(result.id)
 }
 
+async function handleAssetPreviewReady() {
+  await renderer.value?.refreshAssets()
+}
+
 function clearThumbnails() {
   // Release object URLs before replacing them to avoid leaking memory in the demo.
   thumbnailsState.items.forEach(thumb => URL.revokeObjectURL(thumb.url))
@@ -1542,7 +1546,11 @@ function handleAddSegmentClick(data: {
 
       <div class="drawer__body">
         <div v-if="drawerTab === 'assets'" class="drawer__pane">
-          <AssetPanel :catalog="assetCatalog" @add="handleAssetAdd" />
+          <AssetPanel
+            :catalog="assetCatalog"
+            @add="handleAssetAdd"
+            @preview-ready="handleAssetPreviewReady"
+          />
         </div>
 
         <div v-else-if="drawerTab === 'compose'" class="drawer__pane">

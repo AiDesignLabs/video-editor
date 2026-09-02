@@ -56,11 +56,31 @@ editor.commands.addSegment({
 `resolveForExport()` 始终选择原始素材。两个 resolver 可直接传给 renderer 和 compose，不要求
 调用方理解 `preferProxy`。
 
+视频预览版本通过 `generatePreviewVersion()` 生成：
+
+```ts
+const controller = new AbortController()
+
+await assets.generatePreviewVersion(asset.id, {
+  signal: controller.signal,
+  onProgress: progress => updateProgress(progress.ratio),
+})
+
+await renderer.refreshAssets()
+```
+
+默认参数为 360p、600 kbps 和 1 秒关键帧间隔。调用方可以调整参数，但不接触生成文件、代理 ID
+或 source revision。已有当前预览版本时直接返回素材状态，不重复编码；非视频素材会明确失败。
+
 ## 4. PixiJS 边界
 
 素材目录不依赖 PixiJS Assets。音频不经过 PixiJS，视频需要媒体解码器逐帧产生 Canvas，导出也
 不能依赖 PixiJS 的全局资源注册表。renderer 可以在内部使用 PixiJS 的图片加载能力，但
 `MediaAsset`、`assetId` 和 proxy 关系不得映射为 PixiJS 的公共资源身份。
+
+当前视频预览版本只包含画面。renderer 使用同一个 `resolveForPreview()` 分别解析画面和音频：
+画面选择当前预览版本，音频选择当前原始素材，避免代理生成后丢失视频原声。普通集成仍只需传入
+一个 resolver。
 
 完整转换顺序为：
 
@@ -78,7 +98,8 @@ assetId -> MediaAsset -> 原始素材或预览版本 -> URL / OPFS File -> 解�
 - 缺少删除保护协议提供者时，`MediaAssetCatalog.remove()` 明确失败，不允许绕过引用检查。
 - 存储适配、proxy 生成和诊断工具在 `protocol` 包内部直接使用素材 repository；未来确需向外部
   开放时，应增加可独立构建和测试的正式子路径。
-- 本 RFC 不改变 PixiJS 资源加载方式，也不实现 proxy 生成任务。
+- 预览版本编码通过 `@video-editor/media` 完成，临时输出和素材二进制写入 OPFS；这些步骤不进入
+  公共 API。
 
 ## 6. Agent 使用
 

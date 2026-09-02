@@ -454,7 +454,50 @@ describe('createRenderer render ownership', () => {
       await flushReactivity()
       const callsBeforeRefresh = resolveAssetUrl.mock.calls.length
       await renderer.refreshAssets()
-      expect(resolveAssetUrl).toHaveBeenCalledTimes(callsBeforeRefresh + 1)
+      expect(resolveAssetUrl).toHaveBeenCalledTimes(callsBeforeRefresh + 2)
+    }
+    finally {
+      renderer.destroy()
+    }
+  })
+
+  it('uses the preview source for visuals and the original source for audio', async () => {
+    audioManagerInstances.length = 0
+    const segment = createVideoSegment('video-1', 0, 1000)
+    segment.assetId = 'asset-1'
+    const protocol: IVideoProtocol = {
+      id: 'renderer-proxy-audio-test',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [{
+        trackId: 'frames-track',
+        trackType: 'frames',
+        isMain: true,
+        children: [segment],
+      }],
+    }
+    const resolveAssetUrl = vi.fn(async (
+      _assetId: string,
+      fallbackUrl: string,
+      context?: { media: 'visual' | 'audio' },
+    ) => context?.media === 'visual' ? 'local-asset://proxy/video.mp4' : fallbackUrl)
+
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as unknown as Parameters<typeof createRenderer>[0]['app'],
+      manualRender: true,
+      warmUpResources: false,
+      resolveAssetUrl,
+    })
+
+    try {
+      const contexts = resolveAssetUrl.mock.calls.map(call => call[2])
+      expect(contexts.filter(context => context?.media === 'visual')).toHaveLength(2)
+      expect(contexts.filter(context => context?.media === 'audio')).toHaveLength(2)
+      const audioSegment = getAudioManagerInstance().protocol.tracks[0]!.children[0]
+      expect(audioSegment.url).toBe(segment.url)
     }
     finally {
       renderer.destroy()

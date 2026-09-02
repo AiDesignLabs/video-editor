@@ -10,6 +10,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'add', binding: SegmentAssetBinding): void
+  (event: 'previewReady', assetId: string): void
 }>()
 
 const assets = ref<MediaAsset[]>([])
@@ -17,6 +18,8 @@ const importing = ref(false)
 const error = ref<string | null>(null)
 const dragActive = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+const previewProgress = reactive<Record<string, number>>({})
+const previewControllers = new Map<string, AbortController>()
 
 /** Preview object urls keyed by asset id; every entry must be revoked before it is dropped. */
 const previews = reactive<Record<string, string>>({})
@@ -38,6 +41,13 @@ function revokePreviews() {
     URL.revokeObjectURL(previews[id])
     delete previews[id]
   })
+}
+
+function cleanup() {
+  for (const controller of previewControllers.values())
+    controller.abort()
+  previewControllers.clear()
+  revokePreviews()
 }
 
 function formatBytes(size: number) {
@@ -180,13 +190,55 @@ async function handleRemove(asset: MediaAsset) {
   }
 }
 
+function previewActionLabel(asset: MediaAsset) {
+  const progress = previewProgress[asset.id]
+  if (progress !== undefined)
+    return `取消 ${Math.round(progress * 100)}%`
+  if (asset.proxyStatus === 'ready')
+    return '预览就绪'
+  if (asset.proxyStatus === 'stale')
+    return '重新生成'
+  return '生成预览'
+}
+
+async function handlePreviewVersion(asset: MediaAsset) {
+  const active = previewControllers.get(asset.id)
+  if (active) {
+    active.abort()
+    return
+  }
+  if (asset.proxyStatus === 'ready')
+    return
+
+  error.value = null
+  const controller = new AbortController()
+  previewControllers.set(asset.id, controller)
+  previewProgress[asset.id] = 0
+  try {
+    await props.catalog.generatePreviewVersion(asset.id, {
+      signal: controller.signal,
+      onProgress: progress => previewProgress[asset.id] = progress.ratio,
+    })
+    emit('previewReady', asset.id)
+    await refresh()
+  }
+  catch (err) {
+    if (!(err instanceof DOMException && err.name === 'AbortError'))
+      error.value = err instanceof Error ? err.message : String(err)
+  }
+  finally {
+    previewControllers.delete(asset.id)
+    delete previewProgress[asset.id]
+  }
+}
+
 onMounted(() => {
   refresh().catch((err) => {
     error.value = err instanceof Error ? err.message : String(err)
   })
 })
 
-onBeforeUnmount(revokePreviews)
+onBeforeUnmount(cleanup)
 </script>
 
 <template>
@@ -237,6 +289,16 @@ onBeforeUnmount(revokePreviews)
           <p class="asset-card__meta mono">
             {{ describe(asset) }}
           </p>
+          <button
+            v-if="asset.kind === 'video'"
+            type="button"
+            class="asset-card__preview"
+            :class="{ 'asset-card__preview--ready': asset.proxyStatus === 'ready' }"
+            :disabled="asset.proxyStatus === 'ready'"
+            @click.stop="handlePreviewVersion(asset)"
+          >
+            {{ previewActionLabel(asset) }}
+          </button>
           <button class="asset-card__remove" title="删除素材" @click.stop="handleRemove(asset)">
             ✕
           </button>
@@ -368,6 +430,27 @@ onBeforeUnmount(revokePreviews)
   margin: 0;
   font-size: 11px;
   color: var(--ink-muted);
+}
+
+.asset-card__preview {
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--shell-deep);
+  cursor: pointer;
+}
+
+.asset-card__preview:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.asset-card__preview--ready {
+  color: var(--ink-muted);
+  cursor: default;
 }
 
 .asset-card__remove {

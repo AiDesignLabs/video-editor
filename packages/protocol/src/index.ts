@@ -1,8 +1,11 @@
 export { createMediaAssetCatalog } from './assets/catalog'
 export type {
+  GenerateMediaAssetPreviewOptions,
   MediaAsset,
   MediaAssetCatalog,
   MediaAssetCatalogOptions,
+  MediaAssetPreviewProgress,
+  MediaAssetPreviewResolveContext,
   MediaAssetProxyStatus,
   SegmentAssetBinding,
 } from './assets/catalog'

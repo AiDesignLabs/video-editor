@@ -67,6 +67,21 @@ compatibility URL required by the current protocol; application code must not co
 Use `assets.resolveForPreview` as the renderer resolver and `assets.resolveForExport` as the compose
 resolver. Do not use the preview resolver for export.
 
+Generate a smaller video preview without handling files or proxy records:
+
+```ts
+const controller = new AbortController()
+await assets.generatePreviewVersion(asset.id, {
+  signal: controller.signal,
+  onProgress: ({ ratio }) => updateProgress(ratio),
+})
+await renderer.refreshAssets()
+```
+
+The renderer asks the preview resolver separately for visual and audio media. The catalog selects the current
+preview version for video frames and the original source for video audio. Application code still passes only
+`assets.resolveForPreview`.
+
 Use `assets.getPreviewBlob(asset.id)`, `assets.getThumbnails(asset.id, options)`, and
 `assets.getWaveform(asset.id, options)` for asset UI. Do not resolve an asset URL and call the low-level
 resource helpers yourself.
@@ -81,4 +96,5 @@ const thumbnails = assets.getThumbnails(asset.id, { signal: controller.signal })
 controller.abort()
 ```
 
-Treat an `AbortError` as a normal cancellation. Other failures must remain visible to the caller.
+Treat an `AbortError` as a normal cancellation. This applies to preview generation and media analysis. Other
+failures must remain visible to the caller.

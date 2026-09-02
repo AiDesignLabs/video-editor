@@ -85,9 +85,76 @@ describe('media asset catalog', () => {
       durationMs: 5000,
     })
     await expect(catalog.resolveForPreview(source.id)).resolves.toBe(proxy.url)
+    await expect(catalog.resolveForPreview(source.id, source.url, { media: 'audio' })).resolves.toBe(source.url)
     await expect(catalog.resolveForExport(source.id)).resolves.toBe(source.url)
     await expect(catalog.getPreviewBlob(source.id)).resolves.toBe(preview)
     expect(library.getAssetFile).toHaveBeenCalledWith(source.id, { preferProxy: true })
+  })
+
+  it('generates and registers a preview version without exposing its file', async () => {
+    const assets = [source]
+    const library = createLibrary(assets)
+    const sourceFile = new File(['source'], source.name, { type: 'video/mp4' })
+    const previewFile = new File(['preview'], 'source.preview.mp4', { type: 'video/mp4' })
+    const cleanup = vi.fn(async () => {})
+    const generatePreviewFile = vi.fn(async () => ({ file: previewFile, cleanup }))
+    library.getAssetFile = vi.fn(async () => sourceFile)
+    library.importProxy = vi.fn(async () => {
+      assets.push(proxy)
+      return proxy
+    })
+    const catalog = createMediaAssetCatalogFromLibrary(library, {}, { generatePreviewFile })
+
+    await expect(catalog.generatePreviewVersion(source.id)).resolves.toMatchObject({
+      id: source.id,
+      proxyStatus: 'ready',
+    })
+
+    expect(generatePreviewFile).toHaveBeenCalledWith(sourceFile, source.name, expect.objectContaining({
+      height: 360,
+      videoBitrate: 600_000,
+      keyFrameIntervalMs: 1000,
+    }))
+    expect(library.importProxy).toHaveBeenCalledWith(source.id, previewFile)
+    expect(cleanup).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns an existing current preview without generating another one', async () => {
+    const generatePreviewFile = vi.fn()
+    const catalog = createMediaAssetCatalogFromLibrary(createLibrary(), {}, { generatePreviewFile })
+
+    await expect(catalog.generatePreviewVersion(source.id)).resolves.toMatchObject({
+      proxyStatus: 'ready',
+    })
+    expect(generatePreviewFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects a second preview generation for the same asset', async () => {
+    const assets = [source]
+    const library = createLibrary(assets)
+    const previewFile = new File(['preview'], 'source.preview.mp4', { type: 'video/mp4' })
+    let finishGeneration: (() => void) | undefined
+    const generatePreviewFile = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        finishGeneration = resolve
+      })
+      return { file: previewFile, cleanup: async () => {} }
+    })
+    library.importProxy = vi.fn(async () => {
+      assets.push(proxy)
+      return proxy
+    })
+    const catalog = createMediaAssetCatalogFromLibrary(library, {}, { generatePreviewFile })
+
+    const firstGeneration = catalog.generatePreviewVersion(source.id)
+    await vi.waitFor(() => expect(generatePreviewFile).toHaveBeenCalledTimes(1))
+
+    await expect(catalog.generatePreviewVersion(source.id)).rejects.toThrow(
+      `Preview generation is already running for media asset ${source.id}`,
+    )
+
+    finishGeneration?.()
+    await expect(firstGeneration).resolves.toMatchObject({ proxyStatus: 'ready' })
   })
 
   it('requires protected protocols before removal', async () => {
