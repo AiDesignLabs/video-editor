@@ -11,7 +11,7 @@ interface Mp4State {
 interface AudioElementState {
   segmentId: string
   url: string
-  el: HTMLAudioElement
+  el: HTMLMediaElement
   pendingPlay?: Promise<void>
   lastTimelineMs?: number
   lastSourceSec?: number
@@ -734,7 +734,7 @@ export class AudioManager {
       return existing
     }
 
-    const el = new Audio(nextUrl)
+    const el = this.createMediaElement(segment, nextUrl)
     el.preload = 'auto'
     el.loop = false
     el.volume = this.normalizeVolume(segment.volume)
@@ -748,7 +748,17 @@ export class AudioManager {
     return state
   }
 
-  private destroyAudioElement(el: HTMLAudioElement) {
+  private createMediaElement(segment: AudioElementSegment, url: string): HTMLMediaElement {
+    if (segment.segmentType === 'frames') {
+      const video = document.createElement('video')
+      video.src = url
+      video.playsInline = true
+      return video
+    }
+    return new Audio(url)
+  }
+
+  private destroyAudioElement(el: HTMLMediaElement) {
     try {
       el.pause()
     }
