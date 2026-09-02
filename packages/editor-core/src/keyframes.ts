@@ -35,9 +35,16 @@ type GetKeyframeSegment = (segmentId: string) => ReadableKeyframeSegment | undef
 interface KeyframeCommandDeps {
   getSegment: GetKeyframeSegment
   updateSegment: EditorCoreCommands['updateSegment']
+  transaction: EditorCoreCommands['transaction']
 }
 
 const NAMED_EASINGS = new Set<string>(['linear', 'easeIn', 'easeOut', 'easeInOut'])
+const COMMAND_LABELS = {
+  moveKeyframe: 'move-keyframe',
+  removeKeyframe: 'remove-keyframe',
+  setKeyframeEasing: 'set-keyframe-easing',
+  upsertKeyframe: 'upsert-keyframe',
+} as const
 
 function refused(reason: string): CommandCheckResult {
   return { ok: false, reason }
@@ -159,10 +166,15 @@ export function createKeyframeCommands(deps: KeyframeCommandDeps) {
     if (!allowed.ok)
       return { success: false, error: allowed.reason }
 
-    const success = deps.updateSegment(mutate, check.input.segmentId)
-    return success
-      ? { success: true }
-      : { success: false, error: 'the protocol rejected the keyframe edit' }
+    return deps.transaction(() => {
+      const success = deps.updateSegment(mutate, check.input.segmentId)
+      return success
+        ? { success: true }
+        : { success: false, error: 'the protocol rejected the keyframe edit' }
+    }, {
+      label: COMMAND_LABELS[check.command],
+      data: { ...check.input },
+    }).value
   }
 
   return {

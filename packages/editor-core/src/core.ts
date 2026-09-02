@@ -45,6 +45,7 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     duration,
     undoCount: protocolManager.undoCount,
     redoCount: protocolManager.redoCount,
+    operationLog: protocolManager.operationLog,
     isTransactionActive: protocolManager.isTransactionActive,
     transactionDepth: protocolManager.transactionDepth,
   }
@@ -60,6 +61,7 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
   const keyframes = createKeyframeCommands({
     getSegment: protocolManager.getSegment,
     updateSegment: protocolManager.updateSegment,
+    transaction: protocolManager.transaction,
   })
 
   const commands: EditorCoreCommands = {
@@ -117,6 +119,7 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
         return state.protocol.value.tracks
       return state.protocol.value.tracks.filter(track => track.trackType === trackType)
     },
+    getOperationLog: () => structuredClone(state.operationLog.value),
   }
 
   const registry = {

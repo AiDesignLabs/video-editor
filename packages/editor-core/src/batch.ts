@@ -48,7 +48,7 @@ export function createBatchCommands(deps: BatchDeps) {
    * error string to reject the whole batch — a batch is all-or-nothing, so a
    * rejection rolls back everything done so far and leaves history untouched.
    */
-  function batch(label: string, body: () => string[] | string): BatchResult {
+  function batch(label: string, data: Record<string, unknown>, body: () => string[] | string): BatchResult {
     let outcome: BatchResult = rejected(`${label}: nothing ran`)
     transaction((tx) => {
       const result = body()
@@ -58,7 +58,7 @@ export function createBatchCommands(deps: BatchDeps) {
         return
       }
       outcome = ok(result)
-    }, { label })
+    }, { label, data })
     return outcome
   }
 
@@ -78,7 +78,7 @@ export function createBatchCommands(deps: BatchDeps) {
       if (!moves.length)
         return ok([])
 
-      return batch('move-segments', () => {
+      return batch('move-segments', { moves: moves.map(move => ({ ...move })) }, () => {
         const moved: string[] = []
         for (const move of moves) {
           if (!deps.moveSegment(move).success)
@@ -94,7 +94,7 @@ export function createBatchCommands(deps: BatchDeps) {
       if (!targets.length)
         return ok([])
 
-      return batch('remove-segments', () => {
+      return batch('remove-segments', { segmentIds: targets, ripple: options?.ripple === true }, () => {
         const segments = requireSegments(targets, 'remove-segments')
         if (typeof segments === 'string')
           return segments
@@ -118,7 +118,7 @@ export function createBatchCommands(deps: BatchDeps) {
       if (!targets.length)
         return ok([])
 
-      return batch('update-segments', () => {
+      return batch('update-segments', { segmentIds: targets }, () => {
         const segments = requireSegments(targets, 'update-segments')
         if (typeof segments === 'string')
           return segments
@@ -139,7 +139,7 @@ export function createBatchCommands(deps: BatchDeps) {
       if (!targets.length)
         return ok([])
 
-      return batch('duplicate-segments', () => {
+      return batch('duplicate-segments', { segmentIds: targets }, () => {
         const segments = requireSegments(targets, 'duplicate-segments')
         if (typeof segments === 'string')
           return segments

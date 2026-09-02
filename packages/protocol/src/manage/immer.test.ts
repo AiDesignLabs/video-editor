@@ -145,17 +145,85 @@ describe('transaction commit', () => {
   })
 
   it('carries semantic metadata on the committed item', () => {
-    const { transaction, update, undo, state } = createHistory()
+    const { transaction, update, undo, state, operationLog } = createHistory()
+    const data = { segmentId: 'a', detail: { timeMs: 500 } }
 
     transaction(() => {
       update((draft) => {
         draft.count = 1
       })
-    }, { label: 'split-segment', data: { segmentId: 'a' } })
+    }, { label: 'split-segment', data })
+
+    data.detail.timeMs = 900
+    expect(operationLog.value).toEqual([{
+      index: 0,
+      status: 'applied',
+      meta: { label: 'split-segment', data: { segmentId: 'a', detail: { timeMs: 500 } } },
+      operations: [],
+    }])
+    expect(operationLog.value[0]).not.toHaveProperty('patches')
 
     // Metadata is not part of undo semantics: the entry still undoes normally.
     undo()
     expect(state.value.count).toBe(0)
+    expect(operationLog.value[0]?.status).toBe('undone')
+  })
+
+  it('rejects metadata that cannot be isolated from the caller', () => {
+    const { beginTransaction, transactionDepth } = createHistory()
+
+    expect(() => beginTransaction({ data: { callback: () => undefined } }))
+      .toThrow('transaction metadata must be structured-cloneable')
+    expect(transactionDepth.value).toBe(0)
+  })
+
+  it('lists direct named operations inside a grouped transaction', () => {
+    const { transaction, update, operationLog } = createHistory()
+
+    transaction(() => {
+      transaction(() => {
+        update((draft) => {
+          draft.count = 1
+        })
+      }, { label: 'move-segment', data: { segmentId: 'a' } })
+      transaction(() => {
+        update((draft) => {
+          draft.items.push({ id: 'b', value: 1 })
+        })
+      }, { label: 'update-segment', data: { segmentId: 'b' } })
+    }, { label: 'accept-proposal', data: { proposalId: 'proposal-1' } })
+
+    expect(operationLog.value[0]).toEqual({
+      index: 0,
+      status: 'applied',
+      meta: { label: 'accept-proposal', data: { proposalId: 'proposal-1' } },
+      operations: [
+        { label: 'move-segment', data: { segmentId: 'a' } },
+        { label: 'update-segment', data: { segmentId: 'b' } },
+      ],
+    })
+  })
+
+  it('updates status on undo and redo, then removes an abandoned redo branch', () => {
+    const { transaction, update, operationLog, undo, redo } = createHistory()
+
+    const setCount = (count: number) => transaction(() => {
+      update((draft) => {
+        draft.count = count
+      })
+    }, { label: 'set-count', data: { count } })
+
+    setCount(1)
+    setCount(2)
+    undo()
+    expect(operationLog.value.map(entry => entry.status)).toEqual(['applied', 'undone'])
+
+    redo()
+    expect(operationLog.value.map(entry => entry.status)).toEqual(['applied', 'applied'])
+
+    undo()
+    setCount(3)
+    expect(operationLog.value.map(entry => entry.meta?.data)).toEqual([{ count: 1 }, { count: 3 }])
   })
 })
 

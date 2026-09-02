@@ -14,6 +14,8 @@ export type {
   AddTrackResult,
   CanvasSize,
   HistoryMutationResult,
+  OperationLogEntry,
+  OperationLogMeta,
   SetCanvasSizeResult,
   SetFpsResult,
   TrackMutableFields,

@@ -1,6 +1,6 @@
 import type { ComputedRef, Ref } from '@vue/reactivity'
 import type { Patch } from 'immer'
-import { computed, ref, shallowRef } from '@vue/reactivity'
+import { computed, ref, shallowRef, toRaw } from '@vue/reactivity'
 import { applyPatches, enableMapSet, enablePatches, produceWithPatches } from 'immer'
 
 enablePatches()
@@ -21,10 +21,27 @@ export interface TransactionMeta {
   data?: Record<string, unknown>
 }
 
+export interface OperationLogMeta {
+  readonly label?: string
+  readonly data?: Readonly<Record<string, unknown>>
+}
+
+export interface OperationLogEntry {
+  /** Position in the currently reachable history branch. */
+  readonly index: number
+  /** Undo changes this to `undone`; redo restores `applied`. */
+  readonly status: 'applied' | 'undone'
+  /** Description of the outer transaction, when it has one. */
+  readonly meta?: OperationLogMeta
+  /** Direct named transactions committed inside the outer transaction. */
+  readonly operations: readonly OperationLogMeta[]
+}
+
 export interface UndoStackItem {
   patches: Patch[]
   inversePatches: Patch[]
   meta?: TransactionMeta
+  operations: TransactionMeta[]
 }
 
 export interface TransactionOptions<T> extends TransactionMeta {
@@ -73,6 +90,7 @@ interface TransactionFrame<T> {
   patches: Patch[]
   inversePatches: Patch[]
   meta?: TransactionMeta
+  operations: TransactionMeta[]
   validate?: (state: T) => boolean
   cancelled: boolean
   closed: boolean
@@ -106,6 +124,8 @@ export interface History<T> {
   isRedoDisable: ComputedRef<boolean>
   undoCount: ComputedRef<number>
   redoCount: ComputedRef<number>
+  /** Semantic history only; Immer patches remain private. */
+  operationLog: ComputedRef<readonly OperationLogEntry[]>
   /**
    * Open a transaction imperatively. Use this for continuous interactions that
    * span multiple events (pointer down → move → up); prefer `transaction()`
@@ -150,6 +170,18 @@ export function useHistory<T>(baseState: T): History<T> {
   }
   const currentFrame = () => frames.at(-1)
 
+  const cloneMeta = (meta: TransactionMeta): TransactionMeta => {
+    try {
+      return {
+        ...(meta.label === undefined ? {} : { label: meta.label }),
+        ...(meta.data === undefined ? {} : { data: structuredClone(toRaw(meta.data)) }),
+      }
+    }
+    catch (error) {
+      throw new TypeError('transaction metadata must be structured-cloneable', { cause: error })
+    }
+  }
+
   const pushHistory = (item: UndoStackItem) => {
     const pointer = ++undoStackPointer.value
     undoStack.value.length = pointer
@@ -183,7 +215,7 @@ export function useHistory<T>(baseState: T): History<T> {
         frame.inversePatches.push(...inversePatches)
       }
       else {
-        pushHistory({ patches, inversePatches })
+        pushHistory({ patches, inversePatches, operations: [] })
       }
       callback?.(patches, inversePatches, applyEffect)
     }
@@ -200,8 +232,9 @@ export function useHistory<T>(baseState: T): History<T> {
       patches: [],
       inversePatches: [],
       meta: options?.label !== undefined || options?.data !== undefined
-        ? { label: options.label, data: options.data }
+        ? cloneMeta({ label: options.label, data: options.data })
         : undefined,
+      operations: [],
       validate: options?.validate,
       cancelled: false,
       closed: false,
@@ -247,6 +280,10 @@ export function useHistory<T>(baseState: T): History<T> {
             continue
           frame.patches.push(...orphan.patches)
           frame.inversePatches.push(...orphan.inversePatches)
+          if (orphan.meta?.label)
+            frame.operations.push(cloneMeta(orphan.meta))
+          else
+            frame.operations.push(...orphan.operations.map(cloneMeta))
         }
 
         const parent = frames[depth - 2]
@@ -258,6 +295,10 @@ export function useHistory<T>(baseState: T): History<T> {
         if (parent) {
           parent.patches.push(...frame.patches)
           parent.inversePatches.push(...frame.inversePatches)
+          if (frame.meta?.label)
+            parent.operations.push(cloneMeta(frame.meta))
+          else
+            parent.operations.push(...frame.operations.map(cloneMeta))
           return 'nested'
         }
 
@@ -267,6 +308,7 @@ export function useHistory<T>(baseState: T): History<T> {
           // walk them backwards.
           inversePatches: [...frame.inversePatches].reverse(),
           meta: frame.meta,
+          operations: frame.operations,
         })
         return 'committed'
       },
@@ -332,6 +374,15 @@ export function useHistory<T>(baseState: T): History<T> {
     () => undoStack.value.length - undoStackPointer.value - 1,
   )
 
+  const operationLog = computed<readonly OperationLogEntry[]>(() => {
+    return undoStack.value.map((item, index) => ({
+      index,
+      status: index <= undoStackPointer.value ? 'applied' : 'undone',
+      ...(item.meta === undefined ? {} : { meta: cloneMeta(item.meta) }),
+      operations: item.operations.map(cloneMeta),
+    }))
+  })
+
   const isTransactionActive = computed(() => frameDepth.value > 0)
   const transactionDepth = computed(() => frameDepth.value)
 
@@ -345,6 +396,7 @@ export function useHistory<T>(baseState: T): History<T> {
     isRedoDisable,
     undoCount,
     redoCount,
+    operationLog,
     beginTransaction,
     transaction,
     isTransactionActive,

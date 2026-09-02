@@ -100,12 +100,18 @@ P0 拆成三个顺序交付的门槛，避免所有基础能力集中在一个�
       moveKeyframe / removeKeyframe / setKeyframeEasing。测试断言 `canRun` 的判断与命令的实际行为
       一致，两者不允许分歧。
 
-**语义化操作日志。** History 记录的是 immer patch，人类看不懂，无法据此审阅 agent 的提案。
-需要在事务上附带语义描述（例如 `split-segment`、`replace-source` 及其参数），用于：
+**语义化操作日志。已完成。** History 仍使用 immer patch 完成撤销和重做，但不再向调用方暴露
+patch。协议命令和 `editor-core` 命令会记录语义标签及参数，例如 `split-segment`、
+`move-segments` 和 `upsert-keyframe`。`manager.operationLog`、`editor.state.operationLog` 和
+`editor.selectors.getOperationLog()` 提供不含 patch 的操作记录，用于：
 
 - 向人类展示"agent 打算做什么"，支撑提案 → 审阅 → 接受/拒绝的流程；
 - 未来的历史记录界面；
 - 审计与调试。
+
+每条记录标明当前是 `applied` 还是 `undone`；撤销后产生新编辑时，不可再重做的分支会从记录中
+删除。外层事务会保留自身元数据，并列出直接提交到其中的具名操作，能够表示批量命令和未来接受
+提案时的操作列表。元数据在写入时复制，调用方后续修改原对象不会改写历史。
 
 语义标签不参与撤销语义本身，只作为元数据，也不能直接作为确定性回放格式。未来如需回放，
 需要另外定义带版本的操作协议、前置条件、基础工程版本和确定性 ID 生成规则。
@@ -159,7 +165,8 @@ History 需要满足：
 - 事务提交前统一执行协议校验；校验失败时回滚到事务开始前的状态，并返回明确错误。
 - 工程协议之外的异步副作用不进入 History。资源写入、上传和导出等任务应在事务成功后启动，
   并使用独立的取消和补偿机制。
-- 事务可携带语义标签和元数据，供 agent 提案审阅和历史界面使用。
+- [x] 事务可携带语义标签和元数据，供 agent 提案审阅和历史界面使用；嵌套事务会保留直接子
+      操作，取消、失败和空事务不产生操作记录。
 
 `editor-core.commands` 应提供稳定的批量操作入口，避免界面连续调用多个底层命令拼接业务操作。
 协议层需要提供明确的事务 API，但具体命名在实现前通过 RFC 确定。
@@ -459,7 +466,7 @@ i18n 方案，当前只能通过覆盖 slot 或分叉来本地化，与"宿主�
 
 ### 命令层测试覆盖
 
-**状态：已完成。** `editor-core` 此前没有任何测试文件，现在有 95 个用例（Node 环境，
+**状态：已完成。** `editor-core` 此前没有任何测试文件，现在有 100 个用例（Node 环境，
 `vitest.config.ts` 把 `@video-editor/*` 别名指向源码）：
 
 - `core.test.ts`：状态派生、片段增删改、分割、裁剪、画布尺寸、查询、事务。
@@ -468,6 +475,7 @@ i18n 方案，当前只能通过覆盖 slot 或分叉来本地化，与"宿主�
   `replaceSegmentId`，以及插件与 segment registry 的生命周期。
 - `selectors.test.ts`：时间点、结构、属性采样、选中态和 `canRun` 查询。
 - `keyframes.test.ts`：关键帧新增或更新、移动、删除、缓动、边界校验和历史记录。
+- `operation-log.test.ts`：语义元数据、嵌套操作、撤销状态、隔离副本和失败操作。
 
 补覆盖的过程中发现并修掉了两个协议层缺陷：`moveSegment` 省略 `targetTrackId` 时会丢片段
 却返回成功；命令返回 `false`（拒绝执行）时仍会因转场同步写入而压入一个历史项。

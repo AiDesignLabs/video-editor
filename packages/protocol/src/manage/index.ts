@@ -1,6 +1,7 @@
 import type { IAudioSegment, ITrack, ITrackType, ITransition, ITransitionEdge, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
 import type { DeepReadonly } from '@vue/reactivity'
 import type { Patch } from 'immer'
+import type { TransactionMeta } from './immer'
 import type { PartialByKeys } from './utils'
 import { isAudioSegment, isVideoFramesSegment, sampleKeyframes } from '@video-editor/shared'
 import { computed, reactive, readonly, ref, toRaw } from '@vue/reactivity'
@@ -11,6 +12,8 @@ import { checkSegment, handleSegmentUpdate } from './segment'
 import { clone, findInsertFramesSegmentIndex, findInsertSegmentIndex, genRandomId } from './utils'
 
 export type {
+  OperationLogEntry,
+  OperationLogMeta,
   TransactionHandle,
   TransactionMeta,
   TransactionOptions,
@@ -307,6 +310,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     exportProtocol,
     undoCount,
     redoCount,
+    operationLog,
     protocol: protocolRef,
   } = normalizedProtocol(validator.verify(protocol))
 
@@ -329,8 +333,11 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
    * when the updater bailed out, and its write to `protocol.transitions` was by
    * itself enough to push a history item for an operation that changed nothing.
    */
-  const updateProtocolWithTransitionSync = <T>(updater: (protocol: IVideoProtocol) => T): T => {
-    const tx = beginTransaction()
+  const updateProtocolWithTransitionSync = <T>(
+    updater: (protocol: IVideoProtocol) => T,
+    meta?: TransactionMeta,
+  ): T => {
+    const tx = beginTransaction(meta)
     let result!: T
     updateProtocol((protocol) => {
       result = updater(protocol)
@@ -342,6 +349,11 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       tx.commit()
     return result
   }
+
+  const updateProtocolWithMeta = <T>(
+    updater: (protocol: IVideoProtocol) => T,
+    meta: TransactionMeta,
+  ): T => transaction(() => updateProtocol(updater), meta).value
 
   const addSegmentToTrack = <T extends SegmentUnion>(segment: T, tracks: IVideoProtocol['tracks']) => {
     const hasMainFrames = tracks.some(track => track.trackType === 'frames' && (track as TrackTypeMapTrack['frames']).isMain)
@@ -565,6 +577,9 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         affectedTrackIds.add(newTrack.trackId)
       }
       return newId
+    }, {
+      label: 'add-segment',
+      data: { segmentId: theSegment.id, segmentType: theSegment.segmentType, trackId },
     })
 
     // Collect affected segments from the final protocol state (not from Immer drafts)
@@ -619,7 +634,10 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     // Keep the source id on the copy on purpose: `normalizedSegment` detects the
     // collision and generates a fresh id for us.
     const copy = JSON.parse(JSON.stringify(source)) as SegmentUnion
-    const result = addSegment(copy)
+    const result = transaction(
+      () => addSegment(copy),
+      { label: 'duplicate-segment', data: { segmentId } },
+    ).value
 
     return { success: true, ...result }
   }
@@ -692,7 +710,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         }
       }
       return false
-    })
+    }, { label: 'remove-segment', data: { segmentId: id, ripple: removeOptions?.ripple === true } })
 
     // Collect affected segments from the final protocol state (not from Immer drafts)
     const affectedSegments: SegmentUnion[] = []
@@ -843,7 +861,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       }
 
       return true
-    })
+    }, { label: 'move-segment', data: { ...moveOptions } })
 
     const affectedSegments: SegmentUnion[] = []
     if (success) {
@@ -936,7 +954,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       affectedTrackId = track.trackId
 
       return true
-    })
+    }, { label: 'resize-segment', data: { ...options } })
 
     // Collect affected segments from the final protocol state (not from Immer drafts)
     const affectedSegments: SegmentUnion[] = []
@@ -1056,7 +1074,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
 
       affectedTrackId = track.trackId
       return true
-    })
+    }, { label: 'split-segment', data: { segmentId, timelineMs } })
 
     const affectedSegments: SegmentUnion[] = []
     if (success && affectedTrackId) {
@@ -1180,7 +1198,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         transitions.push(edge)
 
       return true
-    })
+    }, { label: 'add-transition', data: { transition: { ...transition }, addTime } })
   }
 
   const removeTransition = (segmentId: string) => {
@@ -1204,7 +1222,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         return false
       protocol.transitions = filtered
       return true
-    })
+    }, { label: 'remove-transition', data: { segmentId } })
   }
 
   const updateTransition = (segmentId: string, updater: (transition: ITransition) => void) => {
@@ -1237,7 +1255,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       }
 
       return false
-    })
+    }, { label: 'update-transition', data: { segmentId } })
   }
 
   /** Set the project frame rate without changing millisecond-based timeline data. */
@@ -1249,9 +1267,9 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     if (protocolRef.value.fps === fps)
       return { success: true }
 
-    updateProtocol((protocol) => {
+    updateProtocolWithMeta((protocol) => {
       protocol.fps = fps
-    })
+    }, { label: 'set-fps', data: { fps } })
     return { success: true }
   }
 
@@ -1279,10 +1297,10 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     if (protocolRef.value.width === width && protocolRef.value.height === height)
       return { success: true }
 
-    updateProtocol((protocol) => {
+    updateProtocolWithMeta((protocol) => {
       protocol.width = width
       protocol.height = height
-    })
+    }, { label: 'set-canvas-size', data: { width, height } })
     return { success: true }
   }
 
@@ -1319,9 +1337,9 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
       return { success: false, error: 'invalid track data' }
     }
 
-    updateProtocol((protocol) => {
+    updateProtocolWithMeta((protocol) => {
       protocol.tracks.splice(index, 0, track)
-    })
+    }, { label: 'add-track', data: { trackId, trackType: input.trackType, index } })
     return { success: true, trackId }
   }
 
@@ -1349,7 +1367,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         }
       }
       return true
-    })
+    }, { label: 'remove-track', data: { trackId, removedSegmentIds } })
 
     return { success: true, removedSegmentIds }
   }
@@ -1365,10 +1383,10 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     if (fromIndex === toIndex)
       return { success: true }
 
-    updateProtocol((protocol) => {
+    updateProtocolWithMeta((protocol) => {
       const [track] = protocol.tracks.splice(fromIndex, 1)
       protocol.tracks.splice(toIndex, 0, track)
-    })
+    }, { label: 'move-track', data: { trackId, fromIndex, toIndex } })
     return { success: true }
   }
 
@@ -1404,7 +1422,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         extraTarget.extra = patch.extra
 
       return true
-    })
+    }, { label: 'update-track', data: { trackId } })
   }
 
   const replaceTrackId = (oldTrackId: string, newTrackId: string) => {
@@ -1414,7 +1432,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         return false
       track.trackId = newTrackId
       return true
-    })
+    }, { label: 'replace-track-id', data: { oldTrackId, newTrackId } })
   }
 
   const replaceSegmentId = (oldSegmentId: string, newSegmentId: string) => {
@@ -1439,7 +1457,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
         return true
       }
       return false
-    })
+    }, { label: 'replace-segment-id', data: { oldSegmentId, newSegmentId } })
     if (success && selectedSegmentId.value === oldSegmentId)
       selectedSegmentId.value = newSegmentId
     return success
@@ -1525,6 +1543,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     redo,
     redoCount,
     undoCount,
+    operationLog,
 
     beginTransaction,
     transaction,
@@ -1544,6 +1563,7 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     undo,
     undoCount,
     redoCount,
+    operationLog,
     beginTransaction,
     transaction,
     isTransactionActive,
@@ -1629,6 +1649,7 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     undo,
     undoCount,
     redoCount,
+    operationLog,
     exportProtocol,
   }
 }

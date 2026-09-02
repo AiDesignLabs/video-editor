@@ -204,6 +204,8 @@ export interface EditorCoreState {
   undoCount: ProtocolManager['undoCount']
   /** Redo stack size. */
   redoCount: ProtocolManager['redoCount']
+  /** Semantic descriptions of the currently reachable history branch. */
+  operationLog: ProtocolManager['operationLog']
   /** Whether a history transaction is currently open. */
   isTransactionActive: ProtocolManager['isTransactionActive']
   /** Nesting depth of the open transaction; 0 when none is open. */
@@ -340,6 +342,8 @@ export interface EditorCoreSelectors {
   sampleProperty: (segmentId: string, property: IKeyframeProperty, timeMs: number) => SampledProperty | undefined
   /** The current selection, resolved against the protocol. */
   getSelection: () => EditorSelection
+  /** Semantic history entries without internal Immer patches. */
+  getOperationLog: () => ProtocolManager['operationLog']['value']
   /** Whether a command would do anything right now, and why not when it would not. */
   canRun: (check: CommandCheck) => CommandCheckResult
 }
