@@ -27,6 +27,7 @@ describe('timeline track layout', () => {
 
   it('keeps a muted track visibly distinct from a hidden track', () => {
     expect(source).toContain('\'ve-track--muted\': trackLayout.track.muted')
-    expect(source).toMatch(/\.ve-track--muted \.ve-segment\s*\{[\s\S]*?opacity:\s*0\.5;[\s\S]*?filter:\s*grayscale\(0\.85\);/)
+    expect(source).toMatch(/\.ve-track--muted \.ve-track__body::after\s*\{[\s\S]*?height:\s*2px;[\s\S]*?background:\s*var\(--ve-track-muted-color/)
+    expect(source).not.toMatch(/\.ve-track--muted \.ve-segment/)
   })
 })
