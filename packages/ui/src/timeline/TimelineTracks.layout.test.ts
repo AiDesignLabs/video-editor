@@ -18,4 +18,10 @@ describe('timeline track layout', () => {
     expect(source).toMatch(/left: `\$\{segmentGeometry\(layout\)\.left\}px`/)
     expect(source).toMatch(/width: `\$\{segmentGeometry\(layout\)\.width\}px`/)
   })
+
+  it('renders only buffered visible segments while preserving active interactions', () => {
+    expect(source).toContain('v-for="layout in getRenderedSegments(trackLayout)"')
+    expect(source).toContain('if (isActiveSegment(layout))')
+    expect(source).toContain('intersectsTimelineRenderWindow(geometry.left, geometry.width, renderWindow)')
+  })
 })

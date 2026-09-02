@@ -278,13 +278,16 @@ function buildTransitionSeams(overlay: TimelineOverlaySlotProps): TransitionSeam
       continue
     // The main frames track has no gaps, so the boundary is a single point.
     const boundaryTime = from.segment.end
+    const left = boundaryTime * overlay.pixelsPerMs
+    if (left < overlay.visibleStartPx || left > overlay.visibleEndPx)
+      continue
     seams.push({
       key: `${from.segment.id}->${to.segment.id}`,
       fromSegmentId: from.segment.id,
       toSegmentId: to.segment.id,
       boundaryTime,
       existing: findTransitionEdge(from.segment.id, to.segment.id),
-      left: boundaryTime * overlay.pixelsPerMs,
+      left,
       top,
     })
   }

@@ -57,6 +57,9 @@ export interface TrackLayout {
 /** Slot props of VideoTimeline's `overlay` slot (content-box coordinates). */
 export interface TimelineOverlaySlotProps {
   trackLayouts: TrackLayout[]
+  /** Buffered visible range in timeline content coordinates. */
+  visibleStartPx: number
+  visibleEndPx: number
   pixelsPerMs: number
   rulerHeight: number
   trackHeight: number

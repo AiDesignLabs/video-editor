@@ -19,6 +19,7 @@ import TimelineTracks from '../timeline/TimelineTracks.vue'
 import { useDragAndDrop } from './hooks'
 import { buildTrackMetrics, trackHeightAt, trackTopAt } from './metrics'
 import { collectSnapCandidates, quantizeToGrid, resolveSnapCandidates, SNAP_THRESHOLD_PX } from './snap'
+import { intersectsTimelineRenderWindow, resolveTimelineRenderWindow } from './virtualization'
 import { gestureZoomFactor, normalizeGestureScale, normalizeWheelDeltaY, pinchZoomFactor } from './zoom'
 
 defineOptions({ name: 'VideoTimeline' })
@@ -96,6 +97,7 @@ const contentRef = ref<HTMLElement | null>(null)
 const tracksRef = ref<HTMLElement | null>(null)
 
 const viewportWidth = ref(0)
+const viewportScrollLeft = ref(0)
 /**
  * Measured rail width. The rail is a sticky column that occupies real space at
  * the left of the viewport, so the timeline area is `viewportWidth - railWidth`
@@ -190,6 +192,13 @@ const contentWidthPx = computed(() => {
   return Math.max(Math.ceil(safeWidth), Math.ceil(timelineWidth.value))
 })
 
+const renderWindow = computed(() => resolveTimelineRenderWindow({
+  scrollLeft: viewportScrollLeft.value,
+  viewportWidth: viewportWidth.value,
+  railWidth: railWidthPx.value,
+  contentWidth: contentWidthPx.value,
+}))
+
 const renderedDurationForTicks = computed(() => {
   const pxPerMs = Math.max(pixelsPerMs.value, 0.0001)
   const pxWidth = contentWidthPx.value || viewportWidth.value || 0
@@ -200,6 +209,9 @@ const renderedDurationForTicks = computed(() => {
 const playheadLeft = computed(() => props.currentTime * pixelsPerMs.value)
 
 const ticks = computed<TimelineTick[]>(() => buildTicks(renderedDurationForTicks.value, pixelsPerMs.value))
+const visibleTicks = computed(() => ticks.value.filter(tick =>
+  intersectsTimelineRenderWindow(tick.position, 0, renderWindow.value),
+))
 const frameDurationMs = computed(() => 1000 / Math.max(props.fps || 30, 1))
 
 const trackHeightPx = computed(() => props.trackHeight)
@@ -385,6 +397,11 @@ function centerViewportOnCurrentTime() {
   const halfWidth = viewport.clientWidth / 2
   const desired = props.currentTime * pixelsPerMs.value + getTimelineTrackRailWidth() - halfWidth
   viewport.scrollLeft = Math.max(0, desired)
+  viewportScrollLeft.value = viewport.scrollLeft
+}
+
+function handleViewportScroll() {
+  viewportScrollLeft.value = viewportRef.value?.scrollLeft ?? 0
 }
 
 function clampZoom(value: number) {
@@ -908,6 +925,7 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
         ref="viewportRef"
         class="ve-timeline__viewport"
         @click="handleBackgroundClick"
+        @scroll="handleViewportScroll"
       >
         <div
           ref="contentRef"
@@ -916,8 +934,8 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
           :style="{ width: `calc(${contentWidthPx}px + ${railWidthPx}px)` }"
         >
           <div class="ve-timeline__ruler-layer">
-            <slot name="ruler" :ticks="ticks" :pixels-per-ms="pixelsPerMs">
-              <TimelineRuler :ticks="ticks" :style="{ height: `${rulerHeightPx}px` }" />
+            <slot name="ruler" :ticks="visibleTicks" :pixels-per-ms="pixelsPerMs">
+              <TimelineRuler :ticks="visibleTicks" :style="{ height: `${rulerHeightPx}px` }" />
             </slot>
           </div>
 
@@ -938,6 +956,8 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
               :show-track-rail="hasTrackRailSlot"
               :drag-preview="dragPreview"
               :resize-preview="resizePreview"
+              :visible-start-px="renderWindow.startPx"
+              :visible-end-px="renderWindow.endPx"
               @segment-click="handleSegmentClick"
               @segment-mousedown="startDrag"
               @resize-start="startResize"
@@ -981,6 +1001,8 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
             <slot
               name="overlay"
               :track-layouts="segmentLayouts"
+              :visible-start-px="renderWindow.startPx"
+              :visible-end-px="renderWindow.endPx"
               :pixels-per-ms="pixelsPerMs"
               :ruler-height="rulerHeightPx"
               :track-height="trackHeightPx"

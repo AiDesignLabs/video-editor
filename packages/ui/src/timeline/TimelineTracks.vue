@@ -2,6 +2,7 @@
 import type { SegmentLayout, SegmentResizePayload, TimelineTrack } from '../VideoTimeline/types'
 import { computed } from 'vue'
 import { resolveResizePreviewGeometry } from '../VideoTimeline/resize'
+import { intersectsTimelineRenderWindow } from '../VideoTimeline/virtualization'
 
 defineOptions({ name: 'TimelineTracks' })
 
@@ -17,6 +18,8 @@ const props = defineProps<{
     segment: { id: string }
   } | null
   resizePreview?: Pick<SegmentResizePayload, 'segment' | 'startTime' | 'endTime'> | null
+  visibleStartPx: number
+  visibleEndPx: number
 }>()
 
 const emit = defineEmits<{
@@ -58,6 +61,21 @@ function segmentGeometry(layout: SegmentLayout) {
   return resolveResizePreviewGeometry(layout, props.resizePreview)
 }
 
+function isActiveSegment(layout: SegmentLayout) {
+  const id = layout.segment.id
+  return props.dragPreview?.segment.id === id || props.resizePreview?.segment.id === id
+}
+
+function getRenderedSegments(trackLayout: TrackLayout) {
+  const renderWindow = { startPx: props.visibleStartPx, endPx: props.visibleEndPx }
+  return trackLayout.segments.filter((layout) => {
+    if (isActiveSegment(layout))
+      return true
+    const geometry = segmentGeometry(layout)
+    return intersectsTimelineRenderWindow(geometry.left, geometry.width, renderWindow)
+  })
+}
+
 const trackGaps = computed(() => {
   return props.tracks.map((trackLayout) => {
     const gaps = []
@@ -96,7 +114,9 @@ const trackGaps = computed(() => {
 })
 
 function getGapsForTrack(trackId: string) {
-  return trackGaps.value.find(tg => tg.trackId === trackId)?.gaps || []
+  const renderWindow = { startPx: props.visibleStartPx, endPx: props.visibleEndPx }
+  return (trackGaps.value.find(tg => tg.trackId === trackId)?.gaps || [])
+    .filter(gap => intersectsTimelineRenderWindow(gap.left, gap.width, renderWindow))
 }
 </script>
 
@@ -129,7 +149,7 @@ function getGapsForTrack(trackId: string) {
       </div>
       <div class="ve-track__body">
         <div
-          v-for="layout in trackLayout.segments"
+          v-for="layout in getRenderedSegments(trackLayout)"
           v-show="dragPreview?.segment.id !== layout.segment.id"
           :key="layout.segment.id"
           class="ve-segment"
