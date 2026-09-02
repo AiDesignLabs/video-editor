@@ -66,3 +66,7 @@ compatibility URL required by the current protocol; application code must not co
 
 Use `assets.resolveForPreview` as the renderer resolver and `assets.resolveForExport` as the compose
 resolver. Do not use the preview resolver for export.
+
+Use `assets.getPreviewBlob(asset.id)`, `assets.getThumbnails(asset.id, options)`, and
+`assets.getWaveform(asset.id, options)` for asset UI. Do not resolve an asset URL and call the low-level
+resource helpers yourself.

@@ -31,7 +31,8 @@ Renderer code may use PixiJS loading internally, but PixiJS keys are not asset I
 Use `MediaAssetCatalog` for imports, lists, segment bindings, removal, and preview/export resolvers.
 It hides URLs, revisions, proxy IDs, and OPFS details from normal integrations.
 
-Use `AssetLibrary` only to implement or debug:
+`AssetLibrary` is not a public package export. Use its source module only while implementing or debugging the
+`protocol` package itself:
 
 - custom persistent storage;
 - proxy creation and source-revision tracking;
