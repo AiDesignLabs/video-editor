@@ -1,22 +1,18 @@
 <script setup lang="ts">
-import type { AssetMeta } from '@video-editor/protocol'
-import type { IVideoProtocol } from '@video-editor/shared'
-import { createAssetLibrary, generateThumbnails } from '@video-editor/protocol'
+import type { MediaAsset, MediaAssetCatalog, SegmentAssetBinding } from '@video-editor/protocol'
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 defineOptions({ name: 'AssetPanel' })
 
 const props = defineProps<{
-  getProtectedProtocols: () => Promise<IVideoProtocol[]>
+  catalog: MediaAssetCatalog
 }>()
 
 const emit = defineEmits<{
-  (event: 'add', asset: AssetMeta): void
+  (event: 'add', binding: SegmentAssetBinding): void
 }>()
 
-const library = createAssetLibrary()
-
-const assets = ref<AssetMeta[]>([])
+const assets = ref<MediaAsset[]>([])
 const importing = ref(false)
 const error = ref<string | null>(null)
 const dragActive = ref(false)
@@ -25,13 +21,13 @@ const fileInput = ref<HTMLInputElement | null>(null)
 /** Preview object urls keyed by asset id; every entry must be revoked before it is dropped. */
 const previews = reactive<Record<string, string>>({})
 
-const KIND_GLYPH: Record<AssetMeta['kind'], string> = {
+const KIND_GLYPH: Record<MediaAsset['kind'], string> = {
   video: '🎬',
   audio: '🎵',
   image: '🖼',
 }
 
-const KIND_LABEL: Record<AssetMeta['kind'], string> = {
+const KIND_LABEL: Record<MediaAsset['kind'], string> = {
   video: '视频',
   audio: '音频',
   image: '图片',
@@ -61,28 +57,28 @@ function formatDuration(ms: number | undefined) {
   return `${String(minutes).padStart(2, '0')}:${seconds.toFixed(1).padStart(4, '0')}`
 }
 
-function describe(asset: AssetMeta) {
+function describe(asset: MediaAsset) {
   const duration = formatDuration(asset.durationMs)
   return duration ? `${duration} · ${formatBytes(asset.sizeBytes)}` : formatBytes(asset.sizeBytes)
 }
 
 /** Build a preview object url for one asset; failures simply fall back to the kind glyph. */
-async function loadPreview(asset: AssetMeta) {
+async function loadPreview(asset: MediaAsset) {
   if (previews[asset.id])
     return
 
   try {
     if (asset.kind === 'image') {
-      const file = await library.getAssetFile(asset.id)
-      if (!file)
+      const blob = await props.catalog.getPreviewBlob(asset.id)
+      if (!blob)
         return
-      previews[asset.id] = URL.createObjectURL(file)
+      previews[asset.id] = URL.createObjectURL(blob)
       return
     }
 
     if (asset.kind === 'video') {
       // Microsecond units: grab a single frame near the start of the clip.
-      const shots = await generateThumbnails(asset.url, {
+      const shots = await props.catalog.getThumbnails(asset.id, {
         imgWidth: 160,
         start: 0,
         end: 800_000,
@@ -100,7 +96,7 @@ async function loadPreview(asset: AssetMeta) {
 
 async function refresh() {
   revokePreviews()
-  assets.value = await library.listAssets()
+  assets.value = await props.catalog.list()
   await Promise.all(assets.value.map(loadPreview))
 }
 
@@ -114,7 +110,7 @@ async function importFiles(files: File[]) {
 
   for (const file of files) {
     try {
-      await library.importAsset(file)
+      await props.catalog.import(file)
     }
     catch (err) {
       // A single bad file must not abort the rest of the batch.
@@ -163,11 +159,20 @@ async function handleDrop(event: DragEvent) {
   await importFiles(files)
 }
 
-async function handleRemove(asset: AssetMeta) {
+async function handleAdd(asset: MediaAsset) {
   error.value = null
   try {
-    const protocols = await props.getProtectedProtocols()
-    await library.removeAsset(asset.id, { protocols })
+    emit('add', await props.catalog.bindForSegment(asset.id))
+  }
+  catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
+async function handleRemove(asset: MediaAsset) {
+  error.value = null
+  try {
+    await props.catalog.remove(asset.id)
     await refresh()
   }
   catch (err) {
@@ -197,7 +202,7 @@ onBeforeUnmount(revokePreviews)
         {{ importing ? '导入中…' : '导入素材' }}
       </button>
       <p class="asset-panel__hint">
-        支持视频 / 音频 / 图片，也可以直接把文件拖进本面板。素材存放在浏览器 OPFS 中。
+        支持视频 / 音频 / 图片，也可以直接把文件拖进本面板。
       </p>
       <p v-if="error" class="asset-panel__error">
         {{ error }}
@@ -219,7 +224,7 @@ onBeforeUnmount(revokePreviews)
           :key="asset.id"
           class="asset-card"
           :title="asset.name"
-          @click="emit('add', asset)"
+          @click="handleAdd(asset)"
         >
           <div class="asset-card__thumb">
             <img v-if="previews[asset.id]" :src="previews[asset.id]" :alt="asset.name">

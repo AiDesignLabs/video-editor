@@ -1,7 +1,7 @@
 import type { IVideoProtocol } from '@video-editor/shared'
 import type { AssetLibrary, AssetMeta } from './index'
 import { describe, expect, it, vi } from 'vitest'
-import { createMediaAssetCatalog } from './catalog'
+import { createMediaAssetCatalogFromLibrary } from './catalog'
 
 const source: AssetMeta = {
   id: 'source-1',
@@ -52,7 +52,7 @@ function createLibrary(assets: AssetMeta[] = [source, proxy]): AssetLibrary {
 
 describe('media asset catalog', () => {
   it('lists original media without storage or proxy internals', async () => {
-    const catalog = createMediaAssetCatalog({ library: createLibrary() })
+    const catalog = createMediaAssetCatalogFromLibrary(createLibrary())
 
     const assets = await catalog.list()
 
@@ -73,7 +73,10 @@ describe('media asset catalog', () => {
   })
 
   it('creates protocol bindings and purpose-specific resolvers', async () => {
-    const catalog = createMediaAssetCatalog({ library: createLibrary() })
+    const library = createLibrary()
+    const preview = new File(['preview'], 'preview.mp4', { type: 'video/mp4' })
+    library.getAssetFile = vi.fn(async () => preview)
+    const catalog = createMediaAssetCatalogFromLibrary(library)
 
     await expect(catalog.bindForSegment(source.id)).resolves.toMatchObject({
       assetId: source.id,
@@ -83,11 +86,13 @@ describe('media asset catalog', () => {
     })
     await expect(catalog.resolveForPreview(source.id)).resolves.toBe(proxy.url)
     await expect(catalog.resolveForExport(source.id)).resolves.toBe(source.url)
+    await expect(catalog.getPreviewBlob(source.id)).resolves.toBe(preview)
+    expect(library.getAssetFile).toHaveBeenCalledWith(source.id, { preferProxy: true })
   })
 
   it('requires protected protocols before removal', async () => {
     const library = createLibrary([source])
-    const catalog = createMediaAssetCatalog({ library })
+    const catalog = createMediaAssetCatalogFromLibrary(library)
 
     await expect(catalog.remove(source.id)).rejects.toThrow('requires getProtectedProtocols')
     expect(library.removeAsset).not.toHaveBeenCalled()
@@ -103,8 +108,7 @@ describe('media asset catalog', () => {
       tracks: [],
     }
     const library = createLibrary([source])
-    const catalog = createMediaAssetCatalog({
-      library,
+    const catalog = createMediaAssetCatalogFromLibrary(library, {
       getProtectedProtocols: () => [protocol],
     })
 

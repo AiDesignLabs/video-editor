@@ -1,5 +1,9 @@
 import type { IVideoProtocol } from '@video-editor/shared'
-import type { AssetKind, AssetLibrary, AssetLibraryOptions, AssetMeta } from './index'
+import type { GenerateThumbnailsOptions, Thumbnail } from '../resource/thumbnails'
+import type { WaveformData, WaveformOptions } from '../resource/waveform'
+import type { AssetKind, AssetLibrary, AssetMeta } from './index'
+import { generateThumbnails } from '../resource/thumbnails'
+import { extractWaveform } from '../resource/waveform'
 import { createAssetLibrary } from './index'
 
 export type MediaAssetProxyStatus = 'none' | 'ready' | 'stale'
@@ -20,6 +24,7 @@ export interface MediaAsset {
 /** Compatibility fields required when a managed asset is written into a segment. */
 export interface SegmentAssetBinding {
   assetId: string
+  name: string
   url: string
   kind: AssetKind
   durationMs?: number
@@ -27,9 +32,11 @@ export interface SegmentAssetBinding {
   height?: number
 }
 
-export interface MediaAssetCatalogOptions extends AssetLibraryOptions {
-  /** Reuse an advanced asset library, primarily for custom storage or proxy generation. */
-  library?: AssetLibrary
+export interface MediaAssetCatalogOptions {
+  /** OPFS directory holding source media. */
+  resourceDir?: string
+  /** OPFS directory holding catalog metadata. */
+  manifestDir?: string
   /** Required by remove() so referenced media cannot be deleted. */
   getProtectedProtocols?: () => readonly IVideoProtocol[] | Promise<readonly IVideoProtocol[]>
 }
@@ -39,6 +46,9 @@ export interface MediaAssetCatalog {
   list: () => Promise<MediaAsset[]>
   get: (id: string) => Promise<MediaAsset | undefined>
   bindForSegment: (id: string) => Promise<SegmentAssetBinding>
+  getPreviewBlob: (id: string) => Promise<Blob | undefined>
+  getThumbnails: (id: string, options?: GenerateThumbnailsOptions) => Promise<Thumbnail[]>
+  getWaveform: (id: string, options?: WaveformOptions) => Promise<WaveformData>
   resolveForPreview: (id: string) => Promise<string | undefined>
   resolveForExport: (id: string) => Promise<string | undefined>
   remove: (id: string) => Promise<void>
@@ -69,10 +79,23 @@ function toMediaAsset(asset: AssetMeta, assets: readonly AssetMeta[]): MediaAsse
 
 /** Public media catalog that keeps storage, URL, proxy, and OPFS details internal. */
 export function createMediaAssetCatalog(options: MediaAssetCatalogOptions = {}): MediaAssetCatalog {
-  const library = options.library ?? createAssetLibrary(options)
+  return createMediaAssetCatalogFromLibrary(createAssetLibrary(options), options)
+}
 
+/** Internal dependency-injection entry used by focused tests. */
+export function createMediaAssetCatalogFromLibrary(
+  library: AssetLibrary,
+  options: Pick<MediaAssetCatalogOptions, 'getProtectedProtocols'> = {},
+): MediaAssetCatalog {
   async function listOriginals() {
     return (await library.listAssets()).filter(asset => !asset.derivation)
+  }
+
+  async function requireOriginal(id: string): Promise<AssetMeta> {
+    const asset = (await listOriginals()).find(candidate => candidate.id === id)
+    if (!asset)
+      throw new Error(`No media asset with id ${id}`)
+    return asset
   }
 
   async function list(): Promise<MediaAsset[]> {
@@ -94,17 +117,38 @@ export function createMediaAssetCatalog(options: MediaAssetCatalogOptions = {}):
   }
 
   async function bindForSegment(id: string): Promise<SegmentAssetBinding> {
-    const asset = (await listOriginals()).find(candidate => candidate.id === id)
-    if (!asset)
-      throw new Error(`No media asset with id ${id}`)
+    const asset = await requireOriginal(id)
     return {
       assetId: asset.id,
+      name: asset.name,
       url: asset.url,
       kind: asset.kind,
       durationMs: asset.durationMs,
       width: asset.width,
       height: asset.height,
     }
+  }
+
+  async function getPreviewBlob(id: string): Promise<Blob | undefined> {
+    await requireOriginal(id)
+    return await library.getAssetFile(id, { preferProxy: true })
+  }
+
+  async function getThumbnails(id: string, options?: GenerateThumbnailsOptions): Promise<Thumbnail[]> {
+    const asset = await requireOriginal(id)
+    if (asset.kind !== 'video')
+      throw new Error(`Media asset ${id} is not a video`)
+    const url = await library.resolveAssetUrl(id, { preferProxy: true })
+    if (!url)
+      throw new Error(`No preview source for media asset ${id}`)
+    return await generateThumbnails(url, options)
+  }
+
+  async function getWaveform(id: string, options?: WaveformOptions): Promise<WaveformData> {
+    const asset = await requireOriginal(id)
+    if (asset.kind !== 'video' && asset.kind !== 'audio')
+      throw new Error(`Media asset ${id} has no audio waveform`)
+    return await extractWaveform(asset.url, options)
   }
 
   async function remove(id: string): Promise<void> {
@@ -119,6 +163,9 @@ export function createMediaAssetCatalog(options: MediaAssetCatalogOptions = {}):
     list,
     get,
     bindForSegment,
+    getPreviewBlob,
+    getThumbnails,
+    getWaveform,
     resolveForPreview: id => library.resolveAssetUrl(id, { preferProxy: true }),
     resolveForExport: id => library.resolveAssetUrl(id),
     remove,

@@ -1,4 +1,4 @@
-import type { AssetMeta, AssetReference, createVideoProtocolManager, OperationLogMeta } from '@video-editor/protocol'
+import type { AssetReference, AssetReferenceTarget, createVideoProtocolManager, OperationLogMeta } from '@video-editor/protocol'
 import type { IKeyframeEasing, IKeyframeProperty, ITrackType, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
 import type { ComputedRef, DeepReadonly } from '@vue/reactivity'
 
@@ -352,7 +352,7 @@ export interface EditorCoreSelectors {
   /** The current selection, resolved against the protocol. */
   getSelection: () => EditorSelection
   /** Find every segment in this protocol that uses a library asset. */
-  getAssetReferences: (asset: Pick<AssetMeta, 'id' | 'url' | 'previousUrls'>) => AssetReference[]
+  getAssetReferences: (asset: AssetReferenceTarget) => AssetReference[]
   /** Semantic history entries without internal Immer patches. */
   getOperationLog: () => ProtocolManager['operationLog']['value']
   /** Whether a command would do anything right now, and why not when it would not. */

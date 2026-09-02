@@ -32,7 +32,8 @@ const binding = await assets.bindForSegment(asset.id)
 ```
 
 Use `MediaAssetCatalog` in application code. It hides OPFS files, proxy records, revisions, and changing
-resource URLs. Use the lower-level `AssetLibrary` only for storage adapters, proxy generation, or diagnostics.
+resource URLs. `AssetLibrary` is an internal implementation used by storage, proxy generation, and diagnostics;
+it is not exported from the package entry.
 
 ### Audio Waveform Extraction
 

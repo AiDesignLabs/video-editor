@@ -1,18 +1,3 @@
-export {
-  createAssetLibrary,
-  DEFAULT_ASSET_MANIFEST_DIR,
-  findAssetReferences,
-} from './assets'
-export type {
-  AssetDerivation,
-  AssetKind,
-  AssetLibrary,
-  AssetLibraryOptions,
-  AssetMeta,
-  AssetReference,
-  AssetRemovalContext,
-  AssetUrlResolutionOptions,
-} from './assets'
 export { createMediaAssetCatalog } from './assets/catalog'
 export type {
   MediaAsset,
@@ -21,6 +6,8 @@ export type {
   MediaAssetProxyStatus,
   SegmentAssetBinding,
 } from './assets/catalog'
+export { findAssetReferences } from './assets/references'
+export type { AssetReference, AssetReferenceTarget } from './assets/references'
 export { createVideoProtocolManager, MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS } from './manage'
 export type {
   AddTrackOptions,
@@ -69,7 +56,7 @@ export {
   peaksToBars,
   peaksToSvgPath,
 } from './resource'
-export type { WaveformData, WaveformOptions } from './resource'
+export type { GenerateThumbnailsOptions, Thumbnail, WaveformData, WaveformOptions } from './resource'
 export {
   fileTo,
   getResourceType,

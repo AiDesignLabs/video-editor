@@ -1,4 +1,4 @@
-import type { IVideoProtocol, SegmentUnion } from '@video-editor/shared'
+import type { IVideoProtocol } from '@video-editor/shared'
 import { file as opfsFile, write as opfsWrite } from 'opfs-tools'
 import { getCachedResourceFile } from '../resource/cache'
 import { DEFAULT_RESOURCE_DIR } from '../resource/constants'
@@ -6,6 +6,7 @@ import { createResourceManager, invalidateResourceDerivatives } from '../resourc
 import { inferResourceTypeFromUrl } from '../resource/key'
 import { getMp4Meta } from '../resource/meta'
 import { extractWaveform } from '../resource/waveform'
+import { findAssetReferences } from './references'
 
 export const DEFAULT_ASSET_MANIFEST_DIR = '/video-editor-assets'
 
@@ -58,13 +59,7 @@ export interface AssetLibrary {
   relinkAsset: (id: string, url: string) => Promise<AssetMeta>
   removeAsset: (id: string, context: AssetRemovalContext) => Promise<void>
   /** Origin OPFS File, useful for previews. */
-  getAssetFile: (id: string) => Promise<File | undefined>
-}
-
-export interface AssetReference {
-  protocolId: string
-  trackId: string
-  segmentId: string
+  getAssetFile: (id: string, options?: AssetUrlResolutionOptions) => Promise<File | undefined>
 }
 
 export interface AssetRemovalContext {
@@ -79,6 +74,33 @@ export interface AssetLibraryOptions {
   resourceDir?: string
   /** OPFS directory holding `manifest.json`. */
   manifestDir?: string
+}
+
+function resolveAssetRecord(
+  assets: readonly AssetMeta[],
+  id: string,
+  options: AssetUrlResolutionOptions,
+): AssetMeta | undefined {
+  const target = assets.find(asset => asset.id === id)
+  if (!target)
+    return undefined
+
+  if (target.derivation) {
+    const source = assets.find(asset => asset.id === target.derivation?.sourceAssetId)
+    if (!source)
+      return undefined
+    if ((source.revision ?? 1) !== target.derivation.sourceRevision)
+      return source
+  }
+
+  if (!options.preferProxy)
+    return target
+
+  return assets
+    .filter(asset => asset.derivation?.kind === 'proxy'
+      && asset.derivation.sourceAssetId === target.id
+      && asset.derivation.sourceRevision === (target.revision ?? 1))
+    .sort((a, b) => b.createdAt - a.createdAt)[0] ?? target
 }
 
 /**
@@ -148,22 +170,6 @@ function isAbsoluteUrl(url: string) {
   catch {
     return false
   }
-}
-
-export function findAssetReferences(protocol: IVideoProtocol, asset: Pick<AssetMeta, 'id' | 'url' | 'previousUrls'>): AssetReference[] {
-  const references: AssetReference[] = []
-  const knownUrls = new Set([asset.url, ...(asset.previousUrls ?? [])])
-  for (const track of protocol.tracks) {
-    for (const segment of track.children) {
-      if (!('url' in segment))
-        continue
-      const media = segment as SegmentUnion & { assetId?: string, url: string }
-      if (media.assetId !== asset.id && (media.assetId !== undefined || !knownUrls.has(media.url)))
-        continue
-      references.push({ protocolId: protocol.id, trackId: track.trackId, segmentId: segment.id })
-    }
-  }
-  return references
 }
 
 async function readManifest(manifestPath: string): Promise<AssetMeta[]> {
@@ -267,27 +273,7 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
 
   async function resolveAssetUrl(id: string, options: AssetUrlResolutionOptions = {}): Promise<string | undefined> {
     const assets = await readManifest(manifestPath)
-    const target = assets.find(asset => asset.id === id)
-    if (!target)
-      return undefined
-
-    if (target.derivation) {
-      const source = assets.find(asset => asset.id === target.derivation?.sourceAssetId)
-      if (!source)
-        return undefined
-      if ((source.revision ?? 1) !== target.derivation.sourceRevision)
-        return source.url
-    }
-
-    if (!options.preferProxy)
-      return target.url
-
-    const proxy = assets
-      .filter(asset => asset.derivation?.kind === 'proxy'
-        && asset.derivation.sourceAssetId === target.id
-        && asset.derivation.sourceRevision === (target.revision ?? 1))
-      .sort((a, b) => b.createdAt - a.createdAt)[0]
-    return proxy?.url ?? target.url
+    return resolveAssetRecord(assets, id, options)?.url
   }
 
   async function storeAsset(file: File, derivation?: AssetDerivation): Promise<AssetMeta> {
@@ -458,9 +444,9 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
     }
   }
 
-  async function getAssetFile(id: string): Promise<File | undefined> {
+  async function getAssetFile(id: string, options: AssetUrlResolutionOptions = {}): Promise<File | undefined> {
     const assets = await readManifest(manifestPath)
-    const target = assets.find(asset => asset.id === id)
+    const target = resolveAssetRecord(assets, id, options)
     if (!target)
       return undefined
 

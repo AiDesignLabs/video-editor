@@ -51,8 +51,10 @@ editor.commands.addSegment({
 `bindForSegment()` 返回协议兼容所需的 `url`，调用方只展开返回值，不负责生成、缓存或改写地址。
 后续协议版本可以允许仅保存 `assetId`；在此之前保留 `url`，避免破坏旧工程和离线恢复能力。
 
-`resolveForPreview()` 可以选择当前有效的预览版本，`resolveForExport()` 始终选择原始素材。两者可
-直接传给 renderer 和 compose，不要求调用方理解 `preferProxy`。
+`getPreviewBlob()`、`getThumbnails()` 和 `getWaveform()` 按素材 ID 读取预览数据，不要求调用方
+处理 OPFS `File` 或资源 URL。`resolveForPreview()` 可以选择当前有效的预览版本，
+`resolveForExport()` 始终选择原始素材。两个 resolver 可直接传给 renderer 和 compose，不要求
+调用方理解 `preferProxy`。
 
 ## 4. PixiJS 边界
 
@@ -68,12 +70,14 @@ assetId -> MediaAsset -> 原始素材或预览版本 -> URL / OPFS File -> 解�
 
 ## 5. 兼容策略
 
-- `AssetLibrary` 保持导出，供存储适配、proxy 生成和诊断工具使用。
+- `AssetLibrary` 保留为 `protocol` 包内部实现，不再从包根入口导出。
 - `MediaAssetCatalog` 不返回 `url`、`previousUrls`、`revision`、`derivation` 或 OPFS `File`。
 - `MediaAssetCatalog.remove()` 在完成全部引用检查后同时删除派生素材；低层 `removeAsset()` 默认仍
   拒绝删除存在派生素材的原始素材。
 - 现有片段继续保存 `assetId` 和 `url`，无需迁移。
 - 缺少删除保护协议提供者时，`MediaAssetCatalog.remove()` 明确失败，不允许绕过引用检查。
+- 存储适配、proxy 生成和诊断工具在 `protocol` 包内部直接使用素材 repository；未来确需向外部
+  开放时，应增加可独立构建和测试的正式子路径。
 - 本 RFC 不改变 PixiJS 资源加载方式，也不实现 proxy 生成任务。
 
 ## 6. Agent 使用

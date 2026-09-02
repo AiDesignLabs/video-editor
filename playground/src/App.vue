@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AssetMeta, ProjectMeta } from '@video-editor/protocol'
+import type { ProjectMeta, SegmentAssetBinding } from '@video-editor/protocol'
 import type { ExportTask, Renderer } from '@video-editor/renderer'
 import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageFramesSegment, IKeyframeProperty, IStickerSegment, ITextSegment, ITransform, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
 import type { SegmentUpdater, TransitionEditPayload } from '@video-editor/ui'
@@ -7,7 +7,7 @@ import type { Ref } from 'vue'
 import type { ExportSettings } from './export-options'
 import type { GizmoTransformPatch } from './gizmo/types'
 import { createEditorCore } from '@video-editor/editor-core'
-import { createAssetLibrary, createMediaAssetCatalog, createProjectStore, generateThumbnails } from '@video-editor/protocol'
+import { createMediaAssetCatalog, createProjectStore, generateThumbnails } from '@video-editor/protocol'
 import { createExportTask, createRenderer, listEffectDefinitions, listTransitionDefinitions } from '@video-editor/renderer'
 import { CanvasSizePanel, createDefaultToolbarActions, mergeToolbarActions, PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
@@ -190,8 +190,9 @@ const boot = bootstrapEditor()
 const editor = boot.editor
 const { state, commands } = editor
 const protocol = state.protocol
-const assetLibrary = createAssetLibrary()
-const assetCatalog = createMediaAssetCatalog({ library: assetLibrary })
+const assetCatalog = createMediaAssetCatalog({
+  getProtectedProtocols: getAssetProtectionProtocols,
+})
 const scrub = state.currentTime
 const selectedSegmentId = computed({
   get: () => state.selectedSegmentId.value ?? null,
@@ -893,7 +894,7 @@ function appendClip() {
 }
 
 /** Insert an imported asset at the playhead and select the created segment. */
-function handleAssetAdd(asset: AssetMeta) {
+function handleAssetAdd(asset: SegmentAssetBinding) {
   // addSegment always re-anchors startTime to the current time, so pin it first.
   commands.setCurrentTime(currentTimeMs.value)
 
@@ -902,7 +903,7 @@ function handleAssetAdd(asset: AssetMeta) {
   if (asset.kind === 'audio') {
     const segment: Omit<IAudioSegment, 'id'> = {
       segmentType: 'audio',
-      assetId: asset.id,
+      assetId: asset.assetId,
       url: asset.url,
       startTime: 0,
       endTime: asset.durationMs ?? 5000,
@@ -921,7 +922,7 @@ function handleAssetAdd(asset: AssetMeta) {
       segmentType: 'frames',
       type: 'image',
       format: 'img',
-      assetId: asset.id,
+      assetId: asset.assetId,
       url: asset.url,
       startTime: 0,
       endTime: 4000,
@@ -935,7 +936,7 @@ function handleAssetAdd(asset: AssetMeta) {
   const segment: Omit<IVideoFramesSegment, 'id'> = {
     segmentType: 'frames',
     type: 'video',
-    assetId: asset.id,
+    assetId: asset.assetId,
     url: asset.url,
     startTime: 0,
     endTime: asset.durationMs ?? 5000,
@@ -1541,7 +1542,7 @@ function handleAddSegmentClick(data: {
 
       <div class="drawer__body">
         <div v-if="drawerTab === 'assets'" class="drawer__pane">
-          <AssetPanel :get-protected-protocols="getAssetProtectionProtocols" @add="handleAssetAdd" />
+          <AssetPanel :catalog="assetCatalog" @add="handleAssetAdd" />
         </div>
 
         <div v-else-if="drawerTab === 'compose'" class="drawer__pane">
