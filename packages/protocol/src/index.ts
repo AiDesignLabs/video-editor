@@ -4,12 +4,14 @@ export {
   findAssetReferences,
 } from './assets'
 export type {
+  AssetDerivation,
   AssetKind,
   AssetLibrary,
   AssetLibraryOptions,
   AssetMeta,
   AssetReference,
   AssetRemovalContext,
+  AssetUrlResolutionOptions,
 } from './assets'
 export { createVideoProtocolManager, MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS } from './manage'
 export type {
@@ -45,6 +47,8 @@ export type {
   StoredProject,
 } from './project'
 export {
+  clearMp4MetaCache,
+  clearThumbnailCache,
   clearWaveformCache,
   createResourceManager,
   DEFAULT_RESOURCE_DIR,
@@ -53,6 +57,7 @@ export {
   generateThumbnails,
   getMp4Meta,
   getResourceKey,
+  invalidateResourceDerivatives,
   peaksToBars,
   peaksToSvgPath,
 } from './resource'

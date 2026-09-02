@@ -3,6 +3,17 @@ import { ensureResourceCached, getCachedResourceFile, waitForResourceDirectoryWr
 import { DEFAULT_RESOURCE_DIR } from './constants'
 import { fileTo, getResourceType } from './fetch'
 import { getResourceOpfsPath, inferResourceTypeFromUrl } from './key'
+import { clearMp4MetaCache } from './meta'
+import { clearThumbnailCache } from './thumbnails'
+import { clearWaveformCache } from './waveform'
+
+export async function invalidateResourceDerivatives(url: string, resourceDir = DEFAULT_RESOURCE_DIR): Promise<void> {
+  if (!url)
+    return
+  clearMp4MetaCache(url, resourceDir)
+  clearWaveformCache(url, resourceDir)
+  await clearThumbnailCache(url, resourceDir)
+}
 
 export function createResourceManager(opts?: { dir?: string }) {
   const { dir = DEFAULT_RESOURCE_DIR } = opts || {}
@@ -76,7 +87,7 @@ export function createResourceManager(opts?: { dir?: string }) {
 
 export { DEFAULT_RESOURCE_DIR } from './constants'
 export { getResourceKey } from './key'
-export { getMp4Meta } from './meta'
-export { generateThumbnails } from './thumbnails'
+export { clearMp4MetaCache, getMp4Meta } from './meta'
+export { clearThumbnailCache, generateThumbnails } from './thumbnails'
 export { clearWaveformCache, extractWaveform, extractWaveformFromBuffer, peaksToBars, peaksToSvgPath } from './waveform'
 export type { WaveformData, WaveformOptions } from './waveform'

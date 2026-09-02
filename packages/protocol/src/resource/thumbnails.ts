@@ -93,6 +93,30 @@ export async function generateThumbnails(url: string, options?: GenerateThumbnai
   }
 }
 
+/** Remove every cached thumbnail variant derived from one source URL. */
+export async function clearThumbnailCache(
+  url: string,
+  resourceDir = DEFAULT_RESOURCE_DIR,
+): Promise<void> {
+  if (!url)
+    return
+
+  const cachePrefix = `${resourceDir}::${getResourceKey(url)}::`
+  const pending = [...inflightThumbnails.entries()]
+    .filter(([key]) => key.startsWith(cachePrefix))
+    .map(([, job]) => job.catch(() => []))
+  await Promise.all(pending)
+
+  for (const key of thumbnailCache.keys()) {
+    if (key.startsWith(cachePrefix))
+      thumbnailCache.delete(key)
+  }
+
+  const resourceKey = getResourceKey(url)
+  if (resourceKey)
+    await removeThumbnailEntry(`${resourceDir}/thumbnails/${resourceKey}`)
+}
+
 async function generateThumbnailsInner(url: string, opts: Required<Pick<GenerateThumbnailsOptions, 'imgWidth' | 'resourceDir'>> & Pick<GenerateThumbnailsOptions, 'start' | 'end' | 'step'>): Promise<Thumbnail[]> {
   const { imgWidth, start, end, step, resourceDir } = opts
   const file = await getCachedResourceFile(url, resourceDir) ?? await ensureResourceCached(url, resourceDir)
@@ -312,7 +336,7 @@ async function removeThumbnailEntry(baseDir: string) {
 }
 
 function buildThumbnailCacheKey(url: string, opts: { imgWidth: number, start?: number, end?: number, step?: number, resourceDir: string }) {
-  return [opts.resourceDir, url, opts.imgWidth, opts.start ?? '', opts.end ?? '', opts.step ?? ''].join('::')
+  return [opts.resourceDir, getResourceKey(url), opts.imgWidth, opts.start ?? '', opts.end ?? '', opts.step ?? ''].join('::')
 }
 
 function getCachedThumbnails(key: string) {

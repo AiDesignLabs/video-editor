@@ -2,7 +2,7 @@ import type { IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import { file as opfsFile, write as opfsWrite } from 'opfs-tools'
 import { getCachedResourceFile } from '../resource/cache'
 import { DEFAULT_RESOURCE_DIR } from '../resource/constants'
-import { createResourceManager } from '../resource/index'
+import { createResourceManager, invalidateResourceDerivatives } from '../resource/index'
 import { inferResourceTypeFromUrl } from '../resource/key'
 import { getMp4Meta } from '../resource/meta'
 import { extractWaveform } from '../resource/waveform'
@@ -12,6 +12,17 @@ export const DEFAULT_ASSET_MANIFEST_DIR = '/video-editor-assets'
 const MANIFEST_FILE_NAME = 'manifest.json'
 
 export type AssetKind = 'video' | 'audio' | 'image'
+
+export interface AssetDerivation {
+  kind: 'proxy'
+  sourceAssetId: string
+  sourceRevision: number
+}
+
+export interface AssetUrlResolutionOptions {
+  /** Use a current proxy when one exists. Export should leave this false. */
+  preferProxy?: boolean
+}
 
 export interface AssetMeta {
   id: string
@@ -24,6 +35,10 @@ export interface AssetMeta {
   kind: AssetKind
   sizeBytes: number
   createdAt: number
+  /** Changes whenever the source location changes. Missing means revision 1 for old manifests. */
+  revision?: number
+  /** Records the original asset revision used to create this derived asset. */
+  derivation?: AssetDerivation
   /** Video / audio only. */
   durationMs?: number
   /** Video / image only. */
@@ -33,10 +48,13 @@ export interface AssetMeta {
 
 export interface AssetLibrary {
   importAsset: (file: File) => Promise<AssetMeta>
+  importProxy: (sourceAssetId: string, file: File) => Promise<AssetMeta>
   /** Newest first. */
   listAssets: () => Promise<AssetMeta[]>
   getAsset: (id: string) => Promise<AssetMeta | undefined>
-  resolveAssetUrl: (id: string) => Promise<string | undefined>
+  resolveAssetUrl: (id: string, options?: AssetUrlResolutionOptions) => Promise<string | undefined>
+  listAssetDerivatives: (sourceAssetId: string) => Promise<AssetMeta[]>
+  isAssetDerivativeStale: (id: string) => Promise<boolean>
   relinkAsset: (id: string, url: string) => Promise<AssetMeta>
   removeAsset: (id: string, context: AssetRemovalContext) => Promise<void>
   /** Origin OPFS File, useful for previews. */
@@ -111,6 +129,13 @@ function isAssetMeta(value: unknown): value is AssetMeta {
     && isAssetKind(meta.kind)
     && typeof meta.sizeBytes === 'number'
     && typeof meta.createdAt === 'number'
+    && (meta.revision === undefined || (Number.isInteger(meta.revision) && meta.revision > 0))
+    && (meta.derivation === undefined || (
+      meta.derivation.kind === 'proxy'
+      && typeof meta.derivation.sourceAssetId === 'string'
+      && Number.isInteger(meta.derivation.sourceRevision)
+      && meta.derivation.sourceRevision > 0
+    ))
     && (meta.previousUrls === undefined || (Array.isArray(meta.previousUrls) && meta.previousUrls.every(url => typeof url === 'string')))
 }
 
@@ -238,11 +263,32 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
     return assets.find(asset => asset.id === id)
   }
 
-  async function resolveAssetUrl(id: string): Promise<string | undefined> {
-    return (await getAsset(id))?.url
+  async function resolveAssetUrl(id: string, options: AssetUrlResolutionOptions = {}): Promise<string | undefined> {
+    const assets = await readManifest(manifestPath)
+    const target = assets.find(asset => asset.id === id)
+    if (!target)
+      return undefined
+
+    if (target.derivation) {
+      const source = assets.find(asset => asset.id === target.derivation?.sourceAssetId)
+      if (!source)
+        return undefined
+      if ((source.revision ?? 1) !== target.derivation.sourceRevision)
+        return source.url
+    }
+
+    if (!options.preferProxy)
+      return target.url
+
+    const proxy = assets
+      .filter(asset => asset.derivation?.kind === 'proxy'
+        && asset.derivation.sourceAssetId === target.id
+        && asset.derivation.sourceRevision === (target.revision ?? 1))
+      .sort((a, b) => b.createdAt - a.createdAt)[0]
+    return proxy?.url ?? target.url
   }
 
-  async function importAsset(file: File): Promise<AssetMeta> {
+  async function storeAsset(file: File, derivation?: AssetDerivation): Promise<AssetMeta> {
     const kind = detectKind(file)
     if (!kind)
       throw new Error(`Unsupported asset type for file "${file.name}": expected video, audio or image`)
@@ -268,15 +314,63 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
       kind,
       sizeBytes: file.size,
       createdAt: Date.now(),
+      revision: 1,
+      ...(derivation ? { derivation } : {}),
       ...probed,
     }
 
-    await enqueueManifestJob(manifestPath, async () => {
-      const assets = await readManifest(manifestPath)
-      await writeManifest(manifestPath, [...assets, meta])
-    })
+    try {
+      await enqueueManifestJob(manifestPath, async () => {
+        const assets = await readManifest(manifestPath)
+        if (derivation) {
+          const source = assets.find(asset => asset.id === derivation.sourceAssetId)
+          if (!source || (source.revision ?? 1) !== derivation.sourceRevision)
+            throw new Error(`Source asset ${derivation.sourceAssetId} changed while creating its proxy`)
+          if (source.kind !== kind)
+            throw new Error(`Proxy kind ${kind} does not match source kind ${source.kind}`)
+        }
+        await writeManifest(manifestPath, [...assets, meta])
+      })
+    }
+    catch (error) {
+      await resourceManager.remove(url)
+      throw error
+    }
 
     return meta
+  }
+
+  async function importAsset(file: File): Promise<AssetMeta> {
+    return await storeAsset(file)
+  }
+
+  async function importProxy(sourceAssetId: string, file: File): Promise<AssetMeta> {
+    const source = await getAsset(sourceAssetId)
+    if (!source)
+      throw new Error(`No source asset with id ${sourceAssetId}`)
+    return await storeAsset(file, {
+      kind: 'proxy',
+      sourceAssetId,
+      sourceRevision: source.revision ?? 1,
+    })
+  }
+
+  async function listAssetDerivatives(sourceAssetId: string): Promise<AssetMeta[]> {
+    const assets = await readManifest(manifestPath)
+    return assets
+      .filter(asset => asset.derivation?.sourceAssetId === sourceAssetId)
+      .sort((a, b) => b.createdAt - a.createdAt)
+  }
+
+  async function isAssetDerivativeStale(id: string): Promise<boolean> {
+    const assets = await readManifest(manifestPath)
+    const target = assets.find(asset => asset.id === id)
+    if (!target)
+      throw new Error(`No asset with id ${id}`)
+    if (!target.derivation)
+      return false
+    const source = assets.find(asset => asset.id === target.derivation?.sourceAssetId)
+    return !source || (source.revision ?? 1) !== target.derivation.sourceRevision
   }
 
   async function relinkAsset(id: string, url: string): Promise<AssetMeta> {
@@ -294,12 +388,18 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
       const previousUrl = assets[index].url
       const previousUrls = [...new Set([...(assets[index].previousUrls ?? []), previousUrl])]
         .filter(previous => previous !== url)
-      const updated = { ...assets[index], url, previousUrls }
+      const updated = {
+        ...assets[index],
+        url,
+        previousUrls,
+        revision: (assets[index].revision ?? 1) + 1,
+      }
       assets[index] = updated
       await writeManifest(manifestPath, assets)
-      return updated
+      return { previousUrl, updated }
     })
-    return result
+    await invalidateResourceDerivatives(result.previousUrl, resourceDir)
+    return result.updated
   }
 
   async function removeAsset(id: string, context: AssetRemovalContext): Promise<void> {
@@ -310,6 +410,12 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
       const target = assets.find(asset => asset.id === id)
       if (!target)
         return undefined
+
+      const derivatives = assets.filter(asset => asset.derivation?.sourceAssetId === id)
+      if (derivatives.length) {
+        const derivativeIds = derivatives.map(asset => asset.id).join(', ')
+        throw new Error(`Cannot remove asset ${id}; derived asset(s) still exist: ${derivativeIds}`)
+      }
 
       const references = context.protocols.flatMap(protocol => findAssetReferences(protocol, target))
       if (references.length) {
@@ -325,6 +431,7 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
       return
 
     for (const url of new Set([removed.url, ...(removed.previousUrls ?? [])])) {
+      await invalidateResourceDerivatives(url, resourceDir)
       try {
         await resourceManager.remove(url)
       }
@@ -350,9 +457,12 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
 
   return {
     importAsset,
+    importProxy,
     listAssets,
     getAsset,
     resolveAssetUrl,
+    listAssetDerivatives,
+    isAssetDerivativeStale,
     relinkAsset,
     removeAsset,
     getAssetFile,

@@ -436,7 +436,7 @@ async function mountRendererInstance(options: {
     protocol,
     autoPlay: false,
     videoSourceMode: 'auto' as const,
-    resolveAssetUrl: (assetId: string) => assetLibrary.resolveAssetUrl(assetId),
+    resolveAssetUrl: (assetId: string) => assetLibrary.resolveAssetUrl(assetId, { preferProxy: true }),
     appOptions: {
       ...fitToAspectRatio(
         host?.clientWidth || 1280,

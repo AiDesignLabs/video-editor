@@ -1,6 +1,7 @@
 import type { IImageFramesSegment, IVideoProtocol } from '@video-editor/shared'
-import { dir as opfsDir, write as opfsWrite } from 'opfs-tools'
+import { dir as opfsDir, file as opfsFile, write as opfsWrite } from 'opfs-tools'
 import { afterEach, describe, expect, it } from 'vitest'
+import { getResourceKey } from '../resource/key'
 import { createAssetLibrary } from './index'
 
 const resourceDir = '/video-editor-res/asset-library-test'
@@ -110,6 +111,46 @@ describe('asset library', () => {
     expect(updated.previousUrls).toEqual([meta.url])
     expect(await library.resolveAssetUrl(meta.id)).toBe('https://cdn.example.com/relinked.png')
     expect((await library.getAsset(meta.id))?.url).toBe('https://cdn.example.com/relinked.png')
+  })
+
+  it('tracks a proxy against the source revision and stops using it when stale', async () => {
+    const library = createLibrary()
+    const source = await library.importAsset(await createPngFile('source.png', 8, 6))
+    const proxy = await library.importProxy(source.id, await createPngFile('proxy.png', 4, 3))
+
+    expect(proxy.derivation).toEqual({
+      kind: 'proxy',
+      sourceAssetId: source.id,
+      sourceRevision: 1,
+    })
+    expect((await library.listAssetDerivatives(source.id)).map(asset => asset.id)).toEqual([proxy.id])
+    expect(await library.isAssetDerivativeStale(proxy.id)).toBe(false)
+    expect(await library.resolveAssetUrl(source.id, { preferProxy: true })).toBe(proxy.url)
+    expect(await library.resolveAssetUrl(source.id)).toBe(source.url)
+
+    await expect(library.removeAsset(source.id, { protocols: [] }))
+      .rejects
+      .toThrow(`derived asset(s) still exist: ${proxy.id}`)
+
+    const updated = await library.relinkAsset(source.id, 'https://cdn.example.com/source-v2.png')
+
+    expect(updated.revision).toBe(2)
+    expect(await library.isAssetDerivativeStale(proxy.id)).toBe(true)
+    expect(await library.resolveAssetUrl(source.id, { preferProxy: true })).toBe(updated.url)
+    expect(await library.resolveAssetUrl(proxy.id)).toBe(updated.url)
+  })
+
+  it('clears derived thumbnail storage when an asset is relinked', async () => {
+    const library = createLibrary()
+    const source = await library.importAsset(await createPngFile('cached.png'))
+    const thumbnailDir = `${resourceDir}/thumbnails/${getResourceKey(source.url)}`
+    const cachedThumbnail = `${thumbnailDir}/variant/0.png`
+    await opfsWrite(cachedThumbnail, new Blob(['cached']).stream(), { overwrite: true })
+    expect(await opfsFile(cachedThumbnail, 'r').exists()).toBe(true)
+
+    await library.relinkAsset(source.id, 'https://cdn.example.com/cached-v2.png')
+
+    expect(await opfsDir(thumbnailDir).exists()).toBe(false)
   })
 
   it('keeps legacy URL references protected after relinking', async () => {

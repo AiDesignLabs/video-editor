@@ -15,6 +15,22 @@ export interface Mp4Meta {
 
 const metaCache = new Map<string, Promise<Mp4Meta>>()
 
+export function clearMp4MetaCache(url?: string, resourceDir?: string): void {
+  if (!url) {
+    metaCache.clear()
+    return
+  }
+
+  const resourceKey = getResourceKey(url)
+  for (const key of metaCache.keys()) {
+    const separatorIndex = key.indexOf('::')
+    const cachedDir = key.slice(0, separatorIndex)
+    const cachedResourceKey = key.slice(separatorIndex + 2)
+    if (cachedResourceKey === resourceKey && (resourceDir === undefined || cachedDir === resourceDir))
+      metaCache.delete(key)
+  }
+}
+
 export function getMp4Meta(url: string, options?: { resourceDir?: string }): Promise<Mp4Meta> {
   if (!url)
     return Promise.reject(new Error('url is required'))

@@ -26,8 +26,8 @@ const waveformCache = new Map<string, WaveformData>()
 /**
  * Get cache key for waveform data
  */
-function getCacheKey(url: string, samples: number): string {
-  return `${getResourceKey(url)}:${samples}`
+function getCacheKey(url: string, samples: number, channel: number | 'mix', resourceDir: string): string {
+  return `${resourceDir}::${getResourceKey(url)}::${samples}::${channel}`
 }
 
 /**
@@ -39,7 +39,7 @@ export async function extractWaveform(
   options: WaveformOptions = {},
 ): Promise<WaveformData> {
   const { samples = 100, channel = 'mix', resourceDir = DEFAULT_RESOURCE_DIR } = options
-  const cacheKey = getCacheKey(url, samples)
+  const cacheKey = getCacheKey(url, samples, channel, resourceDir)
 
   // Check memory cache first
   const cached = waveformCache.get(cacheKey)
@@ -110,11 +110,12 @@ export async function extractWaveformFromBuffer(
 /**
  * Clear waveform cache for a specific URL or all
  */
-export function clearWaveformCache(url?: string): void {
+export function clearWaveformCache(url?: string, resourceDir?: string): void {
   if (url) {
-    const keyPrefix = getResourceKey(url)
+    const resourceKey = getResourceKey(url)
     for (const key of waveformCache.keys()) {
-      if (key.startsWith(keyPrefix))
+      const [cachedDir, cachedResourceKey] = key.split('::')
+      if (cachedResourceKey === resourceKey && (resourceDir === undefined || cachedDir === resourceDir))
         waveformCache.delete(key)
     }
   }
