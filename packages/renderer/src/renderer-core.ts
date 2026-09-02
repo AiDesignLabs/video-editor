@@ -386,8 +386,9 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     clearDisplays()
     if (opts.warmUpResources !== false) {
       warmUpResources(validatedProtocol.value)
-      warmUpMediaElementSources(validatedProtocol.value)
     }
+    void prepareMediaElementSources(validatedAudioProtocol.value)
+      .catch(err => console.error('[renderer] failed to prepare audio sources', err))
     cleanupCache(validatedProtocol.value)
     cleanupMediaElementObjectUrls(validatedProtocol.value)
     clampCurrentTime()
@@ -417,6 +418,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   const refreshAssets = async () => {
     await syncProtocol(unref(protocolInput))
+    await prepareMediaElementSources(validatedAudioProtocol.value)
   }
 
   const scope = effectScope()
@@ -475,16 +477,19 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     }
   }
 
-  function warmUpMediaElementSources(protocol: IVideoProtocol) {
+  async function prepareMediaElementSources(protocol: IVideoProtocol) {
+    const localSources: Promise<string | undefined>[] = []
     for (const track of protocol.tracks) {
       for (const segment of track.children) {
         if (segment.segmentType !== 'audio' && !isVideoSegment(segment))
           continue
         if ((segment.volume ?? 1) <= 0)
           continue
-        void ensureMediaElementObjectUrl(segment.url)
+        if (segment.url.startsWith('local-asset://'))
+          localSources.push(ensureMediaElementObjectUrl(segment.url))
       }
     }
+    await Promise.all(localSources)
   }
 
   function cleanupCache(protocol: IVideoProtocol) {
@@ -1332,6 +1337,11 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
     audioManager.destroy()
   }
+
+  // A local asset cannot be passed directly to HTMLAudioElement. Resolve its
+  // OPFS-backed blob URL before createRenderer returns, so the first play call
+  // stays inside the user's click and is not rejected as delayed autoplay.
+  await prepareMediaElementSources(validatedAudioProtocol.value)
 
   if (opts.autoPlay)
     play()

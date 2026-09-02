@@ -533,6 +533,8 @@ describe('createRenderer video segment preloading', () => {
         },
       ],
     })
+    const videoSegment = protocol.value.tracks[0]!.children[0] as IVideoFramesSegment
+    videoSegment.url = 'local-asset://video-1/video-1.mp4'
 
     const renderer = await createRenderer({
       protocol,
@@ -541,11 +543,7 @@ describe('createRenderer video segment preloading', () => {
     })
 
     try {
-      await flushReactivity()
-      await flushReactivity()
-
       const audioManager = getAudioManagerInstance()
-      const videoSegment = protocol.value.tracks[0]!.children[0] as IVideoFramesSegment
       expect(audioManager.options?.resolveMediaElementUrl?.(videoSegment)).toBe('blob:opfs-video-1')
       expect(createObjectURL).toHaveBeenCalledWith(opfsState.originFile)
     }
