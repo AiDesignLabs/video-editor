@@ -6,38 +6,44 @@ const { state } = vi.hoisted(() => ({
     audio: undefined as AudioBuffer | undefined,
     cancelled: 0,
     controller: undefined as ReadableStreamDefaultController<Uint8Array> | undefined,
+    supportError: null as string | null,
+    encoderOptions: undefined as Record<string, unknown> | undefined,
   },
 }))
 
 vi.mock('./encoder', () => ({
-  createEncoder: () => ({
-    stream: new ReadableStream<Uint8Array>({
-      start(controller) {
-        state.controller = controller
+  checkEncoderSupport: async () => state.supportError,
+  createEncoder: (options: Record<string, unknown>) => {
+    state.encoderOptions = options
+    return ({
+      stream: new ReadableStream<Uint8Array>({
+        start(controller) {
+          state.controller = controller
+        },
+      }),
+      mimeType: 'video/mp4',
+      fileExtension: '.mp4',
+      getWriteStats: () => ({ chunks: 1, ms: 2 }),
+      async addFrame(timestampMs: number, durationMs: number) {
+        state.frames.push({ timestampMs, durationMs })
+        return { captureMs: 0, submitMs: 0 }
       },
-    }),
-    mimeType: 'video/mp4',
-    fileExtension: '.mp4',
-    getWriteStats: () => ({ chunks: 1, ms: 2 }),
-    async addFrame(timestampMs: number, durationMs: number) {
-      state.frames.push({ timestampMs, durationMs })
-      return { captureMs: 0, submitMs: 0 }
-    },
-    async setAudio(buffer: AudioBuffer) {
-      state.audio = buffer
-    },
-    async finalize() {
-      state.controller?.enqueue(new Uint8Array([1, 2, 3]))
-      state.controller?.close()
-    },
-    async cancel() {
-      state.cancelled += 1
-      try {
+      async setAudio(buffer: AudioBuffer) {
+        state.audio = buffer
+      },
+      async finalize() {
+        state.controller?.enqueue(new Uint8Array([1, 2, 3]))
         state.controller?.close()
-      }
-      catch {}
-    },
-  }),
+      },
+      async cancel() {
+        state.cancelled += 1
+        try {
+          state.controller?.close()
+        }
+        catch {}
+      },
+    })
+  },
 }))
 
 const { renderCanvasToVideo } = await import('./render-canvas-to-video')
@@ -58,11 +64,21 @@ function createSink() {
   }
 }
 
+function createFailingSink() {
+  return new WritableStream<Uint8Array>({
+    write() {
+      throw new Error('sink write failed')
+    },
+  })
+}
+
 beforeEach(() => {
   state.frames = []
   state.audio = undefined
   state.cancelled = 0
   state.controller = undefined
+  state.supportError = null
+  state.encoderOptions = undefined
 })
 
 describe('renderCanvasToVideo', () => {
@@ -91,6 +107,7 @@ describe('renderCanvasToVideo', () => {
     expect(progress).toHaveBeenLastCalledWith({ framesDone: 3, framesTotal: 3, timeMs: 100 })
     expect(sink.chunks).toEqual([new Uint8Array([1, 2, 3])])
     expect(result).toMatchObject({ frameCount: 3, durationMs: 100, mimeType: 'video/mp4' })
+    expect(state.encoderOptions).toMatchObject({ frameRate: 24 })
   })
 
   it('passes optional audio to the encoder', async () => {
@@ -120,6 +137,27 @@ describe('renderCanvasToVideo', () => {
     expect(state.cancelled).toBeGreaterThan(0)
   })
 
+  it('cancels the encoder when rendering or writing output fails', async () => {
+    await expect(renderCanvasToVideo({
+      canvas: fakeCanvas(),
+      durationMs: 100,
+      fps: 25,
+      sink: createSink().stream,
+      renderFrame: () => { throw new Error('render failed') },
+    })).rejects.toThrow('render failed')
+    expect(state.cancelled).toBeGreaterThan(0)
+
+    state.cancelled = 0
+    await expect(renderCanvasToVideo({
+      canvas: fakeCanvas(),
+      durationMs: 100,
+      fps: 25,
+      sink: createFailingSink(),
+      renderFrame: () => {},
+    })).rejects.toThrow('sink write failed')
+    expect(state.cancelled).toBeGreaterThan(0)
+  })
+
   it('rejects invalid timing and canvas dimensions before creating output', async () => {
     await expect(renderCanvasToVideo({
       canvas: fakeCanvas(),
@@ -135,5 +173,23 @@ describe('renderCanvasToVideo', () => {
       sink: createSink().stream,
       renderFrame: () => {},
     })).rejects.toThrow(/canvas dimensions/)
+  })
+
+  it('fails before rendering or locking the sink when the encoder is unsupported', async () => {
+    state.supportError = 'this browser cannot encode avc video at 1920x1080'
+    const sink = createSink()
+    const renderFrame = vi.fn()
+
+    await expect(renderCanvasToVideo({
+      canvas: fakeCanvas(),
+      durationMs: 100,
+      fps: 25,
+      sink: sink.stream,
+      renderFrame,
+    })).rejects.toThrow(/cannot encode avc video/)
+
+    expect(renderFrame).not.toHaveBeenCalled()
+    expect(sink.stream.locked).toBe(false)
+    expect(state.encoderOptions).toBeUndefined()
   })
 })

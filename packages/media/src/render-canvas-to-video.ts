@@ -1,6 +1,6 @@
 import type { EncoderFormat, EncoderOptions, WriteStats } from './encoder'
 import type { MediaWriteSink } from './types'
-import { createEncoder } from './encoder'
+import { checkEncoderSupport, createEncoder } from './encoder'
 
 export interface CanvasVideoFrameContext {
   /** Zero-based frame index. */
@@ -64,6 +64,17 @@ export async function renderCanvasToVideo(
     throw new TypeError('renderCanvasToVideo: canvas dimensions must be greater than zero')
   throwIfAborted(options.signal)
 
+  const supportError = await checkEncoderSupport({
+    format: options.format,
+    videoCodec: options.videoCodec,
+    width: options.canvas.width,
+    height: options.canvas.height,
+    withAudio: !!options.audio,
+  })
+  if (supportError)
+    throw new Error(`renderCanvasToVideo: ${supportError}`)
+  throwIfAborted(options.signal)
+
   const frameDurationMs = 1000 / options.fps
   const framesTotal = Math.ceil(options.durationMs / frameDurationMs)
   const encoder = createEncoder({
@@ -75,6 +86,7 @@ export async function renderCanvasToVideo(
     latencyMode: options.latencyMode,
     hardwareAcceleration: options.hardwareAcceleration,
     onEncoderConfig: options.onEncoderConfig,
+    frameRate: options.fps,
     withAudio: !!options.audio,
     audioBitrate: options.audioBitrate,
   })

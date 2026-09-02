@@ -188,4 +188,19 @@ describe('trimVideo', () => {
     })).rejects.toThrow(/endMs/)
     expect(sink.stream.locked).toBe(false)
   })
+
+  it('rejects an already cancelled task before locking the sink', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const sink = createSink()
+
+    await expect(trimVideo({
+      source: new Blob(),
+      startMs: 0,
+      endMs: 1000,
+      sink: sink.stream,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' })
+    expect(sink.stream.locked).toBe(false)
+  })
 })

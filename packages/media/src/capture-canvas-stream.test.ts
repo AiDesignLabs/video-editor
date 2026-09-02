@@ -29,6 +29,7 @@ describe('captureCanvasStream', () => {
     expect(captureStream).toHaveBeenCalledWith(0)
     expect(requested).toHaveBeenCalledOnce()
     expect(track.stop).toHaveBeenCalledOnce()
+    await expect(handle.requestFrame()).rejects.toMatchObject({ name: 'InvalidStateError' })
   })
 
   it('writes OffscreenCanvas frames through VideoTrackGenerator', async () => {
