@@ -281,7 +281,6 @@ const resizePreview = ref<SegmentResizePayload | null>(null)
 /** Snap guide times matched while resizing (drags keep theirs in the hook). */
 const resizeGuideTimes = ref<number[]>([])
 const dragPreviewPayload = computed(() => dragPreview.value)
-const resizePreviewPayload = computed(() => resizePreview.value)
 const resizingState = ref<ResizeState | null>(null)
 const draggingPlayhead = ref(false)
 const isMouseDownOnTimeline = ref(false)
@@ -1042,19 +1041,6 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
             </div>
           </template>
 
-          <template v-if="resizePreviewPayload">
-            <div
-              class="ve-segment ve-segment--preview"
-              :style="{
-                left: formatTimelineX(resizePreviewPayload.startTime * pixelsPerMs),
-                width: `${(resizePreviewPayload.endTime - resizePreviewPayload.startTime) * pixelsPerMs}px`,
-                top: `${rowTop(resizePreviewPayload.trackIndex)}px`,
-                height: `${rowHeight(resizePreviewPayload.trackIndex)}px`,
-                backgroundColor: resizePreviewPayload.segment.color || 'var(--ve-primary)',
-              }"
-            />
-          </template>
-
           <!-- 吸附辅助线 -->
           <template v-if="activeSnapGuides.length">
             <div
@@ -1143,16 +1129,6 @@ function formatTickLabel(ms: number, framesPerSecond: number, level: TickLevel) 
 .ve-timeline .ve-segment--dragging {
   --at-apply: absolute z-50 rounded-[4px] cursor-pointer flex items-center overflow-hidden pointer-events-none;
   color: var(--ve-content-primary);
-  box-shadow:
-    var(--ve-shadow-floating),
-    inset 0 0 0 1px var(--ve-border-weak);
-  transition: none;
-}
-
-/* Resize preview (VideoTimeline specific) */
-.ve-timeline .ve-segment--preview {
-  --at-apply: absolute z-45 rounded-[4px] pointer-events-none;
-  opacity: 0.7;
   box-shadow:
     var(--ve-shadow-floating),
     inset 0 0 0 1px var(--ve-border-weak);

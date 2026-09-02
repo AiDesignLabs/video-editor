@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { SegmentLayout, TimelineTrack } from '../VideoTimeline/types'
+import type { SegmentLayout, SegmentResizePayload, TimelineTrack } from '../VideoTimeline/types'
 import { computed } from 'vue'
+import { resolveResizePreviewGeometry } from '../VideoTimeline/resize'
 
 defineOptions({ name: 'TimelineTracks' })
 
@@ -15,9 +16,7 @@ const props = defineProps<{
   dragPreview?: {
     segment: { id: string }
   } | null
-  resizePreview?: {
-    segment: { id: string }
-  } | null
+  resizePreview?: Pick<SegmentResizePayload, 'segment' | 'startTime' | 'endTime'> | null
 }>()
 
 const emit = defineEmits<{
@@ -53,6 +52,10 @@ function handleResizeStart(layout: SegmentLayout, edge: 'start' | 'end', event: 
 
 function handleAddAt(track: TrackLayout['track'], startTime: number, endTime?: number, event?: MouseEvent) {
   emit('addSegment', { track, startTime, endTime, event })
+}
+
+function segmentGeometry(layout: SegmentLayout) {
+  return resolveResizePreviewGeometry(layout, props.resizePreview)
 }
 
 const trackGaps = computed(() => {
@@ -127,15 +130,15 @@ function getGapsForTrack(trackId: string) {
       <div class="ve-track__body">
         <div
           v-for="layout in trackLayout.segments"
-          v-show="dragPreview?.segment.id !== layout.segment.id && resizePreview?.segment.id !== layout.segment.id"
+          v-show="dragPreview?.segment.id !== layout.segment.id"
           :key="layout.segment.id"
           class="ve-segment"
           :class="{
             've-segment--selected': layout.isSelected,
           }"
           :style="{
-            left: `${layout.left}px`,
-            width: `${layout.width}px`,
+            left: `${segmentGeometry(layout).left}px`,
+            width: `${segmentGeometry(layout).width}px`,
             backgroundColor: layout.segment.color || trackLayout.track.color || 'var(--ve-primary, #222226)',
           }"
           @mousedown.prevent.stop="handleSegmentMouseDown(layout, $event)"
