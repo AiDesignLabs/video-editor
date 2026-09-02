@@ -4,7 +4,9 @@ import type { ApplicationOptions } from 'pixi.js'
 import type { RendererOptions } from './renderer-core'
 import type { ComposeAudioInput } from './timeline'
 import { checkEncoderSupport, createEncoder, openMediaInput } from '@video-editor/media'
+import { DEFAULT_RESOURCE_DIR, getResourceKey } from '@video-editor/protocol'
 import { normalizePlayRate, sourceSpanMs } from '@video-editor/shared'
+import { file as opfsFile } from 'opfs-tools'
 import { Application } from 'pixi.js'
 import { resolveProtocolAssetUrls } from './asset-resolution'
 import { reverseAudioBufferInPlace } from './helpers'
@@ -126,8 +128,36 @@ async function fetchBlob(url: string, signal?: AbortSignal, timeoutMs: number = 
   }
 }
 
-async function decodeInputAudioSlice(input: ComposeAudioInput, signal?: AbortSignal): Promise<AudioBuffer | undefined> {
-  const blob = await fetchBlob(input.url, signal)
+async function getCachedBlob(url: string, resourceDir: string): Promise<Blob | undefined> {
+  if (!url || url.startsWith('data:') || url.startsWith('blob:'))
+    return undefined
+  const key = getResourceKey(url)
+  if (!key)
+    return undefined
+  try {
+    const cached = opfsFile(`${resourceDir}/${key}`, 'r')
+    if (!(await cached.exists()))
+      return undefined
+    return await cached.getOriginFile()
+  }
+  catch {
+    return undefined
+  }
+}
+
+async function loadResourceBlob(url: string, resourceDir: string, signal?: AbortSignal): Promise<Blob> {
+  throwIfAborted(signal, `loading ${url}`)
+  const cached = await getCachedBlob(url, resourceDir)
+  throwIfAborted(signal, `loading ${url}`)
+  return cached ?? await fetchBlob(url, signal)
+}
+
+async function decodeInputAudioSlice(
+  input: ComposeAudioInput,
+  resourceDir: string,
+  signal?: AbortSignal,
+): Promise<AudioBuffer | undefined> {
+  const blob = await loadResourceBlob(input.url, resourceDir, signal)
   const handle = openMediaInput(blob)
   try {
     if (!(await handle.canDecodeAudio()))
@@ -151,7 +181,12 @@ async function decodeInputAudioSlice(input: ComposeAudioInput, signal?: AbortSig
 }
 
 /** Mix every audible segment into one buffer on an offline 48kHz stereo bus. */
-async function renderAudioMix(protocol: IVideoProtocol, durationMs: number, signal?: AbortSignal): Promise<AudioBuffer | undefined> {
+async function renderAudioMix(
+  protocol: IVideoProtocol,
+  durationMs: number,
+  resourceDir: string,
+  signal?: AbortSignal,
+): Promise<AudioBuffer | undefined> {
   const inputs = createComposeAudioInputs(protocol)
   if (!inputs.length)
     return undefined
@@ -163,7 +198,7 @@ async function renderAudioMix(protocol: IVideoProtocol, durationMs: number, sign
   let scheduled = 0
 
   const settled = await Promise.allSettled(inputs.map(async (input) => {
-    const buffer = await decodeInputAudioSlice(input, signal)
+    const buffer = await decodeInputAudioSlice(input, resourceDir, signal)
     if (!buffer)
       return
 
@@ -320,7 +355,12 @@ export async function composeProtocol(
 
     const audioBuffer = opts.audio === false
       ? undefined
-      : await renderAudioMix(renderProtocol, durationMs, opts.signal)
+      : await renderAudioMix(
+          renderProtocol,
+          durationMs,
+          clipOptions?.rendererOptions?.resourceDir ?? DEFAULT_RESOURCE_DIR,
+          opts.signal,
+        )
 
     throwIfAborted(opts.signal, 'preparing the encoder')
 

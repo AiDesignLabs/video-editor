@@ -1,9 +1,9 @@
 import type { IVideoProtocol } from '@video-editor/shared'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { composeProtocol } from './compose'
 
-const { encoderCalls, rendererCalls } = vi.hoisted(() => ({
+const { encoderCalls, opfsState, rendererCalls } = vi.hoisted(() => ({
   encoderCalls: {
     options: undefined as Record<string, unknown> | undefined,
     addFrame: [] as Array<[number, number]>,
@@ -19,6 +19,20 @@ const { encoderCalls, rendererCalls } = vi.hoisted(() => ({
     renderAt: [] as number[],
     destroyed: false,
     options: undefined as Record<string, unknown> | undefined,
+  },
+  opfsState: {
+    file: undefined as File | undefined,
+    paths: [] as string[],
+  },
+}))
+
+vi.mock('opfs-tools', () => ({
+  file: (path: string) => {
+    opfsState.paths.push(path)
+    return {
+      exists: vi.fn(async () => opfsState.file !== undefined),
+      getOriginFile: vi.fn(async () => opfsState.file),
+    }
   },
 }))
 
@@ -105,6 +119,11 @@ async function waitForEncoding() {
 }
 
 describe('composeProtocol', () => {
+  beforeEach(() => {
+    opfsState.file = undefined
+    opfsState.paths.length = 0
+  })
+
   it('drives the render loop through the encoder with monotonic progress', async () => {
     encoderCalls.addFrame.length = 0
     rendererCalls.renderAt.length = 0
@@ -251,6 +270,34 @@ describe('composeProtocol', () => {
     // Silently exporting a soundless video here is the failure mode this guards
     // against: the file plays, so nobody notices until it ships.
     await expect(composeProtocol(createProtocol())).rejects.toThrow(/audio input failed to load/)
+
+    encoderCalls.audioInputs = []
+    vi.unstubAllGlobals()
+  })
+
+  it('loads export audio from the OPFS cache before trying the network', async () => {
+    encoderCalls.audioInputs = [{
+      url: 'https://storage.example.com/video.mp4',
+      startTime: 0,
+      endTime: 1000,
+      fromTime: 0,
+    }]
+    opfsState.file = new File(['cached video'], 'video.mp4', { type: 'video/mp4' })
+    vi.stubGlobal('OfflineAudioContext', class {
+      constructor(..._args: unknown[]) {}
+      async startRendering() {
+        return {}
+      }
+    })
+    const fetchMock = vi.fn(async () => new Response(null, { status: 403 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await composeProtocol(createProtocol(), {
+      clipOptions: { rendererOptions: { resourceDir: '/custom-cache' } },
+    })
+
+    expect(opfsState.paths).toEqual(['/custom-cache/https/storage.example.com/video.mp4'])
+    expect(fetchMock).not.toHaveBeenCalled()
 
     encoderCalls.audioInputs = []
     vi.unstubAllGlobals()
