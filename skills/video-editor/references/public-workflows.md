@@ -70,3 +70,15 @@ resolver. Do not use the preview resolver for export.
 Use `assets.getPreviewBlob(asset.id)`, `assets.getThumbnails(asset.id, options)`, and
 `assets.getWaveform(asset.id, options)` for asset UI. Do not resolve an asset URL and call the low-level
 resource helpers yourself.
+
+Cancel analysis when its view, asset, or project is replaced:
+
+```ts
+const controller = new AbortController()
+const thumbnails = assets.getThumbnails(asset.id, { signal: controller.signal })
+
+// Run when the caller no longer needs the result.
+controller.abort()
+```
+
+Treat an `AbortError` as a normal cancellation. Other failures must remain visible to the caller.
