@@ -478,7 +478,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   function warmUpMediaElementSources(protocol: IVideoProtocol) {
     for (const track of protocol.tracks) {
       for (const segment of track.children) {
-        if (!isVideoSegment(segment))
+        if (segment.segmentType !== 'audio' && !isVideoSegment(segment))
           continue
         if ((segment.volume ?? 1) <= 0)
           continue
@@ -511,7 +511,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     const activeKeys = new Set<string>()
     for (const track of protocol.tracks) {
       for (const segment of track.children) {
-        if (!isVideoSegment(segment))
+        if (segment.segmentType !== 'audio' && !isVideoSegment(segment))
           continue
         const key = getResourceKey(segment.url)
         if (key)
@@ -1019,9 +1019,6 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   function resolveMediaElementUrl(segment: { url: string, segmentType?: string, type?: string }) {
-    if (segment.segmentType !== 'frames' || segment.type !== 'video')
-      return undefined
-
     const key = getResourceKey(segment.url)
     if (!key)
       return undefined
@@ -1058,6 +1055,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
       const objectUrl = URL.createObjectURL(originFile)
       mediaElementObjectUrls.set(key, objectUrl)
+      if (isPlaying.value && !rendererDestroyed) {
+        // The first play attempt may have used the synthetic local-asset URL.
+        // Re-evaluate from a clean state so AudioManager swaps in the blob URL.
+        previewRunner.reset()
+        previewAudioTicker.tick()
+      }
       return objectUrl
     })()
 

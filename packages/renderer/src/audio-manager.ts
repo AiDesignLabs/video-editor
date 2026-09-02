@@ -33,8 +33,8 @@ type AudioElementSegment = IAudioSegment | IVideoFramesSegment
 interface AudioManagerOptions {
   resolveMediaElementUrl?: (segment: AudioElementSegment) => string | undefined
   /**
-   * Decode a segment's source window into an AudioBuffer. Video audio always
-   * uses this path when available; standalone audio uses it when reversed.
+   * Decode a reversed segment's source window into an AudioBuffer. Forward
+   * playback stays on the streaming media-element path for long media.
    */
   loadAudioBuffer?: (segment: AudioElementSegment) => Promise<AudioBuffer | undefined>
 }
@@ -245,7 +245,7 @@ export class AudioManager {
     if (segment?.reversed === true && !this.options.loadAudioBuffer) {
       throw new Error('[renderer] reversed video audio preview requires a decoded audio buffer loader')
     }
-    if (this.options.loadAudioBuffer) {
+    if (segment?.reversed === true && this.options.loadAudioBuffer) {
       this.applyDecodedBufferAudioEvent(event)
       return
     }
@@ -480,6 +480,8 @@ export class AudioManager {
     if (!segment)
       return
     const state = this.getOrCreateAudioElementState(key, segment)
+    if (!state)
+      return
 
     if (event.action === 'start' || event.action === 'seek') {
       const sourceOffsetMs = this.computeSegmentSourceOffsetMs(
@@ -568,6 +570,8 @@ export class AudioManager {
     if (!segment)
       return
     const state = this.getOrCreateAudioElementState(key, segment)
+    if (!state)
+      return
 
     if (event.action === 'start' || event.action === 'seek') {
       this.stopMp4Audio(event.segmentId)
@@ -710,8 +714,11 @@ export class AudioManager {
     return gainNode
   }
 
-  private getOrCreateAudioElementState(key: string, segment: AudioElementSegment): AudioElementState {
-    const nextUrl = this.options.resolveMediaElementUrl?.(segment) ?? segment.url
+  private getOrCreateAudioElementState(key: string, segment: AudioElementSegment): AudioElementState | undefined {
+    const resolvedUrl = this.options.resolveMediaElementUrl?.(segment)
+    if (!resolvedUrl && segment.url.startsWith('local-asset://'))
+      return undefined
+    const nextUrl = resolvedUrl ?? segment.url
     const existing = this.audioElements.get(key)
     if (existing) {
       if (existing.url !== nextUrl) {

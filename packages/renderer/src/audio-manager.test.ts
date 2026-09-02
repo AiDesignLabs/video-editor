@@ -255,7 +255,7 @@ function createVideoPlan(action: AudioVoiceAction, sourceTimeMs: number): Timeli
   }
 }
 
-describe('AudioManager audio-element seek guards', () => {
+describe('audioManager audio-element seek guards', () => {
   beforeEach(() => {
     MockAudioElement.reset()
     vi.stubGlobal('Audio', MockAudioElement as unknown as typeof Audio)
@@ -341,9 +341,35 @@ describe('AudioManager audio-element seek guards', () => {
 
     manager.destroy()
   })
+
+  it('waits for a playable URL before starting local asset audio', () => {
+    MockAudioElement.reset({ duration: 8 })
+    const protocol = createVideoAudioProtocol()
+    const segment = protocol.tracks[0]?.children[0]
+    if (!segment)
+      throw new Error('Expected a video segment')
+    segment.url = 'local-asset://video-1/video.mp4'
+    let resolvedUrl: string | undefined
+    const manager = new AudioManager(protocol, {
+      resolveMediaElementUrl: () => resolvedUrl,
+    })
+
+    manager.applyTimelinePlan(createVideoPlan('start', 1500), true)
+    expect(MockAudioElement.instances).toHaveLength(0)
+
+    resolvedUrl = 'blob:opfs-video'
+    manager.resetTimelineState()
+    manager.applyTimelinePlan(createVideoPlan('start', 1500), true)
+
+    expect(MockAudioElement.instances).toHaveLength(1)
+    expect(MockAudioElement.instances[0]?.url).toBe('blob:opfs-video')
+    expect(MockAudioElement.instances[0]?.playCalls).toBe(1)
+
+    manager.destroy()
+  })
 })
 
-describe('AudioManager decoded buffer audio', () => {
+describe('audioManager decoded buffer audio', () => {
   beforeEach(() => {
     MockAudioElement.reset()
     vi.stubGlobal('Audio', MockAudioElement as unknown as typeof Audio)
@@ -360,11 +386,31 @@ describe('AudioManager decoded buffer audio', () => {
     vi.restoreAllMocks()
   })
 
-  it('schedules video segment audio on the WebAudio clock when a buffer loader is provided', async () => {
-    const startSpy = vi.spyOn(MockBufferSource.prototype, 'start')
+  it('keeps forward video audio on the streaming media element path', () => {
+    MockAudioElement.reset({ duration: 12 })
     const buffer = new MockAudioBuffer(2, 48000 * 12, 48000) as unknown as AudioBuffer
     const loadAudioBuffer = vi.fn(async () => buffer)
     const manager = new AudioManager(createVideoAudioProtocol(), { loadAudioBuffer })
+
+    manager.applyTimelinePlan(createVideoPlan('start', 2000), true)
+
+    expect(loadAudioBuffer).not.toHaveBeenCalled()
+    expect(MockAudioElement.instances).toHaveLength(1)
+    expect(MockAudioElement.instances[0]?.playCalls).toBe(1)
+
+    manager.destroy()
+  })
+
+  it('uses the decoded buffer path for reversed video audio', async () => {
+    const protocol = createVideoAudioProtocol()
+    const segment = protocol.tracks[0]?.children[0]
+    if (!segment || segment.segmentType !== 'frames' || segment.type !== 'video')
+      throw new Error('Expected a video segment')
+    segment.reversed = true
+    const startSpy = vi.spyOn(MockBufferSource.prototype, 'start')
+    const buffer = new MockAudioBuffer(2, 48000 * 12, 48000) as unknown as AudioBuffer
+    const loadAudioBuffer = vi.fn(async () => buffer)
+    const manager = new AudioManager(protocol, { loadAudioBuffer })
 
     manager.applyTimelinePlan(createVideoPlan('start', 2000), true)
     await Promise.resolve()
@@ -372,29 +418,8 @@ describe('AudioManager decoded buffer audio', () => {
     await Promise.resolve()
 
     expect(loadAudioBuffer).toHaveBeenCalledTimes(1)
-    // No hidden <audio> element clock for video segments on this path.
     expect(MockAudioElement.instances).toHaveLength(0)
     expect(startSpy).toHaveBeenCalledTimes(1)
-    // sourceTimeMs 2000 with fromTime 500 → 1.5s into the decoded buffer.
-    expect(startSpy).toHaveBeenCalledWith(0, 1.5)
-
-    manager.destroy()
-  })
-
-  it('falls back to the media element path when the buffer loader yields nothing', async () => {
-    MockAudioElement.reset({ duration: 12 })
-    const loadAudioBuffer = vi.fn(async () => undefined)
-    const manager = new AudioManager(createVideoAudioProtocol(), { loadAudioBuffer })
-
-    manager.applyTimelinePlan(createVideoPlan('start', 2000), true)
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    manager.applyTimelinePlan(createVideoPlan('start', 2100), true)
-
-    const element = MockAudioElement.instances[0]
-    expect(element).toBeDefined()
-    expect(element?.playCalls).toBe(1)
 
     manager.destroy()
   })
