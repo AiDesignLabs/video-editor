@@ -427,7 +427,9 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
         <div class="ve-track-rail__cell">
           <span
             class="ve-track-rail__icon"
-            :class="resolveRailIcon(slotProps.track)"
+            :class="slotProps.track.muted
+              ? ['i-creatly-mute', 've-track-rail__icon--muted']
+              : resolveRailIcon(slotProps.track)"
             aria-hidden="true"
           />
           <div class="ve-track-rail__controls">
@@ -449,8 +451,9 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
               v-if="canMuteTrack(slotProps.track)"
               type="button"
               class="ve-track-toggle"
-              :class="{ 've-track-toggle--off': slotProps.track.muted }"
+              :class="{ 've-track-toggle--muted': slotProps.track.muted }"
               :title="slotProps.track.muted ? '取消静音' : '静音轨道'"
+              :aria-pressed="slotProps.track.muted"
               @mousedown.stop
               @click.stop="handleTrackToggle(slotProps.track, 'muted')"
             >
@@ -645,6 +648,10 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
   opacity: 0;
 }
 
+.ve-track-rail__icon--muted {
+  color: var(--ve-track-muted-color, #dc2626);
+}
+
 .ve-track-toggle {
   width: 16px;
   height: 16px;
@@ -674,6 +681,11 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
 .ve-track-toggle--off {
   opacity: 0.45;
   background: var(--ve-surface-control-muted);
+}
+
+.ve-track-toggle--muted {
+  background: var(--ve-track-muted-color, #dc2626);
+  color: #fff;
 }
 
 .ve-transition-seam__label {

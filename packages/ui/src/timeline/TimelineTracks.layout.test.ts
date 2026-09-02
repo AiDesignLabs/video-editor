@@ -24,4 +24,9 @@ describe('timeline track layout', () => {
     expect(source).toContain('if (isActiveSegment(layout))')
     expect(source).toContain('intersectsTimelineRenderWindow(geometry.left, geometry.width, renderWindow)')
   })
+
+  it('keeps a muted track visibly distinct from a hidden track', () => {
+    expect(source).toContain('\'ve-track--muted\': trackLayout.track.muted')
+    expect(source).toMatch(/\.ve-track--muted \.ve-segment\s*\{[\s\S]*?opacity:\s*0\.5;[\s\S]*?filter:\s*grayscale\(0\.85\);/)
+  })
 })

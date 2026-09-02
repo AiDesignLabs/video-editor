@@ -133,6 +133,7 @@ function getGapsForTrack(trackId: string) {
       :class="{
         've-track--main': trackLayout.track.isMain,
         've-track--hidden': trackLayout.track.hidden,
+        've-track--muted': trackLayout.track.muted,
         've-track--has-selection': trackLayout.segments.some((layout: SegmentLayout) => layout.isSelected),
         've-track--with-rail': showTrackRail,
       }"
@@ -327,6 +328,17 @@ function getGapsForTrack(trackId: string) {
 /* A hidden track keeps its layout but reads as inactive */
 .ve-track--hidden .ve-track__body {
   opacity: 0.4;
+}
+
+/* Muting affects sound, not visibility. Keep the row readable while making
+   the state obvious even when the rail controls are not hovered. */
+.ve-track--muted .ve-track__body {
+  box-shadow: inset 0 0 0 1px var(--ve-track-muted-border, rgba(220, 38, 38, 0.28));
+}
+
+.ve-track--muted .ve-segment {
+  opacity: 0.5;
+  filter: grayscale(0.85);
 }
 
 .ve-segment {
