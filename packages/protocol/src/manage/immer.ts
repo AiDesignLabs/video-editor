@@ -45,6 +45,8 @@ export interface UndoStackItem {
 }
 
 export interface TransactionOptions<T> extends TransactionMeta {
+  /** Operations already performed in an isolated proposal preview. */
+  operations?: readonly TransactionMeta[]
   /**
    * Runs against the pending state right before the transaction commits.
    * Returning `false` rolls the whole transaction back and leaves the
@@ -116,6 +118,8 @@ type UpdaterFn<T> = <R>(
 
 export interface History<T> {
   state: Ref<T>
+  /** Monotonic version of committed state, including undo and redo. */
+  revision: ComputedRef<number>
   update: UpdaterFn<T>
   enable: (value?: boolean) => void
   undo: () => boolean
@@ -158,6 +162,7 @@ export function useHistory<T>(baseState: T): History<T> {
   const undoable = ref(false)
 
   const state = shallowRef(baseState)
+  const stateRevision = ref(0)
 
   // Open transactions, outermost first. A nested transaction reuses the
   // outermost one: it can never push a slice of history on its own.
@@ -186,6 +191,7 @@ export function useHistory<T>(baseState: T): History<T> {
     const pointer = ++undoStackPointer.value
     undoStack.value.length = pointer
     undoStack.value[pointer] = item
+    stateRevision.value++
   }
 
   const applyEffect = (updater: (draft: T) => void) => {
@@ -234,7 +240,7 @@ export function useHistory<T>(baseState: T): History<T> {
       meta: options?.label !== undefined || options?.data !== undefined
         ? cloneMeta({ label: options.label, data: options.data })
         : undefined,
-      operations: [],
+      operations: options?.operations?.map(cloneMeta) ?? [],
       validate: options?.validate,
       cancelled: false,
       closed: false,
@@ -348,6 +354,7 @@ export function useHistory<T>(baseState: T): History<T> {
     const patches = undoStack.value[undoStackPointer.value].inversePatches
     state.value = applyPatches(state.value, patches)
     undoStackPointer.value--
+    stateRevision.value++
     return true
   }
 
@@ -357,6 +364,7 @@ export function useHistory<T>(baseState: T): History<T> {
     undoStackPointer.value++
     const patches = undoStack.value[undoStackPointer.value].patches
     state.value = applyPatches(state.value, patches)
+    stateRevision.value++
     return true
   }
 
@@ -385,9 +393,11 @@ export function useHistory<T>(baseState: T): History<T> {
 
   const isTransactionActive = computed(() => frameDepth.value > 0)
   const transactionDepth = computed(() => frameDepth.value)
+  const revision = computed(() => stateRevision.value)
 
   return {
     state,
+    revision,
     update,
     enable,
     undo,

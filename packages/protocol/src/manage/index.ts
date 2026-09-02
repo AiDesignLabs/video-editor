@@ -1,7 +1,7 @@
 import type { IAudioSegment, ITrack, ITrackType, ITransition, ITransitionEdge, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackTypeMapSegment, TrackTypeMapTrack, TrackUnion } from '@video-editor/shared'
 import type { DeepReadonly } from '@vue/reactivity'
 import type { Patch } from 'immer'
-import type { TransactionMeta } from './immer'
+import type { TransactionMeta, TransactionOptions } from './immer'
 import type { PartialByKeys } from './utils'
 import { isAudioSegment, isVideoFramesSegment, sampleKeyframes } from '@video-editor/shared'
 import { computed, reactive, readonly, ref, toRaw } from '@vue/reactivity'
@@ -311,6 +311,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     undoCount,
     redoCount,
     operationLog,
+    revision,
     protocol: protocolRef,
   } = normalizedProtocol(validator.verify(protocol))
 
@@ -1474,6 +1475,42 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
 
   const takeSnapshot = () => snapshotProtocolState(clone(toRaw(protocolRef.value)) as IVideoProtocol)
 
+  const applyProtocolSnapshot = (
+    snapshot: IVideoProtocol,
+    options?: TransactionOptions<IVideoProtocol>,
+  ) => {
+    const next = validator.verify(clone(snapshot))
+    return transaction(() => {
+      updateProtocol((draft) => {
+        draft.id = next.id
+        draft.version = next.version
+        draft.width = next.width
+        draft.height = next.height
+        draft.fps = next.fps
+        draft.tracks = clone(next.tracks)
+        if (next.transitions === undefined)
+          delete draft.transitions
+        else
+          draft.transitions = clone(next.transitions)
+        if (next.extra === undefined)
+          delete draft.extra
+        else
+          draft.extra = clone(next.extra)
+      })
+    }, {
+      ...options,
+      validate: (state) => {
+        try {
+          validator.verify(clone(toRaw(state)) as IVideoProtocol)
+          return true
+        }
+        catch {
+          return false
+        }
+      },
+    })
+  }
+
   const undo = (): HistoryMutationResult => {
     // Undoing into a half-applied transaction would desync the transaction's
     // snapshot from the state it is about to commit.
@@ -1544,6 +1581,8 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     redoCount,
     undoCount,
     operationLog,
+    revision,
+    applyProtocolSnapshot,
 
     beginTransaction,
     transaction,
@@ -1564,6 +1603,7 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     undoCount,
     redoCount,
     operationLog,
+    revision,
     beginTransaction,
     transaction,
     isTransactionActive,
@@ -1650,6 +1690,7 @@ function normalizedProtocol(protocol: IVideoProtocol) {
     undoCount,
     redoCount,
     operationLog,
+    revision,
     exportProtocol,
   }
 }

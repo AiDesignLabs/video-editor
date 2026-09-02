@@ -1,4 +1,4 @@
-import type { createVideoProtocolManager } from '@video-editor/protocol'
+import type { createVideoProtocolManager, OperationLogMeta } from '@video-editor/protocol'
 import type { IKeyframeEasing, IKeyframeProperty, ITrackType, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
 import type { ComputedRef, DeepReadonly } from '@vue/reactivity'
 
@@ -206,6 +206,8 @@ export interface EditorCoreState {
   redoCount: ProtocolManager['redoCount']
   /** Semantic descriptions of the currently reachable history branch. */
   operationLog: ProtocolManager['operationLog']
+  /** Monotonic committed-state version used for proposal conflict checks. */
+  revision: ProtocolManager['revision']
   /** Whether a history transaction is currently open. */
   isTransactionActive: ProtocolManager['isTransactionActive']
   /** Nesting depth of the open transaction; 0 when none is open. */
@@ -355,6 +357,46 @@ export interface EditorCoreServices {
   [key: string]: unknown
 }
 
+export interface ProposalChangeSummary {
+  addedTrackIds: string[]
+  removedTrackIds: string[]
+  changedTrackIds: string[]
+  addedSegmentIds: string[]
+  removedSegmentIds: string[]
+  changedSegmentIds: string[]
+  projectFields: Array<'width' | 'height' | 'fps'>
+}
+
+/** A valid protocol preview produced without changing the main editor. */
+export interface EditorProposal {
+  id: string
+  baseRevision: number
+  previewProtocol: IVideoProtocol
+  validation: { valid: true }
+  operations: readonly OperationLogMeta[]
+  summary: ProposalChangeSummary
+}
+
+export interface ProposalActionResult {
+  success: boolean
+  error?: string
+  proposal?: EditorProposal
+}
+
+export interface EditorProposalManager {
+  /** Run commands against an isolated copy and keep the resulting preview for review. */
+  create: (
+    build: (editor: EditorCore) => void,
+    options?: { id?: string },
+  ) => ProposalActionResult
+  /** Apply the whole proposal as one history item if its base revision is current. */
+  accept: (id: string) => ProposalActionResult
+  /** Discard a proposal without touching protocol history. */
+  reject: (id: string) => ProposalActionResult
+  get: (id: string) => EditorProposal | undefined
+  list: () => EditorProposal[]
+}
+
 /**
  * The context passed to plugin creators.
  */
@@ -455,10 +497,11 @@ export interface EditorCorePluginManager {
 export interface EditorCoreOptions {
   /** Initial protocol snapshot. */
   protocol: IVideoProtocol
-  /** Optional id generators for segments/tracks. */
+  /** Optional id generators for segments, tracks and proposals. */
   idFactory?: {
     segment?: () => string
     track?: () => string
+    proposal?: () => string
   }
   /** Optional shared services (resource manager, renderer, etc). */
   services?: EditorCoreServices
@@ -474,6 +517,8 @@ export interface EditorCore {
   commands: EditorCoreCommands
   /** Read-only selectors. */
   selectors: EditorCoreSelectors
+  /** Isolated agent proposals waiting for review. */
+  proposals: EditorProposalManager
   /** Plugin manager instance. */
   plugins: EditorCorePluginManager
   /** Segment plugin registry. */

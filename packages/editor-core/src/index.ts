@@ -2,6 +2,7 @@ export { createBatchCommands } from './batch'
 export { createEditorCore } from './core'
 export { checkKeyframeCommand, createKeyframeCommands } from './keyframes'
 export { createPluginManager } from './plugin'
+export { createProposalManager, summarizeProposal } from './proposal'
 export { createSegmentRegistry } from './segment'
 export { createStructuralSelectors } from './selectors'
 export type {
@@ -22,11 +23,15 @@ export type {
   EditorCoreSelectors,
   EditorCoreServices,
   EditorCoreState,
+  EditorProposal,
+  EditorProposalManager,
   EditorSelection,
   KeyframeCommandCheck,
   KeyframeCommandResult,
   MoveKeyframeOptions,
   MoveSegmentOptions,
+  ProposalActionResult,
+  ProposalChangeSummary,
   RemoveKeyframeOptions,
   RemoveSegmentOptions,
   ResizeSegmentOptions,

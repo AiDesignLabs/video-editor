@@ -12,6 +12,7 @@ import { computed } from '@vue/reactivity'
 import { createBatchCommands } from './batch'
 import { createKeyframeCommands } from './keyframes'
 import { createPluginManager } from './plugin'
+import { createProposalManager } from './proposal'
 import { createSegmentRegistry } from './segment'
 import { createStructuralSelectors } from './selectors'
 
@@ -46,6 +47,7 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     undoCount: protocolManager.undoCount,
     redoCount: protocolManager.redoCount,
     operationLog: protocolManager.operationLog,
+    revision: protocolManager.revision,
     isTransactionActive: protocolManager.isTransactionActive,
     transactionDepth: protocolManager.transactionDepth,
   }
@@ -137,11 +139,27 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
   }
 
   const plugins = createPluginManager(context)
+  const proposals = createProposalManager({
+    getProtocol: () => protocolManager.exportProtocol(),
+    getRevision: () => protocolManager.revision.value,
+    isTransactionActive: () => protocolManager.isTransactionActive.value,
+    createSandbox: protocol => createEditorCore({
+      protocol,
+      idFactory: options.idFactory,
+    }),
+    applySnapshot: (protocol, proposal) => protocolManager.applyProtocolSnapshot(protocol, {
+      label: 'accept-proposal',
+      data: { proposalId: proposal.id, baseRevision: proposal.baseRevision },
+      operations: proposal.operations,
+    }).status,
+    createId: options.idFactory?.proposal ?? (() => globalThis.crypto.randomUUID()),
+  })
 
   return {
     state,
     commands,
     selectors,
+    proposals,
     plugins,
     registry,
     services,

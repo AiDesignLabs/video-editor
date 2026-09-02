@@ -55,6 +55,22 @@ describe('useHistory basics', () => {
     expect(undo()).toBe(true)
     expect(redo()).toBe(true)
   })
+
+  it('increments revision for commits, undo and redo', () => {
+    const { update, undo, redo, revision } = createHistory()
+
+    expect(revision.value).toBe(0)
+    update((draft) => {
+      draft.count = 1
+    })
+    expect(revision.value).toBe(1)
+
+    undo()
+    expect(revision.value).toBe(2)
+
+    redo()
+    expect(revision.value).toBe(3)
+  })
 })
 
 describe('transaction commit', () => {
@@ -202,6 +218,27 @@ describe('transaction commit', () => {
         { label: 'update-segment', data: { segmentId: 'b' } },
       ],
     })
+  })
+
+  it('accepts an existing operation list for an isolated commit', () => {
+    const { transaction, update, operationLog } = createHistory()
+
+    transaction(() => {
+      update((draft) => {
+        draft.count = 1
+      })
+    }, {
+      label: 'accept-proposal',
+      operations: [
+        { label: 'set-fps', data: { fps: 24 } },
+        { label: 'add-segment', data: { segmentId: 'segment-1' } },
+      ],
+    })
+
+    expect(operationLog.value[0]?.operations).toEqual([
+      { label: 'set-fps', data: { fps: 24 } },
+      { label: 'add-segment', data: { segmentId: 'segment-1' } },
+    ])
   })
 
   it('updates status on undo and redo, then removes an abandoned redo branch', () => {
