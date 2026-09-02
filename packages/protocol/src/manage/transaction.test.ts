@@ -53,6 +53,24 @@ function startTimeOf(manager: ReturnType<typeof createManager>, id: string) {
 }
 
 describe('protocol transactions', () => {
+  it('groups track structure commands into one undo step', () => {
+    const manager = createManager()
+    const undoBefore = manager.undoCount.value
+
+    manager.transaction(() => {
+      manager.addTrack({ trackType: 'text', trackId: 'titles' })
+      manager.addTrack({ trackType: 'audio', trackId: 'audio', index: 1 })
+      manager.moveTrack('audio', 0)
+    }, { label: 'arrange-tracks' })
+
+    expect(manager.protocol.value.tracks.map(track => track.trackId)).toEqual(['audio', 'titles'])
+    expect(manager.undoCount.value).toBe(undoBefore + 1)
+
+    manager.undo()
+    expect(manager.protocol.value.tracks).toEqual([])
+    expect(manager.undoCount.value).toBe(undoBefore)
+  })
+
   it('collapses a batch move into a single undo step', () => {
     const manager = createManager()
     const [a, b] = seedOverlaySegments(manager, [0, 4000])

@@ -8,12 +8,16 @@ export type {
   AssetLibraryOptions,
   AssetMeta,
 } from './assets'
-export { createVideoProtocolManager, MAX_CANVAS_SIZE, MIN_CANVAS_SIZE } from './manage'
+export { createVideoProtocolManager, MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS } from './manage'
 export type {
+  AddTrackOptions,
+  AddTrackResult,
   CanvasSize,
   HistoryMutationResult,
   SetCanvasSizeResult,
+  SetFpsResult,
   TrackMutableFields,
+  TrackStructureResult,
   TransactionHandle,
   TransactionMeta,
   TransactionOptions,

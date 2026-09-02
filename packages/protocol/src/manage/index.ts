@@ -218,6 +218,29 @@ export interface SetCanvasSizeResult {
   error?: string
 }
 
+export interface AddTrackOptions {
+  trackType: ITrackType
+  /** Generated when omitted. Explicit ids must be non-empty and unique. */
+  trackId?: string
+  /** Final zero-based position. Defaults to the first track. */
+  index?: number
+}
+
+export interface AddTrackResult {
+  success: boolean
+  trackId?: string
+  error?: string
+}
+
+export interface TrackStructureResult {
+  success: boolean
+  error?: string
+  /** Segments deleted together with a removed track. */
+  removedSegmentIds?: string[]
+}
+
+const TRACK_TYPES = new Set<ITrackType>(['frames', 'text', 'sticker', 'audio', 'effect', 'filter'])
+
 function validateCanvasDimension(label: string, value: number): string | null {
   if (!Number.isFinite(value))
     return `${label} must be a finite number`
@@ -1263,6 +1286,92 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     return { success: true }
   }
 
+  /** Add an empty track without exposing the protocol draft to callers. */
+  const addTrack = (input: AddTrackOptions): AddTrackResult => {
+    if (!TRACK_TYPES.has(input.trackType))
+      return { success: false, error: `unsupported track type ${String(input.trackType)}` }
+    if (input.trackId !== undefined && (typeof input.trackId !== 'string' || input.trackId.length === 0))
+      return { success: false, error: 'track id must not be empty' }
+
+    const trackId = input.trackId ?? options?.idFactory?.track?.() ?? genRandomId()
+    if (typeof trackId !== 'string' || trackId.length === 0)
+      return { success: false, error: 'track id must not be empty' }
+    const tracks = protocolRef.value.tracks
+    if (tracks.some(track => track.trackId === trackId))
+      return { success: false, error: `track id ${trackId} already exists` }
+
+    const index = input.index ?? 0
+    if (!Number.isInteger(index) || index < 0 || index > tracks.length)
+      return { success: false, error: `track index must be between 0 and ${tracks.length}` }
+
+    const isMain = input.trackType === 'frames' && !getMainFramesTrack(protocolRef.value)
+    const track = {
+      trackId,
+      trackType: input.trackType,
+      children: [],
+      ...(isMain ? { isMain: true } : {}),
+    } as TrackUnion
+
+    try {
+      validator.verifyTrack(track)
+    }
+    catch {
+      return { success: false, error: 'invalid track data' }
+    }
+
+    updateProtocol((protocol) => {
+      protocol.tracks.splice(index, 0, track)
+    })
+    return { success: true, trackId }
+  }
+
+  /** Remove a track and all of its segments as one history entry. */
+  const removeTrack = (trackId: string): TrackStructureResult => {
+    const track = protocolRef.value.tracks.find(item => item.trackId === trackId)
+    if (!track)
+      return { success: false, error: `no track with id ${trackId}` }
+
+    const removedSegmentIds = track.children.map(segment => segment.id)
+    const removedMainFrames = track.trackType === 'frames' && Boolean(track.isMain)
+
+    updateProtocolWithTransitionSync((protocol) => {
+      const index = protocol.tracks.findIndex(item => item.trackId === trackId)
+      protocol.tracks.splice(index, 1)
+
+      if (removedMainFrames) {
+        for (let i = protocol.tracks.length - 1; i >= 0; i--) {
+          const candidate = protocol.tracks[i]
+          if (candidate.trackType !== 'frames')
+            continue
+          candidate.isMain = true
+          rebuildTrackTimeline(candidate, 0)
+          break
+        }
+      }
+      return true
+    })
+
+    return { success: true, removedSegmentIds }
+  }
+
+  /** Move a track to its final zero-based position. */
+  const moveTrack = (trackId: string, toIndex: number): TrackStructureResult => {
+    const tracks = protocolRef.value.tracks
+    const fromIndex = tracks.findIndex(track => track.trackId === trackId)
+    if (fromIndex < 0)
+      return { success: false, error: `no track with id ${trackId}` }
+    if (!Number.isInteger(toIndex) || toIndex < 0 || toIndex >= tracks.length)
+      return { success: false, error: `track index must be between 0 and ${Math.max(0, tracks.length - 1)}` }
+    if (fromIndex === toIndex)
+      return { success: true }
+
+    updateProtocol((protocol) => {
+      const [track] = protocol.tracks.splice(fromIndex, 1)
+      protocol.tracks.splice(toIndex, 0, track)
+    })
+    return { success: true }
+  }
+
   const updateTrack = (trackId: string, updater: (track: TrackMutableFields) => void): boolean => {
     return updateProtocolWithTransitionSync((protocol) => {
       const track = protocol.tracks.find(t => t.trackId === trackId)
@@ -1403,6 +1512,9 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     addTransition,
     removeTransition,
     updateTransition,
+    addTrack,
+    removeTrack,
+    moveTrack,
     updateTrack,
     setCanvasSize,
     setFps,

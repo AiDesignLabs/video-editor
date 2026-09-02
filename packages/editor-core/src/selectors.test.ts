@@ -453,4 +453,48 @@ describe('canRun', () => {
       expect(editor.commands.setCanvasSize(size).success).toBe(false)
     }
   })
+
+  it('gates frame-rate changes on the same bounds the command enforces', () => {
+    const editor = createEditor()
+
+    for (const fps of [1, 24, 29.97, 60]) {
+      expect(editor.selectors.canRun({ command: 'setFps', fps }).ok).toBe(true)
+      expect(editor.commands.setFps(fps).success).toBe(true)
+    }
+
+    for (const fps of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const check = editor.selectors.canRun({ command: 'setFps', fps })
+      expect(check.ok).toBe(false)
+      expect(check.reason).toBeTruthy()
+      expect(editor.commands.setFps(fps).success).toBe(false)
+    }
+  })
+
+  it('gates track structure commands on the same rules the commands enforce', () => {
+    const editor = createEditor()
+
+    const add = { trackType: 'text' as const, trackId: 'titles', index: 0 }
+    expect(editor.selectors.canRun({ command: 'addTrack', input: add }).ok).toBe(true)
+    expect(editor.commands.addTrack(add).success).toBe(true)
+
+    for (const input of [
+      { trackType: 'text' as const, trackId: 'titles' },
+      { trackType: 'audio' as const, trackId: '', index: 0 },
+      { trackType: 'audio' as const, trackId: 'audio', index: 99 },
+    ]) {
+      const check = editor.selectors.canRun({ command: 'addTrack', input })
+      expect(check.ok).toBe(false)
+      expect(editor.commands.addTrack(input).success).toBe(false)
+    }
+
+    expect(editor.selectors.canRun({ command: 'removeTrack', trackId: 'titles' }).ok).toBe(true)
+    expect(editor.selectors.canRun({ command: 'removeTrack', trackId: 'missing' }).ok).toBe(false)
+    expect(editor.commands.removeTrack('missing').success).toBe(false)
+
+    editor.commands.addTrack({ trackType: 'audio', trackId: 'audio', index: 1 })
+    expect(editor.selectors.canRun({ command: 'moveTrack', trackId: 'audio', toIndex: 0 }).ok).toBe(true)
+    expect(editor.commands.moveTrack('audio', 0).success).toBe(true)
+    expect(editor.selectors.canRun({ command: 'moveTrack', trackId: 'audio', toIndex: 2 }).ok).toBe(false)
+    expect(editor.commands.moveTrack('audio', 2).success).toBe(false)
+  })
 })

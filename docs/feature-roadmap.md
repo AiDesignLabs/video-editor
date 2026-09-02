@@ -68,12 +68,15 @@ P0 拆成三个顺序交付的门槛，避免所有基础能力集中在一个�
 这些工作同时也是测试、历史界面和协作的基础设施，即使 agent 路线推进慢于预期也不会白做。
 
 **命令完备性。** `editor-core.commands` 当前覆盖片段增删改、移动、裁剪、分割、转场、
-轨道显隐、画布尺寸和撤销重做。缺口：
+轨道结构与显隐、画布尺寸、帧率和撤销重做。缺口：
 
-- `setFps`：`videoBasicInfo.fps` 可写且已进历史，但没有命令入口、校验和界面。fps 影响
-  逐帧步进和导出的采样时刻，但不改变以毫秒表示的关键帧时间语义。应与画布尺寸合并为一组
-  工程属性命令。
-- 轨道结构：新增、删除、重排。
+- [x] `setFps`：已提供命令入口、与协议一致的校验、`canRun` 查询和界面。支持 29.97 等
+      小数帧率，修改可整体撤销、重做；`CanvasSizePanel` 在宿主传入 `fps` 时将帧率与画布尺寸
+      合并展示为工程属性。fps 影响逐帧步进和导出的采样时刻，但不改变以毫秒表示的关键帧
+      时间语义。
+- [x] 轨道结构：`addTrack`、`removeTrack`、`moveTrack` 已覆盖新增、删除和重排，并提供对应
+      `canRun` 查询。删除非空轨道会在一个历史项中同时删除其片段；删除主画面轨后会提升另一条
+      画面轨并重建连续时间线。新增的第一条画面轨自动成为主轨，失败和无操作均不写入历史。
 - 关键帧：新增或更新、移动、删除单个关键帧，以及修改缓动。
 - 批量操作入口，见下一节。
 
@@ -90,7 +93,8 @@ P0 拆成三个顺序交付的门槛，避免所有基础能力集中在一个�
       复用 `@video-editor/shared` 的 `sampleKeyframes`，与预览、导出同一套纯函数。
 - [x] 选中态与可执行性查询：`getSelection()`；`canRun(check)` 回答某命令此刻是否可执行及
       原因，覆盖 undo / redo / removeSegment / duplicateSegment / splitSegment / addTransition /
-      setCanvasSize。测试断言 `canRun` 的判断与命令的实际行为一致，两者不允许分歧。
+      setCanvasSize / setFps / addTrack / removeTrack / moveTrack。测试断言 `canRun` 的判断与命令
+      的实际行为一致，两者不允许分歧。
 
 **语义化操作日志。** History 记录的是 immer patch，人类看不懂，无法据此审阅 agent 的提案。
 需要在事务上附带语义描述（例如 `split-segment`、`replace-source` 及其参数），用于：

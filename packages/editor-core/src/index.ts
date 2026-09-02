@@ -5,6 +5,8 @@ export { createSegmentRegistry } from './segment'
 export { createStructuralSelectors } from './selectors'
 export type {
   AddSegmentResult,
+  AddTrackOptions,
+  AddTrackResult,
   BatchResult,
   CommandCheck,
   CommandCheckResult,
@@ -35,6 +37,8 @@ export type {
   SegmentRegistry,
   SegmentsAtOptions,
   SetCanvasSizeResult,
+  SetFpsResult,
   TrackGap,
   TrackMutableFields,
+  TrackStructureResult,
 } from './types'

@@ -3735,6 +3735,112 @@ describe('removeSegment ripple', () => {
   })
 })
 
+describe('track structure commands', () => {
+  it('adds empty tracks at a requested position and makes the first frames track main', () => {
+    const manager = createVideoProtocolManager(structuredClone(protocol))
+
+    expect(manager.addTrack({ trackType: 'frames', trackId: 'main' }))
+      .toEqual({ success: true, trackId: 'main' })
+    expect(manager.addTrack({ trackType: 'text', trackId: 'titles', index: 0 }))
+      .toEqual({ success: true, trackId: 'titles' })
+    expect(manager.addTrack({ trackType: 'frames', trackId: 'overlay', index: 1 }))
+      .toEqual({ success: true, trackId: 'overlay' })
+
+    const tracks = manager.exportProtocol().tracks
+    expect(tracks.map(track => track.trackId)).toEqual(['titles', 'overlay', 'main'])
+    expect(tracks.find(track => track.trackId === 'main')).toMatchObject({ trackType: 'frames', isMain: true })
+    expect(tracks.find(track => track.trackId === 'overlay')).not.toHaveProperty('isMain')
+  })
+
+  it('refuses invalid add requests without changing history', () => {
+    const manager = createVideoProtocolManager(structuredClone(protocol))
+    manager.addTrack({ trackType: 'text', trackId: 'existing' })
+    const undoBefore = manager.undoCount.value
+
+    expect(manager.addTrack({ trackType: 'audio', trackId: 'existing' }).success).toBe(false)
+    expect(manager.addTrack({ trackType: 'audio', trackId: '', index: 0 }).success).toBe(false)
+    expect(manager.addTrack({ trackType: 'audio', trackId: 'bad-index', index: 99 }).success).toBe(false)
+    expect(manager.undoCount.value).toBe(undoBefore)
+    expect(manager.exportProtocol().tracks.map(track => track.trackId)).toEqual(['existing'])
+  })
+
+  it('removes a populated track atomically and restores it on undo', () => {
+    const manager = createVideoProtocolManager(structuredClone(protocol))
+    const title: ITextSegment = {
+      id: 'title-1',
+      segmentType: 'text',
+      startTime: 0,
+      endTime: 1000,
+      texts: [{ content: 'Title' }],
+    }
+    manager.addTrack({ trackType: 'text', trackId: 'titles' })
+    manager.curTime.value = 0
+    manager.addSegment(title, 'titles')
+    const undoBefore = manager.undoCount.value
+
+    expect(manager.removeTrack('titles')).toEqual({ success: true, removedSegmentIds: ['title-1'] })
+    expect(manager.exportProtocol().tracks).toHaveLength(0)
+    expect(manager.segmentMap.value['title-1']).toBeUndefined()
+    expect(manager.undoCount.value).toBe(undoBefore + 1)
+
+    manager.undo()
+    expect(manager.exportProtocol().tracks[0].trackId).toBe('titles')
+    expect(manager.segmentMap.value['title-1']).toBeDefined()
+  })
+
+  it('promotes and normalises another frames track when removing the main track', () => {
+    const manager = createVideoProtocolManager(structuredClone(protocol))
+    const clip: IVideoFramesSegment = {
+      id: 'clip',
+      segmentType: 'frames',
+      type: 'video',
+      url: 'http://example.com/video.mp4',
+      startTime: 0,
+      endTime: 1000,
+    }
+    manager.addTrack({ trackType: 'frames', trackId: 'main' })
+    manager.addTrack({ trackType: 'frames', trackId: 'overlay', index: 0 })
+
+    manager.curTime.value = 0
+    manager.addSegment({ ...clip, id: 'main-clip' }, 'main')
+    manager.curTime.value = 2000
+    manager.addSegment({ ...clip, id: 'overlay-clip', startTime: 2000, endTime: 3000 }, 'overlay')
+
+    expect(manager.removeTrack('main').success).toBe(true)
+    const promoted = manager.exportProtocol().tracks[0]
+    expect(promoted).toMatchObject({ trackId: 'overlay', trackType: 'frames', isMain: true })
+    expect(promoted.children[0]).toMatchObject({ id: 'overlay-clip', startTime: 0, endTime: 1000 })
+
+    manager.undo()
+    const restored = manager.exportProtocol().tracks
+    expect(restored.find(track => track.trackId === 'main')).toMatchObject({ isMain: true })
+    expect(restored.find(track => track.trackId === 'overlay')?.children[0].startTime).toBe(2000)
+  })
+
+  it('reorders tracks with one history entry and rejects invalid destinations', () => {
+    const manager = createVideoProtocolManager(structuredClone(protocol))
+    manager.addTrack({ trackType: 'text', trackId: 'a', index: 0 })
+    manager.addTrack({ trackType: 'audio', trackId: 'b', index: 1 })
+    manager.addTrack({ trackType: 'effect', trackId: 'c', index: 2 })
+    const undoBefore = manager.undoCount.value
+
+    expect(manager.moveTrack('a', 2)).toEqual({ success: true })
+    expect(manager.exportProtocol().tracks.map(track => track.trackId)).toEqual(['b', 'c', 'a'])
+    expect(manager.undoCount.value).toBe(undoBefore + 1)
+
+    manager.undo()
+    expect(manager.exportProtocol().tracks.map(track => track.trackId)).toEqual(['a', 'b', 'c'])
+    manager.redo()
+    expect(manager.exportProtocol().tracks.map(track => track.trackId)).toEqual(['b', 'c', 'a'])
+
+    const afterMove = manager.undoCount.value
+    expect(manager.moveTrack('a', 2)).toEqual({ success: true })
+    expect(manager.moveTrack('missing', 0).success).toBe(false)
+    expect(manager.moveTrack('a', 3).success).toBe(false)
+    expect(manager.undoCount.value).toBe(afterMove)
+  })
+})
+
 describe('updateTrack', () => {
   const textSegment: ITextSegment = {
     id: 'track-flags',

@@ -23,6 +23,14 @@ export type RemoveSegmentOptions = Parameters<ProtocolManager['removeSegment']>[
 /** Result payload returned by setCanvasSize. */
 export type SetCanvasSizeResult = ReturnType<ProtocolManager['setCanvasSize']>
 
+/** Result payload returned by setFps. */
+export type SetFpsResult = ReturnType<ProtocolManager['setFps']>
+
+/** Input and result types for track structure commands. */
+export type AddTrackOptions = Parameters<ProtocolManager['addTrack']>[0]
+export type AddTrackResult = ReturnType<ProtocolManager['addTrack']>
+export type TrackStructureResult = ReturnType<ProtocolManager['removeTrack']>
+
 /** The mutable track fields exposed to an updateTrack updater. */
 export type TrackMutableFields = Parameters<Parameters<ProtocolManager['updateTrack']>[1]>[0]
 
@@ -98,6 +106,10 @@ export type CommandCheck
     | { command: 'splitSegment', segmentId: string, timelineMs: number }
     | { command: 'addTransition' }
     | { command: 'setCanvasSize', width: number, height: number }
+    | { command: 'setFps', fps: number }
+    | { command: 'addTrack', input: AddTrackOptions }
+    | { command: 'removeTrack', trackId: string }
+    | { command: 'moveTrack', trackId: string, toIndex: number }
 
 export interface CommandCheckResult {
   ok: boolean
@@ -185,6 +197,12 @@ export interface EditorCoreCommands {
   updateTransition: ProtocolManager['updateTransition']
   /** Update a track's mutable presentation fields (hidden / muted / extra). */
   updateTrack: ProtocolManager['updateTrack']
+  /** Add an empty track. */
+  addTrack: ProtocolManager['addTrack']
+  /** Remove a track and all of its segments as one undo step. */
+  removeTrack: ProtocolManager['removeTrack']
+  /** Move a track to its final zero-based position. */
+  moveTrack: ProtocolManager['moveTrack']
   /** Resize the project canvas as a single undoable step. */
   setCanvasSize: ProtocolManager['setCanvasSize']
   /** Set the project frame rate as a single undoable step. */

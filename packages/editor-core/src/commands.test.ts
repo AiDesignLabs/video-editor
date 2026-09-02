@@ -137,6 +137,24 @@ describe('updateTrack', () => {
   })
 })
 
+describe('track structure commands', () => {
+  it('adds, reorders, and removes tracks through editor-core', () => {
+    const editor = createEditor()
+
+    expect(editor.commands.addTrack({ trackType: 'text', trackId: 'titles' }))
+      .toEqual({ success: true, trackId: 'titles' })
+    expect(editor.commands.addTrack({ trackType: 'audio', trackId: 'audio', index: 1 }).success).toBe(true)
+    expect(editor.commands.moveTrack('audio', 0)).toEqual({ success: true })
+    expect(editor.selectors.getTracks().map(track => track.trackId)).toEqual(['audio', 'titles'])
+
+    expect(editor.commands.removeTrack('titles')).toEqual({ success: true, removedSegmentIds: [] })
+    expect(editor.selectors.getTrackById('titles')).toBeUndefined()
+
+    editor.commands.undo()
+    expect(editor.selectors.getTrackById('titles')).toBeDefined()
+  })
+})
+
 describe('duplicateSegment', () => {
   it('places a copy and reports its new id', () => {
     const editor = createEditor()

@@ -1,6 +1,7 @@
 import type {
   IKeyframeProperty,
   IKeyframeTrack,
+  ITrackType,
   IVideoProtocol,
   SegmentUnion,
   TrackUnion,
@@ -16,7 +17,7 @@ import type {
   SegmentsAtOptions,
   TrackGap,
 } from './types'
-import { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE } from '@video-editor/protocol'
+import { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS } from '@video-editor/protocol'
 import { sampleKeyframes } from '@video-editor/shared'
 
 /**
@@ -32,6 +33,8 @@ const PROPERTY_DEFAULTS: Record<IKeyframeProperty, number> = {
   'volume': 1,
   'intensity': 1,
 }
+
+const TRACK_TYPES = new Set<ITrackType>(['frames', 'text', 'sticker', 'audio', 'effect', 'filter'])
 
 interface TransformLike {
   position?: readonly number[]
@@ -293,6 +296,42 @@ export function createStructuralSelectors(deps: StructuralSelectorDeps) {
           if (value < MIN_CANVAS_SIZE || value > MAX_CANVAS_SIZE)
             return refused(`${label} must be between ${MIN_CANVAS_SIZE} and ${MAX_CANVAS_SIZE}`)
         }
+        return allowed
+      }
+
+      case 'setFps': {
+        if (!Number.isFinite(check.fps))
+          return refused('fps must be a finite number')
+        if (check.fps < MIN_FPS)
+          return refused(`fps must be at least ${MIN_FPS}`)
+        return allowed
+      }
+
+      case 'addTrack': {
+        const { input } = check
+        if (!TRACK_TYPES.has(input.trackType))
+          return refused(`unsupported track type ${String(input.trackType)}`)
+        if (input.trackId !== undefined && (typeof input.trackId !== 'string' || input.trackId.length === 0))
+          return refused('track id must not be empty')
+        if (input.trackId && protocol().tracks.some(track => track.trackId === input.trackId))
+          return refused(`track id ${input.trackId} already exists`)
+        const index = input.index ?? 0
+        if (!Number.isInteger(index) || index < 0 || index > protocol().tracks.length)
+          return refused(`track index must be between 0 and ${protocol().tracks.length}`)
+        return allowed
+      }
+
+      case 'removeTrack':
+        return protocol().tracks.some(track => track.trackId === check.trackId)
+          ? allowed
+          : refused(`no track with id ${check.trackId}`)
+
+      case 'moveTrack': {
+        const tracks = protocol().tracks
+        if (!tracks.some(track => track.trackId === check.trackId))
+          return refused(`no track with id ${check.trackId}`)
+        if (!Number.isInteger(check.toIndex) || check.toIndex < 0 || check.toIndex >= tracks.length)
+          return refused(`track index must be between 0 and ${Math.max(0, tracks.length - 1)}`)
         return allowed
       }
     }
