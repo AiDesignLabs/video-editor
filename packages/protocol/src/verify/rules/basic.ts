@@ -1,12 +1,12 @@
 import type { IVideoProtocol } from '@video-editor/shared'
 import type { JSONSchemaType } from 'ajv'
-import { CANVAS_SIZE_SUFFIX, INVALID_ID, MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, POSITIVE_NUMBER_SUFFIX, TYPE_ERROR_PREFIX } from './common'
+import { CANVAS_SIZE_SUFFIX, FPS_SUFFIX, INVALID_ID, MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS, TYPE_ERROR_PREFIX } from './common'
 
 export const TYPE_ERROR_BASIC = `${TYPE_ERROR_PREFIX} object`
 export const INVALID_VERSION = 'version is not valid semver version'
 export const INVALID_WIDTH = `width ${CANVAS_SIZE_SUFFIX}`
 export const INVALID_HEIGHT = `height ${CANVAS_SIZE_SUFFIX}`
-export const INVALID_FPS = `fps ${POSITIVE_NUMBER_SUFFIX}`
+export const INVALID_FPS = `fps ${FPS_SUFFIX}`
 export const INVALID_TRACKS = 'tracks must be an array'
 
 export const videoProtocolBasicRule: JSONSchemaType<Omit<IVideoProtocol, 'tracks'> & { tracks: any[] }> = {
@@ -16,7 +16,7 @@ export const videoProtocolBasicRule: JSONSchemaType<Omit<IVideoProtocol, 'tracks
     version: { type: 'string', pattern: '^[0-9]+\\.[0-9]+\\.[0-9]+$' },
     width: { type: 'integer', minimum: MIN_CANVAS_SIZE, maximum: MAX_CANVAS_SIZE },
     height: { type: 'integer', minimum: MIN_CANVAS_SIZE, maximum: MAX_CANVAS_SIZE },
-    fps: { type: 'number', minimum: 1 },
+    fps: { type: 'number', minimum: MIN_FPS },
     tracks: { type: 'array', items: { type: 'object' } },
     transitions: {
       type: 'array',

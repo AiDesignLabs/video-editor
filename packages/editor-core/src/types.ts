@@ -187,6 +187,8 @@ export interface EditorCoreCommands {
   updateTrack: ProtocolManager['updateTrack']
   /** Resize the project canvas as a single undoable step. */
   setCanvasSize: ProtocolManager['setCanvasSize']
+  /** Set the project frame rate as a single undoable step. */
+  setFps: ProtocolManager['setFps']
   /** Replace a track id (useful for migrations). */
   replaceTrackId: ProtocolManager['replaceTrackId']
   /** Replace a segment id (useful for migrations). */

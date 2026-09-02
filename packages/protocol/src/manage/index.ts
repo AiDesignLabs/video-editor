@@ -5,7 +5,7 @@ import type { PartialByKeys } from './utils'
 import { isAudioSegment, isVideoFramesSegment, sampleKeyframes } from '@video-editor/shared'
 import { computed, reactive, readonly, ref, toRaw } from '@vue/reactivity'
 import { createValidator } from '../verify'
-import { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE } from '../verify/rules'
+import { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS } from '../verify/rules'
 import { useHistory } from './immer'
 import { checkSegment, handleSegmentUpdate } from './segment'
 import { clone, findInsertFramesSegmentIndex, findInsertSegmentIndex, genRandomId } from './utils'
@@ -199,11 +199,17 @@ function normalizeProtocolTransitions(protocol: IVideoProtocol) {
  * `setCanvasSize` only exists to turn a rejection into a readable message
  * instead of a thrown validation error.
  */
-export { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE }
+export { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS }
 
 export interface CanvasSize {
   width: number
   height: number
+}
+
+export interface SetFpsResult {
+  success: boolean
+  /** Present when the frame rate was rejected; the project is left untouched. */
+  error?: string
 }
 
 export interface SetCanvasSizeResult {
@@ -221,6 +227,14 @@ function validateCanvasDimension(label: string, value: number): string | null {
     return `${label} must be at least ${MIN_CANVAS_SIZE}, received ${value}`
   if (value > MAX_CANVAS_SIZE)
     return `${label} must be at most ${MAX_CANVAS_SIZE}, received ${value}`
+  return null
+}
+
+function validateFps(value: number): string | null {
+  if (!Number.isFinite(value))
+    return 'fps must be a finite number'
+  if (value < MIN_FPS)
+    return `fps must be at least ${MIN_FPS}, received ${value}`
   return null
 }
 
@@ -1203,6 +1217,21 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     })
   }
 
+  /** Set the project frame rate without changing millisecond-based timeline data. */
+  const setFps = (fps: number): SetFpsResult => {
+    const error = validateFps(fps)
+    if (error)
+      return { success: false, error }
+
+    if (protocolRef.value.fps === fps)
+      return { success: true }
+
+    updateProtocol((protocol) => {
+      protocol.fps = fps
+    })
+    return { success: true }
+  }
+
   /**
    * Update the mutable presentation fields of a track (`hidden`, `muted`, `extra`).
    *
@@ -1376,6 +1405,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     updateTransition,
     updateTrack,
     setCanvasSize,
+    setFps,
     replaceTrackId,
     replaceSegmentId,
 

@@ -74,6 +74,7 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     updateTransition: protocolManager.updateTransition,
     updateTrack: protocolManager.updateTrack,
     setCanvasSize: protocolManager.setCanvasSize,
+    setFps: protocolManager.setFps,
     replaceTrackId: protocolManager.replaceTrackId,
     replaceSegmentId: protocolManager.replaceSegmentId,
     moveSegments: batch.moveSegments,

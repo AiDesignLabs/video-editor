@@ -8,18 +8,24 @@ defineOptions({ name: 'CanvasSizePanel' })
 const props = withDefaults(defineProps<{
   width: number
   height: number
+  /** Optional project frame rate. When present, the panel also edits FPS. */
+  fps?: number
   presets?: CanvasSizePreset[]
   /** Rejection message from the host's `setCanvasSize`, shown inline. */
   error?: string | null
+  /** Rejection message from the host's `setFps`, shown inline. */
+  fpsError?: string | null
   disabled?: boolean
 }>(), {
   presets: () => CANVAS_SIZE_PRESETS,
   error: null,
+  fpsError: null,
   disabled: false,
 })
 
 const emit = defineEmits<{
   (e: 'change', size: { width: number, height: number }): void
+  (e: 'update:fps', fps: number): void
 }>()
 
 /**
@@ -31,10 +37,15 @@ const emit = defineEmits<{
  */
 const draftWidth = ref(String(props.width))
 const draftHeight = ref(String(props.height))
+const draftFps = ref(String(props.fps ?? ''))
 
 watch(() => [props.width, props.height], ([width, height]) => {
   draftWidth.value = String(width)
   draftHeight.value = String(height)
+})
+
+watch(() => props.fps, (fps) => {
+  draftFps.value = fps === undefined ? '' : String(fps)
 })
 
 const activePresetId = computed(() => matchPreset(props.width, props.height, props.presets)?.id ?? null)
@@ -55,6 +66,12 @@ function commitDraft() {
   // Emit whatever was typed, including nonsense — the host validates and
   // reports back through `error`, rather than this panel silently correcting it.
   emit('change', { width: Number(draftWidth.value), height: Number(draftHeight.value) })
+}
+
+function commitFps() {
+  if (props.disabled || props.fps === undefined || draftFps.value === String(props.fps))
+    return
+  emit('update:fps', Number(draftFps.value))
 }
 
 function swapOrientation() {
@@ -122,8 +139,26 @@ function swapOrientation() {
       </label>
     </div>
 
+    <label v-if="fps !== undefined" class="canvas-size__field canvas-size__fps">
+      <span class="canvas-size__field-label">FPS</span>
+      <input
+        v-model="draftFps"
+        class="canvas-size__input"
+        type="number"
+        min="1"
+        step="any"
+        inputmode="decimal"
+        :disabled="disabled"
+        @blur="commitFps"
+        @keyup.enter="commitFps"
+      >
+    </label>
+
     <p v-if="error" class="canvas-size__error" role="alert">
       {{ error }}
+    </p>
+    <p v-if="fpsError" class="canvas-size__error" role="alert">
+      {{ fpsError }}
     </p>
   </section>
 </template>
@@ -182,6 +217,11 @@ function swapOrientation() {
   font-size: 10px;
   line-height: 16px;
   color: var(--ve-content-secondary, rgba(0, 0, 0, 0.55));
+}
+
+.canvas-size .canvas-size__fps {
+  padding-top: var(--ve-panel-group-gap, 12px);
+  border-top: var(--ve-stroke-width, 0.5px) solid var(--ve-panel-border, rgba(34, 34, 38, 0.12));
 }
 
 .canvas-size .canvas-size__input {

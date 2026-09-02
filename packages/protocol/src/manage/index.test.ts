@@ -96,6 +96,44 @@ describe('setCanvasSize', () => {
   })
 })
 
+describe('setFps', () => {
+  const baseProtocol = () => structuredClone(protocol)
+
+  it('sets a fractional frame rate and restores it through history', () => {
+    const { setFps, videoBasicInfo, exportProtocol, undo, redo, undoCount } = createVideoProtocolManager(baseProtocol())
+    const before = undoCount.value
+
+    expect(setFps(29.97)).toEqual({ success: true })
+    expect(videoBasicInfo.fps).toBe(29.97)
+    expect(exportProtocol().fps).toBe(29.97)
+    expect(undoCount.value).toBe(before + 1)
+
+    undo()
+    expect(videoBasicInfo.fps).toBe(30)
+    redo()
+    expect(videoBasicInfo.fps).toBe(29.97)
+  })
+
+  it('does not push history when the frame rate is unchanged', () => {
+    const { setFps, undoCount } = createVideoProtocolManager(baseProtocol())
+    const before = undoCount.value
+
+    expect(setFps(30)).toEqual({ success: true })
+    expect(undoCount.value).toBe(before)
+  })
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid fps %s without changing the project', (fps) => {
+    const { setFps, videoBasicInfo, undoCount } = createVideoProtocolManager(baseProtocol())
+    const before = undoCount.value
+
+    const result = setFps(fps)
+    expect(result.success).toBe(false)
+    expect(result.error).toBeTruthy()
+    expect(videoBasicInfo.fps).toBe(30)
+    expect(undoCount.value).toBe(before)
+  })
+})
+
 describe('video protocol basic info', () => {
   const { videoBasicInfo, exportProtocol } = createVideoProtocolManager(protocol)
 

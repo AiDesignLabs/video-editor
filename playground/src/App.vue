@@ -1046,11 +1046,17 @@ const effectPresets = computed(() => listEffectDefinitions()
 
 // --- canvas size -----------------------------------------------------------
 const canvasSizeError = ref<string | null>(null)
+const fpsError = ref<string | null>(null)
 
 function handleCanvasSizeChange(size: { width: number, height: number }) {
   const result = commands.setCanvasSize(size)
   // Surface the rejection instead of quietly snapping back to the old size.
-  canvasSizeError.value = result.success ? null : (result.error ?? '尺寸无效')
+  canvasSizeError.value = result.success ? null : (result.error ?? 'Invalid canvas size')
+}
+
+function handleFpsChange(fps: number) {
+  const result = commands.setFps(fps)
+  fpsError.value = result.success ? null : (result.error ?? 'Invalid frame rate')
 }
 
 // --- theme -----------------------------------------------------------------
@@ -1395,8 +1401,11 @@ function handleAddSegmentClick(data: {
           class="side__canvas-size"
           :width="protocol.width"
           :height="protocol.height"
+          :fps="protocol.fps"
           :error="canvasSizeError"
+          :fps-error="fpsError"
           @change="handleCanvasSizeChange"
+          @update:fps="handleFpsChange"
         />
 
         <PropertyInspector

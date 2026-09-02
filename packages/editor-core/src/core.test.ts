@@ -178,6 +178,25 @@ describe('canvas commands', () => {
   })
 })
 
+describe('project frame rate command', () => {
+  it('sets fps through the command layer and restores it on undo', () => {
+    const editor = createEditor()
+
+    expect(editor.commands.setFps(29.97)).toEqual({ success: true })
+    expect(editor.state.videoBasicInfo.fps).toBe(29.97)
+
+    editor.commands.undo()
+    expect(editor.state.videoBasicInfo.fps).toBe(30)
+  })
+
+  it('rejects an invalid frame rate', () => {
+    const editor = createEditor()
+
+    expect(editor.commands.setFps(0).success).toBe(false)
+    expect(editor.state.videoBasicInfo.fps).toBe(30)
+  })
+})
+
 describe('selectors', () => {
   it('finds segments and tracks', () => {
     const editor = createEditor()

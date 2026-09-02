@@ -13,6 +13,10 @@ export const MIN_CANVAS_SIZE = 2
 export const MAX_CANVAS_SIZE = 8192
 export const CANVAS_SIZE_SUFFIX = `must be a whole number of pixels between ${MIN_CANVAS_SIZE} and ${MAX_CANVAS_SIZE}`
 
+/** Smallest useful project frame rate. Fractional rates such as 29.97 remain valid. */
+export const MIN_FPS = 1
+export const FPS_SUFFIX = `must be a finite number greater than or equal to ${MIN_FPS}`
+
 export const INVALID_START_TIME = `startTime ${POSITIVE_NUMBER_SUFFIX}`
 export const INVALID_END_TIME = `endTime ${POSITIVE_NUMBER_SUFFIX}`
 export const INVALID_ID = 'id must be a string'
