@@ -34,6 +34,8 @@ export type {
   ProposalChangeSummary,
   RemoveKeyframeOptions,
   RemoveSegmentOptions,
+  ReplaceSegmentAssetOptions,
+  ReplaceSegmentAssetResult,
   ResizeSegmentOptions,
   SampledProperty,
   SegmentInput,

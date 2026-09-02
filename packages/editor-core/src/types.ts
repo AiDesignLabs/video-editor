@@ -40,6 +40,10 @@ export type MoveSegmentOptions = Parameters<ProtocolManager['moveSegment']>[0]
 /** Options for resizing a segment on a track. */
 export type ResizeSegmentOptions = Parameters<ProtocolManager['resizeSegment']>[0]
 
+/** Input and result types for replacing a segment's media source. */
+export type ReplaceSegmentAssetOptions = Parameters<ProtocolManager['replaceSegmentAsset']>[0]
+export type ReplaceSegmentAssetResult = ReturnType<ProtocolManager['replaceSegmentAsset']>
+
 /** Where a segment sits: the segment itself plus the track carrying it. */
 export interface SegmentPlacement {
   segment: SegmentUnion
@@ -152,6 +156,7 @@ export type CommandCheck
     | { command: 'addTrack', input: AddTrackOptions }
     | { command: 'removeTrack', trackId: string }
     | { command: 'moveTrack', trackId: string, toIndex: number }
+    | { command: 'replaceSegmentAsset', input: ReplaceSegmentAssetOptions }
     | KeyframeCommandCheck
 
 export interface CommandCheckResult {
@@ -234,6 +239,8 @@ export interface EditorCoreCommands {
   moveSegment: ProtocolManager['moveSegment']
   /** Resize a segment's time range. */
   resizeSegment: ProtocolManager['resizeSegment']
+  /** Replace a media source with an explicit duration adaptation strategy. */
+  replaceSegmentAsset: ProtocolManager['replaceSegmentAsset']
   /** Split a segment into two at a timeline position (single undo step). */
   splitSegment: ProtocolManager['splitSegment']
   /** Add a transition at the current time or a specified time. */

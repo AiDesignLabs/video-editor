@@ -18,7 +18,7 @@ import type {
   TrackGap,
 } from './types'
 import { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS } from '@video-editor/protocol'
-import { sampleKeyframes } from '@video-editor/shared'
+import { isAudioSegment, isVideoFramesSegment, sampleKeyframes } from '@video-editor/shared'
 import { checkKeyframeCommand } from './keyframes'
 
 /**
@@ -333,6 +333,44 @@ export function createStructuralSelectors(deps: StructuralSelectorDeps) {
           return refused(`no track with id ${check.trackId}`)
         if (!Number.isInteger(check.toIndex) || check.toIndex < 0 || check.toIndex >= tracks.length)
           return refused(`track index must be between 0 and ${Math.max(0, tracks.length - 1)}`)
+        return allowed
+      }
+
+      case 'replaceSegmentAsset': {
+        const { asset, segmentId, strategy } = check.input
+        const segment = findSegment(segmentId)
+        if (!segment)
+          return refused(`no segment with id ${segmentId}`)
+        const currentKind = isVideoFramesSegment(segment)
+          ? 'video'
+          : isAudioSegment(segment)
+            ? 'audio'
+            : segment.segmentType === 'sticker' || (segment.segmentType === 'frames' && segment.type === 'image')
+              ? 'image'
+              : undefined
+        if (!currentKind)
+          return refused('segment does not use a replaceable asset')
+        if (currentKind !== asset.kind)
+          return refused(`cannot replace ${currentKind} with ${asset.kind}`)
+        try {
+          if (!new URL(asset.url).protocol)
+            return refused('asset url must be an absolute URL')
+        }
+        catch {
+          return refused('asset url must be an absolute URL')
+        }
+        if (strategy !== 'preserve' && strategy !== 'fit')
+          return refused(`unsupported replacement strategy ${String(strategy)}`)
+        if (currentKind === 'image')
+          return strategy === 'fit' ? refused('fit strategy requires a video or audio asset with a duration') : allowed
+        if (typeof asset.durationMs !== 'number' || !Number.isFinite(asset.durationMs) || asset.durationMs <= 0)
+          return refused('asset durationMs must be a positive number for video and audio')
+        if (strategy === 'preserve') {
+          const timed = segment as { startTime: number, endTime: number, fromTime?: number, playRate?: number }
+          const sourceEnd = (timed.fromTime ?? 0) + (timed.endTime - timed.startTime) * (timed.playRate ?? 1)
+          if (sourceEnd > asset.durationMs)
+            return refused(`current source window ends at ${sourceEnd}ms, beyond the ${asset.durationMs}ms asset`)
+        }
         return allowed
       }
 

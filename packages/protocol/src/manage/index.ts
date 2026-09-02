@@ -116,6 +116,60 @@ function normalizeSegmentPlayRate(segment: IVideoFramesSegment | IAudioSegment):
   return Math.min(100, Math.max(0.1, rate))
 }
 
+function getReplaceableAssetKind(segment: SegmentUnion): 'video' | 'audio' | 'image' | undefined {
+  if (isVideoFramesSegment(segment))
+    return 'video'
+  if (isAudioSegment(segment))
+    return 'audio'
+  if (segment.segmentType === 'frames' && segment.type === 'image')
+    return 'image'
+  if (segment.segmentType === 'sticker')
+    return 'image'
+  return undefined
+}
+
+function isValidAssetUrl(url: string) {
+  try {
+    return Boolean(new URL(url).protocol)
+  }
+  catch {
+    return false
+  }
+}
+
+function fitKeyframesToDuration(segment: SegmentUnion, durationMs: number) {
+  if (!segment.keyframes)
+    return
+  segment.keyframes = segment.keyframes.map((track) => {
+    if (track.frames.every(frame => frame.timeMs <= durationMs))
+      return track
+    return {
+      ...track,
+      frames: [
+        ...track.frames.filter(frame => frame.timeMs < durationMs),
+        { timeMs: durationMs, value: sampleKeyframes(track, durationMs) },
+      ],
+    }
+  })
+}
+
+function clampAdjacentTransitions(protocol: IVideoProtocol, segmentId: string) {
+  const durations = new Map<string, number>()
+  for (const track of protocol.tracks) {
+    for (const segment of track.children)
+      durations.set(segment.id, segment.endTime - segment.startTime)
+  }
+  for (const edge of protocol.transitions ?? []) {
+    if (edge.fromSegmentId !== segmentId && edge.toSegmentId !== segmentId)
+      continue
+    edge.duration = Math.min(
+      edge.duration,
+      durations.get(edge.fromSegmentId) ?? 0,
+      durations.get(edge.toSegmentId) ?? 0,
+    )
+  }
+}
+
 function getMainFramesTrack(protocol: IVideoProtocol): TrackTypeMapTrack['frames'] | undefined {
   return protocol.tracks.find(track => track.trackType === 'frames' && (track as TrackTypeMapTrack['frames']).isMain) as TrackTypeMapTrack['frames'] | undefined
 }
@@ -207,6 +261,26 @@ export { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS }
 export interface CanvasSize {
   width: number
   height: number
+}
+
+export type ReplaceAssetStrategy = 'preserve' | 'fit'
+
+export interface ReplaceSegmentAssetOptions {
+  segmentId: string
+  asset: {
+    url: string
+    kind: 'video' | 'audio' | 'image'
+    /** Required for video and audio assets. */
+    durationMs?: number
+  }
+  strategy: ReplaceAssetStrategy
+}
+
+export interface ReplaceSegmentAssetResult {
+  success: boolean
+  error?: string
+  affectedSegments: SegmentUnion[]
+  affectedTracks: TrackUnion[]
 }
 
 export interface SetFpsResult {
@@ -970,6 +1044,122 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     return { success, affectedSegments, affectedTracks, createdTracks, removedTrackIds }
   }
 
+  const replaceSegmentAsset = (options: ReplaceSegmentAssetOptions): ReplaceSegmentAssetResult => {
+    if (options.strategy !== 'preserve' && options.strategy !== 'fit')
+      return { success: false, error: `unsupported replacement strategy ${String(options.strategy)}`, affectedSegments: [], affectedTracks: [] }
+    const current = segments.value[options.segmentId]
+    if (!current)
+      return { success: false, error: `no segment with id ${options.segmentId}`, affectedSegments: [], affectedTracks: [] }
+
+    const currentKind = getReplaceableAssetKind(current as SegmentUnion)
+    if (!currentKind)
+      return { success: false, error: 'segment does not use a replaceable asset', affectedSegments: [], affectedTracks: [] }
+    if (currentKind !== options.asset.kind) {
+      return {
+        success: false,
+        error: `cannot replace ${currentKind} with ${options.asset.kind}`,
+        affectedSegments: [],
+        affectedTracks: [],
+      }
+    }
+    if (!isValidAssetUrl(options.asset.url))
+      return { success: false, error: 'asset url must be an absolute URL', affectedSegments: [], affectedTracks: [] }
+
+    const candidate = clone(toRaw(current)) as SegmentUnion
+    candidate.url = options.asset.url
+
+    if (currentKind === 'video' || currentKind === 'audio') {
+      const sourceDuration = options.asset.durationMs
+      if (typeof sourceDuration !== 'number' || !Number.isFinite(sourceDuration) || sourceDuration <= 0) {
+        return {
+          success: false,
+          error: 'asset durationMs must be a positive number for video and audio',
+          affectedSegments: [],
+          affectedTracks: [],
+        }
+      }
+
+      if (!isSegmentWithFromTime(candidate))
+        throw new TypeError('replaceable timed segment has an invalid type')
+
+      if (options.strategy === 'preserve') {
+        const sourceEnd = (candidate.fromTime ?? 0)
+          + (candidate.endTime - candidate.startTime) * normalizeSegmentPlayRate(candidate)
+        if (sourceEnd > sourceDuration) {
+          return {
+            success: false,
+            error: `current source window ends at ${sourceEnd}ms, beyond the ${sourceDuration}ms asset`,
+            affectedSegments: [],
+            affectedTracks: [],
+          }
+        }
+      }
+      else {
+        candidate.endTime = candidate.startTime + sourceDuration
+        delete candidate.fromTime
+        delete candidate.playRate
+        delete candidate.reversed
+        fitKeyframesToDuration(candidate, sourceDuration)
+        if (isAudioSegment(candidate)) {
+          if (typeof candidate.fadeInDuration === 'number')
+            candidate.fadeInDuration = Math.min(candidate.fadeInDuration, sourceDuration / 2)
+          if (typeof candidate.fadeOutDuration === 'number')
+            candidate.fadeOutDuration = Math.min(candidate.fadeOutDuration, sourceDuration / 2)
+        }
+      }
+    }
+    else if (options.strategy === 'fit') {
+      return {
+        success: false,
+        error: 'fit strategy requires a video or audio asset with a duration',
+        affectedSegments: [],
+        affectedTracks: [],
+      }
+    }
+
+    try {
+      validator.verifySegment(clone(candidate))
+    }
+    catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'invalid replacement asset',
+        affectedSegments: [],
+        affectedTracks: [],
+      }
+    }
+
+    let affectedTrackId: string | undefined
+    const success = updateProtocolWithTransitionSync((protocol) => {
+      const track = protocol.tracks.find(item => item.children.some(segment => segment.id === options.segmentId))
+      if (!track)
+        return false
+      const index = track.children.findIndex(segment => segment.id === options.segmentId)
+      ;(track.children as SegmentUnion[])[index] = clone(candidate)
+      rebuildTrackTimeline(track, index)
+      clampAdjacentTransitions(protocol, options.segmentId)
+      affectedTrackId = track.trackId
+      return true
+    }, {
+      label: 'replace-segment-asset',
+      data: {
+        segmentId: options.segmentId,
+        asset: { ...options.asset },
+        strategy: options.strategy,
+      },
+    })
+
+    if (!success || !affectedTrackId)
+      return { success: false, error: 'segment could not be replaced', affectedSegments: [], affectedTracks: [] }
+
+    const track = exportProtocol().tracks.find(item => item.trackId === affectedTrackId)
+    return {
+      success: true,
+      affectedSegments: track ? cloneAffectedSegments(track.children) : [],
+      affectedTracks: track ? [cloneTrack(track)] : [],
+    }
+  }
+
   const splitSegment = (segmentId: string, timelineMs: number): {
     success: boolean
     leftId: string
@@ -1562,6 +1752,7 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     updateSegment,
     moveSegment,
     resizeSegment,
+    replaceSegmentAsset,
     splitSegment,
     exportProtocol,
     addTransition,
