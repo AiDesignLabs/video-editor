@@ -5,6 +5,7 @@
 import { getCachedResourceFile } from './cache'
 import { DEFAULT_RESOURCE_DIR } from './constants'
 import { getResourceKey } from './key'
+import { mediaAnalysisPool, throwIfMediaAnalysisAborted } from './media-analysis-pool'
 
 export interface WaveformData {
   peaks: number[] // Normalized peaks between 0 and 1
@@ -18,6 +19,8 @@ export interface WaveformOptions {
   channel?: number | 'mix'
   /** Resource directory for OPFS cache (default: DEFAULT_RESOURCE_DIR) */
   resourceDir?: string
+  /** Stops waiting and removes queued work when no other caller needs it. */
+  signal?: AbortSignal
 }
 
 // In-memory cache for waveform data
@@ -38,7 +41,8 @@ export async function extractWaveform(
   url: string,
   options: WaveformOptions = {},
 ): Promise<WaveformData> {
-  const { samples = 100, channel = 'mix', resourceDir = DEFAULT_RESOURCE_DIR } = options
+  const { samples = 100, channel = 'mix', resourceDir = DEFAULT_RESOURCE_DIR, signal } = options
+  throwIfMediaAnalysisAborted(signal)
   const cacheKey = getCacheKey(url, samples, channel, resourceDir)
 
   // Check memory cache first
@@ -46,28 +50,32 @@ export async function extractWaveform(
   if (cached)
     return cached
 
-  // Try to get audio data from OPFS cache or fetch
-  const arrayBuffer = await getAudioArrayBuffer(url, resourceDir)
+  return await mediaAnalysisPool.run(`waveform-url::${cacheKey}`, async (sharedSignal) => {
+    // Try to get audio data from OPFS cache or fetch
+    const arrayBuffer = await getAudioArrayBuffer(url, resourceDir, sharedSignal)
+    throwIfMediaAnalysisAborted(sharedSignal)
 
-  const audioContext = createAudioContext()
+    const audioContext = createAudioContext()
 
-  try {
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
-    const peaks = extractPeaks(audioBuffer, samples, channel)
+    try {
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+      throwIfMediaAnalysisAborted(sharedSignal)
+      const peaks = extractPeaks(audioBuffer, samples, channel)
 
-    const result: WaveformData = {
-      peaks,
-      duration: audioBuffer.duration,
+      const result: WaveformData = {
+        peaks,
+        duration: audioBuffer.duration,
+      }
+
+      // Cache the result
+      waveformCache.set(cacheKey, result)
+
+      return result
     }
-
-    // Cache the result
-    waveformCache.set(cacheKey, result)
-
-    return result
-  }
-  finally {
-    await audioContext.close()
-  }
+    finally {
+      await audioContext.close()
+    }
+  }, signal)
 }
 
 /**
@@ -78,33 +86,37 @@ export async function extractWaveformFromBuffer(
   cacheKey: string,
   options: Omit<WaveformOptions, 'resourceDir'> = {},
 ): Promise<WaveformData> {
-  const { samples = 100, channel = 'mix' } = options
-  const fullCacheKey = `${cacheKey}:${samples}`
+  const { samples = 100, channel = 'mix', signal } = options
+  throwIfMediaAnalysisAborted(signal)
+  const fullCacheKey = `${cacheKey}:${samples}:${channel}`
 
   // Check memory cache first
   const cached = waveformCache.get(fullCacheKey)
   if (cached)
     return cached
 
-  const audioContext = createAudioContext()
+  return await mediaAnalysisPool.run(`waveform-buffer::${fullCacheKey}`, async (sharedSignal) => {
+    const audioContext = createAudioContext()
 
-  try {
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0))
-    const peaks = extractPeaks(audioBuffer, samples, channel)
+    try {
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer.slice(0))
+      throwIfMediaAnalysisAborted(sharedSignal)
+      const peaks = extractPeaks(audioBuffer, samples, channel)
 
-    const result: WaveformData = {
-      peaks,
-      duration: audioBuffer.duration,
+      const result: WaveformData = {
+        peaks,
+        duration: audioBuffer.duration,
+      }
+
+      // Cache the result
+      waveformCache.set(fullCacheKey, result)
+
+      return result
     }
-
-    // Cache the result
-    waveformCache.set(fullCacheKey, result)
-
-    return result
-  }
-  finally {
-    await audioContext.close()
-  }
+    finally {
+      await audioContext.close()
+    }
+  }, signal)
 }
 
 /**
@@ -113,6 +125,12 @@ export async function extractWaveformFromBuffer(
 export function clearWaveformCache(url?: string, resourceDir?: string): void {
   if (url) {
     const resourceKey = getResourceKey(url)
+    mediaAnalysisPool.cancelMatching((key) => {
+      if (!key.startsWith('waveform-url::'))
+        return false
+      const [, cachedDir, cachedResourceKey] = key.split('::')
+      return cachedResourceKey === resourceKey && (resourceDir === undefined || cachedDir === resourceDir)
+    })
     for (const key of waveformCache.keys()) {
       const [cachedDir, cachedResourceKey] = key.split('::')
       if (cachedResourceKey === resourceKey && (resourceDir === undefined || cachedDir === resourceDir))
@@ -120,6 +138,7 @@ export function clearWaveformCache(url?: string, resourceDir?: string): void {
     }
   }
   else {
+    mediaAnalysisPool.cancelMatching(key => key.startsWith('waveform-'))
     waveformCache.clear()
   }
 }
@@ -127,17 +146,21 @@ export function clearWaveformCache(url?: string, resourceDir?: string): void {
 /**
  * Get audio data from OPFS cache or fetch from network
  */
-async function getAudioArrayBuffer(url: string, resourceDir: string): Promise<ArrayBuffer> {
+async function getAudioArrayBuffer(url: string, resourceDir: string, signal: AbortSignal): Promise<ArrayBuffer> {
   // Try OPFS cache first
   const file = await getCachedResourceFile(url, resourceDir)
   if (file) {
     const originFile = await file.getOriginFile()
-    if (originFile)
-      return await originFile.arrayBuffer()
+    if (originFile) {
+      const buffer = await originFile.arrayBuffer()
+      throwIfMediaAnalysisAborted(signal)
+      return buffer
+    }
   }
 
   // Fall back to fetch
-  const response = await fetch(url)
+  throwIfMediaAnalysisAborted(signal)
+  const response = await fetch(url, { signal })
   return await response.arrayBuffer()
 }
 

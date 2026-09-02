@@ -46,9 +46,26 @@ const waveformState = reactive<WaveformState>({
 })
 
 let currentJobId = 0
+let waveformAbortController: AbortController | undefined
+
+onBeforeUnmount(() => {
+  waveformAbortController?.abort()
+  currentJobId += 1
+})
 
 // Only reload waveform when URL changes
 watch(() => props.segment.url, (url, prevUrl) => {
+  waveformAbortController?.abort()
+  if (!url) {
+    currentJobId += 1
+    Object.assign(waveformState, {
+      data: null,
+      loading: false,
+      error: null,
+      loadedUrl: null,
+    })
+    return
+  }
   if (url && url !== prevUrl) {
     void loadWaveform(url)
   }
@@ -62,6 +79,8 @@ async function loadWaveform(url: string) {
   if (waveformState.loadedUrl === url && waveformState.data)
     return
 
+  const abortController = new AbortController()
+  waveformAbortController = abortController
   const jobId = ++currentJobId
   waveformState.loading = true
   waveformState.error = null
@@ -71,7 +90,7 @@ async function loadWaveform(url: string) {
     // - Provides enough detail for long audio files (up to ~5min)
     // - Not too heavy for processing/memory (~4KB of data)
     // - Cached per URL so only computed once
-    const data = await extractWaveform(url, { samples: 1000 })
+    const data = await extractWaveform(url, { samples: 1000, signal: abortController.signal })
     if (currentJobId !== jobId)
       return
 
@@ -82,8 +101,14 @@ async function loadWaveform(url: string) {
   catch (err) {
     if (currentJobId !== jobId)
       return
+    if (err instanceof DOMException && err.name === 'AbortError')
+      return
     waveformState.error = err instanceof Error ? err.message : String(err)
     waveformState.loading = false
+  }
+  finally {
+    if (waveformAbortController === abortController)
+      waveformAbortController = undefined
   }
 }
 

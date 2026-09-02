@@ -3,6 +3,7 @@ import { dir as opfsDir, file as opfsFile, write as opfsWrite } from 'opfs-tools
 import { ensureResourceCached, getCachedResourceFile } from './cache'
 import { DEFAULT_RESOURCE_DIR } from './constants'
 import { getResourceKey, inferResourceTypeFromUrl } from './key'
+import { createMediaAnalysisAbortError, isMediaAnalysisAbortError, mediaAnalysisPool, throwIfMediaAnalysisAborted } from './media-analysis-pool'
 
 export interface GenerateThumbnailsOptions {
   /** Thumbnail width in pixels (default 100). */
@@ -15,6 +16,8 @@ export interface GenerateThumbnailsOptions {
   step?: number
   /** OPFS resource directory; defaults to `/video-editor-res`. */
   resourceDir?: string
+  /** Stops waiting and removes queued work when no other caller needs it. */
+  signal?: AbortSignal
 }
 
 export interface Thumbnail {
@@ -22,7 +25,6 @@ export interface Thumbnail {
   img: Blob
 }
 
-const inflightThumbnails = new Map<string, Promise<Thumbnail[]>>()
 const thumbnailCache = new Map<string, Thumbnail[]>()
 const maxThumbnailCacheEntries = 24
 const thumbnailManifestName = 'manifest.json'
@@ -49,6 +51,7 @@ interface ThumbnailIndexEntry {
 export async function generateThumbnails(url: string, options?: GenerateThumbnailsOptions): Promise<Thumbnail[]> {
   if (!url)
     throw new Error('url is required')
+  throwIfMediaAnalysisAborted(options?.signal)
 
   const type = inferResourceTypeFromUrl(url)
   if (type && type !== 'video')
@@ -69,28 +72,21 @@ export async function generateThumbnails(url: string, options?: GenerateThumbnai
 
   if (shouldUseThumbnailOpfs(url)) {
     const opfsCached = await readThumbnailsFromOpfs(url, { imgWidth, start, end, step, resourceDir })
+    throwIfMediaAnalysisAborted(options?.signal)
     if (opfsCached) {
       cacheThumbnails(cacheKey, opfsCached)
       return opfsCached
     }
   }
 
-  const inflight = inflightThumbnails.get(cacheKey)
-  if (inflight)
-    return await inflight
-
-  const job = generateThumbnailsInner(url, { imgWidth, start, end, step, resourceDir })
-  inflightThumbnails.set(cacheKey, job)
-  try {
-    const result = await job
+  return await mediaAnalysisPool.run(`thumbnail::${cacheKey}`, async (signal) => {
+    const result = await generateThumbnailsInner(url, { imgWidth, start, end, step, resourceDir }, signal)
+    throwIfMediaAnalysisAborted(signal)
     cacheThumbnails(cacheKey, result)
     if (shouldUseThumbnailOpfs(url))
       void writeThumbnailsToOpfs(url, { imgWidth, start, end, step, resourceDir }, result)
     return result
-  }
-  finally {
-    inflightThumbnails.delete(cacheKey)
-  }
+  }, options?.signal)
 }
 
 /** Remove every cached thumbnail variant derived from one source URL. */
@@ -102,10 +98,7 @@ export async function clearThumbnailCache(
     return
 
   const cachePrefix = `${resourceDir}::${getResourceKey(url)}::`
-  const pending = [...inflightThumbnails.entries()]
-    .filter(([key]) => key.startsWith(cachePrefix))
-    .map(([, job]) => job.catch(() => []))
-  await Promise.all(pending)
+  mediaAnalysisPool.cancelMatching(key => key.startsWith(`thumbnail::${cachePrefix}`))
 
   for (const key of thumbnailCache.keys()) {
     if (key.startsWith(cachePrefix))
@@ -117,26 +110,35 @@ export async function clearThumbnailCache(
     await removeThumbnailEntry(`${resourceDir}/thumbnails/${resourceKey}`)
 }
 
-async function generateThumbnailsInner(url: string, opts: Required<Pick<GenerateThumbnailsOptions, 'imgWidth' | 'resourceDir'>> & Pick<GenerateThumbnailsOptions, 'start' | 'end' | 'step'>): Promise<Thumbnail[]> {
+async function generateThumbnailsInner(
+  url: string,
+  opts: Required<Pick<GenerateThumbnailsOptions, 'imgWidth' | 'resourceDir'>> & Pick<GenerateThumbnailsOptions, 'start' | 'end' | 'step'>,
+  signal: AbortSignal,
+): Promise<Thumbnail[]> {
   const { imgWidth, start, end, step, resourceDir } = opts
+  throwIfMediaAnalysisAborted(signal)
   const file = await getCachedResourceFile(url, resourceDir) ?? await ensureResourceCached(url, resourceDir)
+  throwIfMediaAnalysisAborted(signal)
   const originFile = file ? await file.getOriginFile() : undefined
   const handle = openMediaInput(originFile ?? url)
 
   try {
     if (!(await handle.canDecodeVideo()))
-      return await generateThumbnailsViaVideoElement(url, file, { imgWidth, start, end, step })
+      return await generateThumbnailsViaVideoElement(url, file, { imgWidth, start, end, step }, signal)
 
     const thumbnails = await handle.thumbnails(imgWidth, {
       startMs: start !== undefined ? start / 1000 : undefined,
       endMs: end !== undefined ? end / 1000 : undefined,
       stepMs: step !== undefined ? step / 1000 : undefined,
     })
+    throwIfMediaAnalysisAborted(signal)
     // Public option/result timestamps stay in microseconds.
     return thumbnails.map(t => ({ ts: t.tsMs * 1000, img: t.img }))
   }
-  catch {
-    return await generateThumbnailsViaVideoElement(url, file, { imgWidth, start, end, step })
+  catch (error) {
+    if (isMediaAnalysisAbortError(error))
+      throw error
+    return await generateThumbnailsViaVideoElement(url, file, { imgWidth, start, end, step }, signal)
   }
   finally {
     handle.dispose()
@@ -363,9 +365,11 @@ async function generateThumbnailsViaVideoElement(
   url: string,
   file: ReturnType<typeof opfsFile> | undefined,
   opts: { imgWidth: number, start?: number, end?: number, step?: number },
+  signal: AbortSignal,
 ): Promise<Thumbnail[]> {
   if (typeof document === 'undefined')
     return []
+  throwIfMediaAnalysisAborted(signal)
 
   const video = document.createElement('video')
   video.crossOrigin = 'anonymous'
@@ -389,7 +393,7 @@ async function generateThumbnailsViaVideoElement(
       video.src = url
     }
 
-    await waitForVideoEvent(video, 'loadedmetadata', 4000)
+    await waitForVideoEvent(video, 'loadedmetadata', 4000, signal)
 
     const durationUs = Number.isFinite(video.duration) ? Math.floor(video.duration * 1_000_000) : 0
     if (durationUs <= 0)
@@ -416,6 +420,7 @@ async function generateThumbnailsViaVideoElement(
 
     const results: Thumbnail[] = []
     for (let ts = startUs; ts <= endUs; ts += stepUs) {
+      throwIfMediaAnalysisAborted(signal)
       const targetSec = ts / 1_000_000
       // Seek and draw.
       try {
@@ -424,9 +429,16 @@ async function generateThumbnailsViaVideoElement(
       catch {
         // ignore seek errors when not ready; rely on canplay/seeked below
       }
-      await waitForVideoEvent(video, 'seeked', 1500).catch(() => {})
-      if (video.readyState < 2)
-        await waitForVideoEvent(video, 'canplay', 1500).catch(() => {})
+      await waitForVideoEvent(video, 'seeked', 1500, signal).catch((error) => {
+        if (isMediaAnalysisAbortError(error))
+          throw error
+      })
+      if (video.readyState < 2) {
+        await waitForVideoEvent(video, 'canplay', 1500, signal).catch((error) => {
+          if (isMediaAnalysisAbortError(error))
+            throw error
+        })
+      }
 
       if (video.readyState < 2)
         continue
@@ -448,8 +460,12 @@ async function generateThumbnailsViaVideoElement(
   }
 }
 
-function waitForVideoEvent(video: HTMLVideoElement, type: string, timeoutMs: number) {
+function waitForVideoEvent(video: HTMLVideoElement, type: string, timeoutMs: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(createMediaAnalysisAbortError())
+      return
+    }
     let cleanup = () => {}
     const timer = window.setTimeout(() => {
       cleanup()
@@ -464,14 +480,20 @@ function waitForVideoEvent(video: HTMLVideoElement, type: string, timeoutMs: num
       cleanup()
       reject(new Error(`Video error while waiting for ${type}`))
     }
+    const onAbort = () => {
+      cleanup()
+      reject(createMediaAnalysisAbortError())
+    }
     cleanup = () => {
       window.clearTimeout(timer)
       video.removeEventListener(type, onOk)
       video.removeEventListener('error', onErr)
+      signal.removeEventListener('abort', onAbort)
     }
 
     video.addEventListener(type, onOk, { once: true })
     video.addEventListener('error', onErr, { once: true })
+    signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 

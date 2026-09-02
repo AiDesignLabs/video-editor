@@ -1,11 +1,11 @@
-/// <reference types="vitest" />
-import { DEFAULT_RESOURCE_DIR, createResourceManager } from '.'
 import { dir as opfsDir, file as opfsFile, write as opfsWrite } from 'opfs-tools'
+import { beforeEach, describe, expect, it } from 'vitest'
+/// <reference types="vitest" />
+import { createResourceManager, DEFAULT_RESOURCE_DIR } from '.'
 import { getResourceType } from './fetch'
 import { getResourceKey } from './key'
 import { getMp4Meta } from './meta'
 import { generateThumbnails } from './thumbnails'
-import { beforeEach, describe, expect, it } from 'vitest'
 
 describe('resource manager', () => {
   const manager = createResourceManager()
@@ -110,6 +110,14 @@ describe('resource manager', () => {
   })
 
   describe('thumbnails', () => {
+    it('rejects an already cancelled request before resource work starts', async () => {
+      const controller = new AbortController()
+      controller.abort()
+      await expect(generateThumbnails(videoUrl, { signal: controller.signal }))
+        .rejects
+        .toMatchObject({ name: 'AbortError' })
+    })
+
     it('returns empty list for non-video url', async () => {
       const thumbs = await generateThumbnails(imgUrl)
       expect(Array.isArray(thumbs) && thumbs.length === 0).toBeTruthy()

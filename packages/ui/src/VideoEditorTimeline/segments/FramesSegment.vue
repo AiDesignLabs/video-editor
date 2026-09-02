@@ -87,11 +87,12 @@ onMounted(() => {
 
 /** Monotonic id used to discard results from superseded waveform jobs. */
 let currentWaveformJobId = 0
+let waveformAbortController: AbortController | undefined
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   cancelThumbnailWork()
-  // Invalidate any in-flight waveform job so a late resolve can't touch state.
+  waveformAbortController?.abort()
   currentWaveformJobId += 1
 })
 
@@ -150,6 +151,7 @@ const waveformState = reactive<WaveformState>({
 let currentJobId = 0
 let refreshTimer: number | undefined
 let pendingThumbnailRequest: VideoThumbnailRequest | null = null
+let thumbnailAbortController: AbortController | undefined
 
 watch(() => {
   if (!isVideoFramesSegment(props.segment))
@@ -164,6 +166,18 @@ watch(() => {
 }, { immediate: true })
 
 watch(() => isVideoFramesSegment(props.segment) ? props.segment.url : '', (url, previousUrl) => {
+  waveformAbortController?.abort()
+  if (!url) {
+    currentWaveformJobId += 1
+    Object.assign(waveformState, {
+      data: null,
+      hasAudio: null,
+      loading: false,
+      error: null,
+      loadedUrl: null,
+    })
+    return
+  }
   if (url && url !== previousUrl)
     void loadVideoWaveform(url)
 }, { immediate: true })
@@ -172,6 +186,8 @@ function scheduleThumbnailRefresh(request: VideoThumbnailRequest, previousReques
   const urlChanged = !previousRequest || previousRequest.url !== request.url
   const fromChanged = !previousRequest || previousRequest.fromTime !== request.fromTime
   const immediate = urlChanged || fromChanged
+  thumbnailAbortController?.abort()
+  thumbnailAbortController = undefined
   pendingThumbnailRequest = request
   if (refreshTimer) {
     window.clearTimeout(refreshTimer)
@@ -189,6 +205,9 @@ function scheduleThumbnailRefresh(request: VideoThumbnailRequest, previousReques
 }
 
 async function loadVideoThumbnails(request: VideoThumbnailRequest) {
+  thumbnailAbortController?.abort()
+  const abortController = new AbortController()
+  thumbnailAbortController = abortController
   const jobId = ++currentJobId
   cleanupThumbnails()
   const startedAt = readThumbnailClock()
@@ -201,7 +220,7 @@ async function loadVideoThumbnails(request: VideoThumbnailRequest) {
 
   try {
     const metadata = await getMp4Meta(request.url)
-    if (currentJobId !== jobId)
+    if (currentJobId !== jobId || abortController.signal.aborted)
       return
 
     const options = videoThumbnailExtractionModel.resolveOptions(request, metadata.durationUs)
@@ -212,7 +231,7 @@ async function loadVideoThumbnails(request: VideoThumbnailRequest) {
     thumbnailDiagnostics.requestedEndUs = options.end
     thumbnailDiagnostics.requestedStepUs = options.step
     thumbnailDiagnostics.stage = 'extracting'
-    const shots = await generateThumbnails(request.url, options)
+    const shots = await generateThumbnails(request.url, { ...options, signal: abortController.signal })
     if (currentJobId !== jobId)
       return
 
@@ -231,6 +250,8 @@ async function loadVideoThumbnails(request: VideoThumbnailRequest) {
   catch (err) {
     if (currentJobId !== jobId)
       return
+    if (err instanceof DOMException && err.name === 'AbortError')
+      return
     const failedAt = readThumbnailClock()
     if (thumbnailDiagnostics.stage === 'metadata')
       thumbnailDiagnostics.metadataDurationMs = resolveThumbnailDuration(startedAt, failedAt)
@@ -242,6 +263,10 @@ async function loadVideoThumbnails(request: VideoThumbnailRequest) {
     thumbnailDiagnostics.totalDurationMs = resolveThumbnailDuration(startedAt, failedAt)
     thumbnailDiagnostics.resultCount = 0
     thumbnailDiagnostics.status = 'error'
+  }
+  finally {
+    if (thumbnailAbortController === abortController)
+      thumbnailAbortController = undefined
   }
 }
 
@@ -260,6 +285,9 @@ async function loadVideoWaveform(url: string) {
   if (waveformState.loadedUrl === url && (waveformState.data || waveformState.hasAudio === false))
     return
 
+  waveformAbortController?.abort()
+  const abortController = new AbortController()
+  waveformAbortController = abortController
   const jobId = ++currentWaveformJobId
   if (waveformState.loadedUrl !== url) {
     waveformState.data = null
@@ -270,7 +298,7 @@ async function loadVideoWaveform(url: string) {
 
   try {
     const meta = await getMp4Meta(url)
-    if (currentWaveformJobId !== jobId)
+    if (currentWaveformJobId !== jobId || abortController.signal.aborted)
       return
 
     const hasAudio = (meta.audioChanCount ?? 0) > 0
@@ -282,7 +310,7 @@ async function loadVideoWaveform(url: string) {
       return
     }
 
-    const data = await extractWaveform(url, { samples: 1000 })
+    const data = await extractWaveform(url, { samples: 1000, signal: abortController.signal })
     if (currentWaveformJobId !== jobId)
       return
     waveformState.data = data
@@ -293,9 +321,15 @@ async function loadVideoWaveform(url: string) {
   catch (err) {
     if (currentWaveformJobId !== jobId)
       return
+    if (err instanceof DOMException && err.name === 'AbortError')
+      return
     waveformState.data = null
     waveformState.error = err instanceof Error ? err.message : String(err)
     waveformState.loading = false
+  }
+  finally {
+    if (waveformAbortController === abortController)
+      waveformAbortController = undefined
   }
 }
 
@@ -305,6 +339,8 @@ function cleanupThumbnails() {
 }
 
 function cancelThumbnailWork() {
+  thumbnailAbortController?.abort()
+  thumbnailAbortController = undefined
   currentJobId += 1
   pendingThumbnailRequest = null
   if (refreshTimer) {
