@@ -51,7 +51,7 @@ describe('replaceSegmentAsset', () => {
     const undoBefore = editor.state.undoCount.value
     const input = {
       segmentId: id,
-      asset: { kind: 'video' as const, url: 'https://example.com/replacement.mp4', durationMs: 1200 },
+      asset: { id: 'asset-2', kind: 'video' as const, url: 'https://example.com/replacement.mp4', durationMs: 1200 },
       strategy: 'preserve' as const,
     }
 
@@ -61,6 +61,7 @@ describe('replaceSegmentAsset', () => {
     const replaced = editor.selectors.getSegment(id, 'frames')
     expect(replaced).toMatchObject({
       url: input.asset.url,
+      assetId: 'asset-2',
       startTime: 0,
       endTime: 500,
       fromTime: 100,
@@ -70,6 +71,11 @@ describe('replaceSegmentAsset', () => {
     })
     expect(editor.state.undoCount.value).toBe(undoBefore + 1)
     expect(editor.state.operationLog.value.at(-1)?.meta?.label).toBe('replace-segment-asset')
+    expect(editor.selectors.getAssetReferences({ id: 'asset-2', url: input.asset.url })).toEqual([{
+      protocolId: 'protocol-1',
+      trackId: 'track-1',
+      segmentId: id,
+    }])
 
     editor.commands.undo()
     expect(editor.selectors.getSegment(id, 'frames')?.url).toBe(videoSegment.url)

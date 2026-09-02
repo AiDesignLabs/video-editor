@@ -1,3 +1,4 @@
+import type { IImageFramesSegment, IVideoProtocol } from '@video-editor/shared'
 import { dir as opfsDir, write as opfsWrite } from 'opfs-tools'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createAssetLibrary } from './index'
@@ -67,7 +68,7 @@ describe('asset library', () => {
     const library = createLibrary()
     const meta = await library.importAsset(await createPngFile('removable.png'))
 
-    await library.removeAsset(meta.id)
+    await library.removeAsset(meta.id, { protocols: [] })
 
     expect(await library.listAssets()).toEqual([])
     expect(await library.getAssetFile(meta.id)).toBeUndefined()
@@ -97,5 +98,87 @@ describe('asset library', () => {
     const doc = new File(['hello'], 'notes.txt', { type: 'text/plain' })
 
     await expect(library.importAsset(doc)).rejects.toThrow(/Unsupported asset type/)
+  })
+
+  it('resolves a stable id after the asset URL changes', async () => {
+    const library = createLibrary()
+    const meta = await library.importAsset(await createPngFile('relinked.png'))
+
+    const updated = await library.relinkAsset(meta.id, 'https://cdn.example.com/relinked.png')
+
+    expect(updated.id).toBe(meta.id)
+    expect(updated.previousUrls).toEqual([meta.url])
+    expect(await library.resolveAssetUrl(meta.id)).toBe('https://cdn.example.com/relinked.png')
+    expect((await library.getAsset(meta.id))?.url).toBe('https://cdn.example.com/relinked.png')
+  })
+
+  it('keeps legacy URL references protected after relinking', async () => {
+    const library = createLibrary()
+    const meta = await library.importAsset(await createPngFile('legacy.png'))
+    await library.relinkAsset(meta.id, 'https://cdn.example.com/legacy.png')
+    const protocol: IVideoProtocol = {
+      id: 'legacy-project',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [{
+        trackId: 'frames-1',
+        trackType: 'frames',
+        isMain: true,
+        children: [{
+          id: 'legacy-segment',
+          segmentType: 'frames',
+          type: 'image',
+          format: 'img',
+          url: meta.url,
+          startTime: 0,
+          endTime: 1000,
+        }],
+      }],
+    }
+
+    await expect(library.removeAsset(meta.id, { protocols: [protocol] }))
+      .rejects
+      .toThrow('referenced by segment(s): legacy-segment')
+  })
+
+  it('refuses deletion when a current or legacy segment references the asset', async () => {
+    const library = createLibrary()
+    const meta = await library.importAsset(await createPngFile('used.png'))
+    const protocol: IVideoProtocol = {
+      id: 'project-1',
+      version: '1.0.0' as const,
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [{
+        trackId: 'frames-1',
+        trackType: 'frames' as const,
+        isMain: true,
+        children: [{
+          id: 'segment-1',
+          segmentType: 'frames' as const,
+          type: 'image' as const,
+          format: 'img' as const,
+          assetId: meta.id,
+          url: 'https://stale.example.com/used.png',
+          startTime: 0,
+          endTime: 1000,
+        }],
+      }],
+    }
+
+    await expect(library.removeAsset(meta.id, { protocols: [protocol] }))
+      .rejects
+      .toThrow(`referenced by segment(s): segment-1`)
+    expect(await library.getAsset(meta.id)).toBeDefined()
+
+    const segment = protocol.tracks[0].children[0] as IImageFramesSegment
+    delete segment.assetId
+    segment.url = meta.url
+    await expect(library.removeAsset(meta.id, { protocols: [protocol] }))
+      .rejects
+      .toThrow(`referenced by segment(s): segment-1`)
   })
 })

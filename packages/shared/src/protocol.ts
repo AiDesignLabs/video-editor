@@ -84,6 +84,8 @@ export type ProtocolExtra = ProtocolExtraRegistry extends Record<string, never>
 interface IFramesSegment extends ISegment<'frames'> {
   type: 'image' | 'video' | '3D'
   url: string
+  /** Stable library identity; `url` remains the last-known usable location. */
+  assetId?: string
   transform?: ITransform
   opacity?: number // 0-1
   fillMode?: IFillMode
@@ -127,6 +129,8 @@ interface StickerSegment<T extends ITrackType> extends ISegment<T> {
   segmentType: T
   format: 'img' | 'gif'
   url: string
+  /** Stable library identity; `url` remains the last-known usable location. */
+  assetId?: string
   fillMode?: IFillMode
   animation?: IAnimation
   transform?: ITransform
@@ -138,6 +142,8 @@ interface StickerSegment<T extends ITrackType> extends ISegment<T> {
 interface AudioSegment<T extends ITrackType> extends ISegment<T> {
   segmentType: T
   url: string
+  /** Stable library identity; `url` remains the last-known usable location. */
+  assetId?: string
   fromTime?: number // from time in audio where to start, default 0
   volume?: number // volume of the audio, value between [0, 1], default 1
   fadeInDuration?: number // in ms, range [0, (endTime - startTime) / 2]

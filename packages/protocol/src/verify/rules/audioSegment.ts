@@ -13,6 +13,7 @@ export const audioSegmentRule: JSONSchemaType<IAudioSegment> = {
     startTime: { type: 'number', minimum: 0 },
     endTime: { type: 'number', minimum: 0 },
     url: { type: 'string', format: 'uri' },
+    assetId: { type: 'string', minLength: 1, nullable: true },
     segmentType: { type: 'string', const: 'audio' },
     fromTime: { type: 'number', minimum: 0, nullable: true },
     volume: { type: 'number', minimum: 0, maximum: 1, nullable: true },

@@ -1,3 +1,5 @@
+export { resolveProtocolAssetUrls } from './asset-resolution'
+export type { AssetUrlResolver } from './asset-resolution'
 export { composeProtocol } from './compose'
 export type {
   ComposeClipOptions,

@@ -268,6 +268,7 @@ export type ReplaceAssetStrategy = 'preserve' | 'fit'
 export interface ReplaceSegmentAssetOptions {
   segmentId: string
   asset: {
+    id?: string
     url: string
     kind: 'video' | 'audio' | 'image'
     /** Required for video and audio assets. */
@@ -1065,8 +1066,14 @@ export function createVideoProtocolManager(protocol: IVideoProtocol, options?: {
     if (!isValidAssetUrl(options.asset.url))
       return { success: false, error: 'asset url must be an absolute URL', affectedSegments: [], affectedTracks: [] }
 
-    const candidate = clone(toRaw(current)) as SegmentUnion
+    const candidate = clone(toRaw(current)) as SegmentUnion & { assetId?: string }
     candidate.url = options.asset.url
+    if (options.asset.id === undefined)
+      delete candidate.assetId
+    else if (options.asset.id)
+      candidate.assetId = options.asset.id
+    else
+      return { success: false, error: 'asset id must not be empty', affectedSegments: [], affectedTracks: [] }
 
     if (currentKind === 'video' || currentKind === 'audio') {
       const sourceDuration = options.asset.durationMs

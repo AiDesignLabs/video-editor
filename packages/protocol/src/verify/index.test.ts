@@ -122,6 +122,11 @@ describe('verify segment of video protocol', () => {
         const o = verifyFramesSegment(videoFramesSegment)
         expect(o).toEqual(videoFramesSegment)
       })
+
+      it('accepts an optional stable asset id', () => {
+        const segment = { ...videoFramesSegment, assetId: 'asset-1' }
+        expect(verifyFramesSegment(segment)).toEqual(segment)
+      })
     })
 
     describe('invalid frames segment', () => {
@@ -177,6 +182,10 @@ describe('verify segment of video protocol', () => {
       })
 
       describe('invalid values', () => {
+        it('rejects an empty asset id', () => {
+          expect(() => verifyFramesSegment({ ...videoFramesSegment, assetId: '' })).toThrow()
+        })
+
         it('invalid id', () => {
           const o = { ...videoFramesSegment, id: 1 }
           expect(() => verifyFramesSegment(o)).toThrowError(INVALID_ID)

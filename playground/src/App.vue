@@ -7,7 +7,7 @@ import type { Ref } from 'vue'
 import type { ExportSettings } from './export-options'
 import type { GizmoTransformPatch } from './gizmo/types'
 import { createEditorCore } from '@video-editor/editor-core'
-import { createProjectStore, generateThumbnails } from '@video-editor/protocol'
+import { createAssetLibrary, createProjectStore, generateThumbnails } from '@video-editor/protocol'
 import { createExportTask, createRenderer, listEffectDefinitions, listTransitionDefinitions } from '@video-editor/renderer'
 import { CanvasSizePanel, createDefaultToolbarActions, mergeToolbarActions, PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
@@ -190,6 +190,7 @@ const boot = bootstrapEditor()
 const editor = boot.editor
 const { state, commands } = editor
 const protocol = state.protocol
+const assetLibrary = createAssetLibrary()
 const scrub = state.currentTime
 const selectedSegmentId = computed({
   get: () => state.selectedSegmentId.value ?? null,
@@ -248,6 +249,15 @@ function openDrawer(tab: DrawerTab) {
 // --- Project persistence ---------------------------------------------------
 
 const projectStore = createProjectStore()
+
+async function getAssetProtectionProtocols(): Promise<IVideoProtocol[]> {
+  const projects = await projectStore.listProjects()
+  const stored = await Promise.all(projects.map(project => projectStore.loadProject(project.id)))
+  return [
+    protocol.value,
+    ...stored.flatMap(project => project ? [project.protocol] : []),
+  ]
+}
 const currentProjectId = ref(boot.id)
 const currentProjectName = ref(boot.name)
 const projects = ref<ProjectMeta[]>([])
@@ -426,6 +436,7 @@ async function mountRendererInstance(options: {
     protocol,
     autoPlay: false,
     videoSourceMode: 'auto' as const,
+    resolveAssetUrl: (assetId: string) => assetLibrary.resolveAssetUrl(assetId),
     appOptions: {
       ...fitToAspectRatio(
         host?.clientWidth || 1280,
@@ -890,6 +901,7 @@ function handleAssetAdd(asset: AssetMeta) {
   if (asset.kind === 'audio') {
     const segment: Omit<IAudioSegment, 'id'> = {
       segmentType: 'audio',
+      assetId: asset.id,
       url: asset.url,
       startTime: 0,
       endTime: asset.durationMs ?? 5000,
@@ -908,6 +920,7 @@ function handleAssetAdd(asset: AssetMeta) {
       segmentType: 'frames',
       type: 'image',
       format: 'img',
+      assetId: asset.id,
       url: asset.url,
       startTime: 0,
       endTime: 4000,
@@ -921,6 +934,7 @@ function handleAssetAdd(asset: AssetMeta) {
   const segment: Omit<IVideoFramesSegment, 'id'> = {
     segmentType: 'frames',
     type: 'video',
+    assetId: asset.id,
     url: asset.url,
     startTime: 0,
     endTime: asset.durationMs ?? 5000,
@@ -989,7 +1003,17 @@ async function runCompose(settings: ExportSettings) {
 
   // The task snapshots the protocol, so edits made while it runs cannot land
   // half-way through the file.
-  exportTask.value = createExportTask(protocol.value, toComposeOptions(settings))
+  const composeOptions = toComposeOptions(settings)
+  exportTask.value = createExportTask(protocol.value, {
+    ...composeOptions,
+    clipOptions: {
+      ...composeOptions.clipOptions,
+      rendererOptions: {
+        ...composeOptions.clipOptions?.rendererOptions,
+        resolveAssetUrl: (assetId: string) => assetLibrary.resolveAssetUrl(assetId),
+      },
+    },
+  })
   await awaitExport(task => task.start())
 }
 
@@ -1516,7 +1540,7 @@ function handleAddSegmentClick(data: {
 
       <div class="drawer__body">
         <div v-if="drawerTab === 'assets'" class="drawer__pane">
-          <AssetPanel @add="handleAssetAdd" />
+          <AssetPanel :get-protected-protocols="getAssetProtectionProtocols" @add="handleAssetAdd" />
         </div>
 
         <div v-else-if="drawerTab === 'compose'" class="drawer__pane">

@@ -7,7 +7,7 @@ import type {
   EditorCoreSelectors,
   EditorCoreState,
 } from './types'
-import { createVideoProtocolManager } from '@video-editor/protocol'
+import { createVideoProtocolManager, findAssetReferences } from '@video-editor/protocol'
 import { computed } from '@vue/reactivity'
 import { createBatchCommands } from './batch'
 import { createKeyframeCommands } from './keyframes'
@@ -123,6 +123,7 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
       return state.protocol.value.tracks.filter(track => track.trackType === trackType)
     },
     getOperationLog: () => structuredClone(state.operationLog.value),
+    getAssetReferences: asset => findAssetReferences(protocolManager.exportProtocol(), asset),
   }
 
   const registry = {

@@ -1,9 +1,13 @@
+import type { MediaInputHandle } from '@video-editor/media'
 import type { IAudioSegment, IKeyframeProperty, ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
-import type { VisualBox } from './gizmo-math'
 import type { ComputedRef, Ref, ShallowRef } from '@vue/reactivity'
 import type { Application, ApplicationOptions, Filter as PixiFilter } from 'pixi.js'
+import type { AssetUrlResolver } from './asset-resolution'
+import type { VisualBox } from './gizmo-math'
+import type { TextRun } from './text'
 import type { ShaderEffectContext, TimelinePlan, VisualRenderItem } from './timeline'
 import type { MaybeRef, PixiDisplayObject } from './types'
+import { openMediaInput } from '@video-editor/media'
 import { createResourceManager, createValidator, getResourceKey } from '@video-editor/protocol'
 import { sourceSpanMs } from '@video-editor/shared'
 import {
@@ -15,11 +19,10 @@ import {
   unref,
   watch,
 } from '@vue/reactivity'
-import type { MediaInputHandle } from '@video-editor/media'
-import { openMediaInput } from '@video-editor/media'
 import { file as opfsFile } from 'opfs-tools'
 import { Container, ImageSource, Sprite, Texture } from 'pixi.js'
 import { createApp as create2dApp } from './2d'
+import { resolveProtocolAssetUrls } from './asset-resolution'
 import { AudioManager } from './audio-manager'
 import {
   applyDisplayProps,
@@ -31,14 +34,13 @@ import {
   placeholder,
   reverseAudioBufferInPlace,
 } from './helpers'
-import type { TextRun } from './text'
 import { buildTextRuns, renderTextBitmap } from './text'
 import { measureTextRuns } from './text-bitmap'
 import {
   createEmptyEvaluatorState,
-  createSegmentFilterCache,
   createPreviewAudioTicker,
   createPreviewRunner,
+  createSegmentFilterCache,
   createTimelineTransport,
   createVisualRenderItems,
   evaluateTimelinePlan,
@@ -80,6 +82,8 @@ export interface RendererOptions {
   manualRender?: boolean
   videoSourceMode?: 'auto' | 'element'
   warmUpResources?: boolean
+  /** Resolve a stable asset id to its current URL before media is loaded. */
+  resolveAssetUrl?: AssetUrlResolver
 }
 
 export interface Renderer {
@@ -93,6 +97,8 @@ export interface Renderer {
   tick: (deltaMs?: number) => void
   seek: (time: number) => void
   renderAt: (time: number) => Promise<void>
+  /** Re-read stable asset mappings without changing the protocol. */
+  refreshAssets: () => Promise<void>
   /** Geometry of every visual rendered in the last frame, in logical stage px. */
   getVisualBoxes: () => VisualBox[]
   destroy: () => void
@@ -124,7 +130,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const protocolInput: Ref<IVideoProtocol> | ShallowRef<IVideoProtocol>
     = isRef(opts.protocol) ? opts.protocol : shallowRef(opts.protocol)
   const validatedProtocol: ShallowRef<IVideoProtocol> = shallowRef(
-    validator.verify(cloneProtocol(unref(protocolInput))),
+    validator.verify(await resolveProtocolAssetUrls(unref(protocolInput), opts.resolveAssetUrl)),
   )
 
   const app = opts.app ?? await create2dApp(opts.appOptions)
@@ -362,6 +368,43 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     getDisplay: getDisplayForSegment,
   }))
 
+  let assetResolutionRevision = 0
+  let rendererDestroyed = false
+  const applyProtocol = (nextProtocol: IVideoProtocol, revision: number) => {
+    if (rendererDestroyed || revision !== assetResolutionRevision)
+      return
+    validatedProtocol.value = nextProtocol
+    audioManager.setProtocol(validatedProtocol.value)
+    resetSchedulerState()
+    if (isPlaying.value)
+      previewAudioTicker.tick()
+    renderGeneration += 1
+    clearDisplays()
+    if (opts.warmUpResources !== false) {
+      warmUpResources(validatedProtocol.value)
+      warmUpMediaElementSources(validatedProtocol.value)
+    }
+    cleanupCache(validatedProtocol.value)
+    cleanupMediaElementObjectUrls(validatedProtocol.value)
+    clampCurrentTime()
+    if (!opts.manualRender)
+      queueRender()
+  }
+
+  const syncProtocol = (protocol: IVideoProtocol): void | Promise<void> => {
+    const revision = ++assetResolutionRevision
+    if (!opts.resolveAssetUrl) {
+      applyProtocol(validator.verify(cloneProtocol(protocol)), revision)
+      return
+    }
+    return resolveProtocolAssetUrls(protocol, opts.resolveAssetUrl)
+      .then(resolved => applyProtocol(validator.verify(resolved), revision))
+  }
+
+  const refreshAssets = async () => {
+    await syncProtocol(unref(protocolInput))
+  }
+
   const scope = effectScope()
   scope.run(() => {
     // Sync external protocol mutations into a verified snapshot the renderer can rely on.
@@ -369,27 +412,13 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       () => unref(protocolInput),
       (protocol) => {
         try {
-          validatedProtocol.value = validator.verify(cloneProtocol(protocol))
+          const pending = syncProtocol(protocol)
+          if (pending)
+            void pending.catch(err => console.error('[renderer] failed to resolve protocol assets', err))
         }
         catch (err) {
           console.error('[renderer] invalid protocol update', err)
-          return
         }
-        audioManager.setProtocol(validatedProtocol.value)
-        resetSchedulerState()
-        if (isPlaying.value)
-          previewAudioTicker.tick()
-        renderGeneration += 1
-        clearDisplays()
-        if (opts.warmUpResources !== false) {
-          warmUpResources(validatedProtocol.value)
-          warmUpMediaElementSources(validatedProtocol.value)
-        }
-        cleanupCache(validatedProtocol.value)
-        cleanupMediaElementObjectUrls(validatedProtocol.value)
-        clampCurrentTime()
-        if (!opts.manualRender)
-          queueRender()
       },
       { deep: true, immediate: true },
     )
@@ -1266,6 +1295,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   function destroy() {
+    rendererDestroyed = true
+    assetResolutionRevision += 1
     pause()
     renderGeneration += 1
     scope.stop()
@@ -1299,6 +1330,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     tick,
     seek,
     renderAt,
+    refreshAssets,
     getVisualBoxes: () => lastVisualBoxes.slice(),
     destroy,
   }

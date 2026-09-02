@@ -6,6 +6,7 @@ import type { ComposeAudioInput } from './timeline'
 import { checkEncoderSupport, createEncoder, openMediaInput } from '@video-editor/media'
 import { normalizePlayRate, sourceSpanMs } from '@video-editor/shared'
 import { Application } from 'pixi.js'
+import { resolveProtocolAssetUrls } from './asset-resolution'
 import { reverseAudioBufferInPlace } from './helpers'
 import { createRenderer } from './renderer-core'
 import { createComposeAudioInputs, sampleFrames } from './timeline'
@@ -273,6 +274,12 @@ export async function composeProtocol(
 
   throwIfAborted(opts.signal, 'starting up')
 
+  const renderProtocol = await resolveProtocolAssetUrls(
+    protocol,
+    clipOptions?.rendererOptions?.resolveAssetUrl,
+  )
+  throwIfAborted(opts.signal, 'resolving assets')
+
   const app = new Application()
   await app.init({
     width,
@@ -293,11 +300,13 @@ export async function composeProtocol(
   }
 
   try {
+    const rendererOptions = { ...clipOptions?.rendererOptions }
+    delete rendererOptions.resolveAssetUrl
     renderer = await createRenderer({
-      protocol,
+      protocol: renderProtocol,
       app,
       warmUpResources: false,
-      ...clipOptions?.rendererOptions,
+      ...rendererOptions,
       autoPlay: false,
       freezeOnPause: false,
       manualRender: true,
@@ -311,7 +320,7 @@ export async function composeProtocol(
 
     const audioBuffer = opts.audio === false
       ? undefined
-      : await renderAudioMix(protocol, durationMs, opts.signal)
+      : await renderAudioMix(renderProtocol, durationMs, opts.signal)
 
     throwIfAborted(opts.signal, 'preparing the encoder')
 

@@ -18,6 +18,7 @@ const { encoderCalls, rendererCalls } = vi.hoisted(() => ({
   rendererCalls: {
     renderAt: [] as number[],
     destroyed: false,
+    options: undefined as Record<string, unknown> | undefined,
   },
 }))
 
@@ -72,16 +73,19 @@ vi.mock('./timeline', async (importOriginal) => {
 })
 
 vi.mock('./renderer-core', () => ({
-  createRenderer: vi.fn(async () => ({
-    duration: { value: 100 },
-    renderAt: vi.fn(async (timeMs: number) => {
-      rendererCalls.renderAt.push(timeMs)
-    }),
-    destroy: vi.fn(() => {
-      rendererCalls.destroyed = true
-    }),
-    app: { canvas: {} },
-  })),
+  createRenderer: vi.fn(async (options: Record<string, unknown>) => {
+    rendererCalls.options = options
+    return {
+      duration: { value: 100 },
+      renderAt: vi.fn(async (timeMs: number) => {
+        rendererCalls.renderAt.push(timeMs)
+      }),
+      destroy: vi.fn(() => {
+        rendererCalls.destroyed = true
+      }),
+      app: { canvas: {} },
+    }
+  }),
 }))
 
 function createProtocol(): IVideoProtocol {
@@ -144,6 +148,37 @@ describe('composeProtocol', () => {
     })
     expect(result.mimeType).toBe('video/webm')
     expect(result.fileExtension).toBe('.webm')
+  })
+
+  it('resolves stable asset ids once for both rendering and audio planning', async () => {
+    const source = createProtocol()
+    source.tracks.push({
+      trackId: 'frames-1',
+      trackType: 'frames',
+      isMain: true,
+      children: [{
+        id: 'segment-1',
+        segmentType: 'frames',
+        type: 'image',
+        format: 'img',
+        assetId: 'asset-1',
+        url: 'https://old.example.com/image.png',
+        startTime: 0,
+        endTime: 100,
+      }],
+    })
+    const resolver = vi.fn(async () => 'https://cdn.example.com/image.png')
+
+    await composeProtocol(source, {
+      audio: false,
+      clipOptions: { rendererOptions: { resolveAssetUrl: resolver } },
+    })
+
+    const rendered = rendererCalls.options?.protocol as IVideoProtocol
+    expect(rendered.tracks[0].children[0].url).toBe('https://cdn.example.com/image.png')
+    expect(rendererCalls.options).not.toHaveProperty('resolveAssetUrl')
+    expect(source.tracks[0].children[0].url).toBe('https://old.example.com/image.png')
+    expect(resolver).toHaveBeenCalledTimes(1)
   })
 
   it('reports the mp4 container by default', async () => {

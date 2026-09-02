@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import type { AssetMeta } from '@video-editor/protocol'
+import type { IVideoProtocol } from '@video-editor/shared'
 import { createAssetLibrary, generateThumbnails } from '@video-editor/protocol'
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 defineOptions({ name: 'AssetPanel' })
+
+const props = defineProps<{
+  getProtectedProtocols: () => Promise<IVideoProtocol[]>
+}>()
 
 const emit = defineEmits<{
   (event: 'add', asset: AssetMeta): void
@@ -161,7 +166,8 @@ async function handleDrop(event: DragEvent) {
 async function handleRemove(asset: AssetMeta) {
   error.value = null
   try {
-    await library.removeAsset(asset.id)
+    const protocols = await props.getProtectedProtocols()
+    await library.removeAsset(asset.id, { protocols })
     await refresh()
   }
   catch (err) {

@@ -13,6 +13,7 @@ import type {
 } from '@video-editor/shared'
 import { ref } from '@vue/reactivity'
 import { describe, expect, it, vi } from 'vitest'
+import { createRenderer } from './renderer-core'
 
 const { audioManagerInstances, mediaInputHandles, mediaMockState, opfsState } = vi.hoisted(() => ({
   mediaMockState: {
@@ -180,9 +181,11 @@ vi.mock('./audio-manager', () => {
     public options?: {
       resolveMediaElementUrl?: (segment: IAudioSegment | IVideoFramesSegment) => string | undefined
     }
+
     public setProtocol = vi.fn((protocol: IVideoProtocol) => {
       this.protocol = protocol
     })
+
     public applyTimelinePlan = vi.fn()
     public resetTimelineState = vi.fn()
     public destroy = vi.fn()
@@ -201,8 +204,6 @@ vi.mock('./audio-manager', () => {
 
   return { AudioManager }
 })
-
-import { createRenderer } from './renderer-core'
 
 function createAudioSegment(id: string, startTime: number, endTime: number): IAudioSegment {
   return {
@@ -418,6 +419,42 @@ describe('createRenderer render ownership', () => {
 
     try {
       expect(app.ticker.stop).toHaveBeenCalledTimes(1)
+    }
+    finally {
+      renderer.destroy()
+    }
+  })
+
+  it('refreshes stable asset mappings without changing the protocol', async () => {
+    const segment = createFrameSegment('image-1', 0, 1000)
+    segment.assetId = 'asset-1'
+    const resolveAssetUrl = vi.fn(async () => 'https://cdn.example.com/image-1.png')
+    const protocol: IVideoProtocol = {
+      id: 'renderer-asset-test',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [{
+        trackId: 'frames-track',
+        trackType: 'frames',
+        isMain: true,
+        children: [segment],
+      }],
+    }
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as unknown as Parameters<typeof createRenderer>[0]['app'],
+      manualRender: true,
+      warmUpResources: false,
+      resolveAssetUrl,
+    })
+
+    try {
+      await flushReactivity()
+      const callsBeforeRefresh = resolveAssetUrl.mock.calls.length
+      await renderer.refreshAssets()
+      expect(resolveAssetUrl).toHaveBeenCalledTimes(callsBeforeRefresh + 1)
     }
     finally {
       renderer.destroy()

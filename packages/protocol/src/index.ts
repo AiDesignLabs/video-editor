@@ -1,12 +1,15 @@
 export {
   createAssetLibrary,
   DEFAULT_ASSET_MANIFEST_DIR,
+  findAssetReferences,
 } from './assets'
 export type {
   AssetKind,
   AssetLibrary,
   AssetLibraryOptions,
   AssetMeta,
+  AssetReference,
+  AssetRemovalContext,
 } from './assets'
 export { createVideoProtocolManager, MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS } from './manage'
 export type {

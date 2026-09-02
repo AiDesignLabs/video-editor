@@ -1,3 +1,4 @@
+import type { IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import { file as opfsFile, write as opfsWrite } from 'opfs-tools'
 import { getCachedResourceFile } from '../resource/cache'
 import { DEFAULT_RESOURCE_DIR } from '../resource/constants'
@@ -18,6 +19,8 @@ export interface AssetMeta {
   name: string
   /** Synthetic `local-asset://` url, usable directly as `segment.url`. */
   url: string
+  /** Earlier locations kept for legacy URL-only protocol reference checks. */
+  previousUrls?: string[]
   kind: AssetKind
   sizeBytes: number
   createdAt: number
@@ -32,9 +35,23 @@ export interface AssetLibrary {
   importAsset: (file: File) => Promise<AssetMeta>
   /** Newest first. */
   listAssets: () => Promise<AssetMeta[]>
-  removeAsset: (id: string) => Promise<void>
+  getAsset: (id: string) => Promise<AssetMeta | undefined>
+  resolveAssetUrl: (id: string) => Promise<string | undefined>
+  relinkAsset: (id: string, url: string) => Promise<AssetMeta>
+  removeAsset: (id: string, context: AssetRemovalContext) => Promise<void>
   /** Origin OPFS File, useful for previews. */
   getAssetFile: (id: string) => Promise<File | undefined>
+}
+
+export interface AssetReference {
+  protocolId: string
+  trackId: string
+  segmentId: string
+}
+
+export interface AssetRemovalContext {
+  /** Every open or stored protocol that must remain valid after deletion. */
+  protocols: readonly IVideoProtocol[]
 }
 
 export interface AssetLibraryOptions {
@@ -94,6 +111,32 @@ function isAssetMeta(value: unknown): value is AssetMeta {
     && isAssetKind(meta.kind)
     && typeof meta.sizeBytes === 'number'
     && typeof meta.createdAt === 'number'
+    && (meta.previousUrls === undefined || (Array.isArray(meta.previousUrls) && meta.previousUrls.every(url => typeof url === 'string')))
+}
+
+function isAbsoluteUrl(url: string) {
+  try {
+    return Boolean(new URL(url).protocol)
+  }
+  catch {
+    return false
+  }
+}
+
+export function findAssetReferences(protocol: IVideoProtocol, asset: Pick<AssetMeta, 'id' | 'url' | 'previousUrls'>): AssetReference[] {
+  const references: AssetReference[] = []
+  const knownUrls = new Set([asset.url, ...(asset.previousUrls ?? [])])
+  for (const track of protocol.tracks) {
+    for (const segment of track.children) {
+      if (!('url' in segment))
+        continue
+      const media = segment as SegmentUnion & { assetId?: string, url: string }
+      if (media.assetId !== asset.id && (media.assetId !== undefined || !knownUrls.has(media.url)))
+        continue
+      references.push({ protocolId: protocol.id, trackId: track.trackId, segmentId: segment.id })
+    }
+  }
+  return references
 }
 
 async function readManifest(manifestPath: string): Promise<AssetMeta[]> {
@@ -190,6 +233,15 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
     return [...assets].sort((a, b) => b.createdAt - a.createdAt)
   }
 
+  async function getAsset(id: string): Promise<AssetMeta | undefined> {
+    const assets = await readManifest(manifestPath)
+    return assets.find(asset => asset.id === id)
+  }
+
+  async function resolveAssetUrl(id: string): Promise<string | undefined> {
+    return (await getAsset(id))?.url
+  }
+
   async function importAsset(file: File): Promise<AssetMeta> {
     const kind = detectKind(file)
     if (!kind)
@@ -227,12 +279,43 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
     return meta
   }
 
-  async function removeAsset(id: string): Promise<void> {
+  async function relinkAsset(id: string, url: string): Promise<AssetMeta> {
+    if (!isAbsoluteUrl(url))
+      throw new Error('Asset URL must be absolute')
+
+    const result = await enqueueManifestJob(manifestPath, async () => {
+      const assets = await readManifest(manifestPath)
+      const index = assets.findIndex(asset => asset.id === id)
+      if (index < 0)
+        throw new Error(`No asset with id ${id}`)
+      const inferredKind = inferResourceTypeFromUrl(url)
+      if (inferredKind && inferredKind !== assets[index].kind)
+        throw new Error(`Cannot relink ${assets[index].kind} asset ${id} to ${inferredKind} media`)
+      const previousUrl = assets[index].url
+      const previousUrls = [...new Set([...(assets[index].previousUrls ?? []), previousUrl])]
+        .filter(previous => previous !== url)
+      const updated = { ...assets[index], url, previousUrls }
+      assets[index] = updated
+      await writeManifest(manifestPath, assets)
+      return updated
+    })
+    return result
+  }
+
+  async function removeAsset(id: string, context: AssetRemovalContext): Promise<void> {
+    if (!context || !Array.isArray(context.protocols))
+      throw new TypeError('Asset removal requires an explicit protocols list')
     const removed = await enqueueManifestJob(manifestPath, async () => {
       const assets = await readManifest(manifestPath)
       const target = assets.find(asset => asset.id === id)
       if (!target)
         return undefined
+
+      const references = context.protocols.flatMap(protocol => findAssetReferences(protocol, target))
+      if (references.length) {
+        const segments = references.map(reference => reference.segmentId).join(', ')
+        throw new Error(`Cannot remove asset ${id}; referenced by segment(s): ${segments}`)
+      }
 
       await writeManifest(manifestPath, assets.filter(asset => asset.id !== id))
       return target
@@ -241,12 +324,14 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
     if (!removed)
       return
 
-    try {
-      await resourceManager.remove(removed.url)
-    }
-    catch (error) {
-      // The manifest entry is already gone; a stale binary is harmless.
-      console.error(`[assets] failed to remove binary for asset "${id}"`, error)
+    for (const url of new Set([removed.url, ...(removed.previousUrls ?? [])])) {
+      try {
+        await resourceManager.remove(url)
+      }
+      catch (error) {
+        // The manifest entry is already gone; a stale binary is harmless.
+        console.error(`[assets] failed to remove binary for asset "${id}"`, error)
+      }
     }
   }
 
@@ -266,6 +351,9 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
   return {
     importAsset,
     listAssets,
+    getAsset,
+    resolveAssetUrl,
+    relinkAsset,
     removeAsset,
     getAssetFile,
   }

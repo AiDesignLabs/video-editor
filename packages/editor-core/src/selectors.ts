@@ -352,6 +352,8 @@ export function createStructuralSelectors(deps: StructuralSelectorDeps) {
           return refused('segment does not use a replaceable asset')
         if (currentKind !== asset.kind)
           return refused(`cannot replace ${currentKind} with ${asset.kind}`)
+        if (asset.id !== undefined && !asset.id)
+          return refused('asset id must not be empty')
         try {
           if (!new URL(asset.url).protocol)
             return refused('asset url must be an absolute URL')
