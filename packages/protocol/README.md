@@ -44,8 +44,8 @@ Use `MediaAssetCatalog` in application code. It hides OPFS files, proxy records,
 resource URLs. `AssetLibrary` is an internal implementation used by storage, proxy generation, and diagnostics;
 it is not exported from the package entry.
 
-Pass `assets.resolveForPreview` to the renderer and `assets.resolveForExport` to compose. Preview video frames
-use the current generated preview version, while video audio and exports keep using the original source.
+Pass `assets.resolveForPreview` to the renderer and `assets.resolveForExport` to compose. Both prefer the current
+editing MP4, which contains H.264 video and AAC audio, and fall back to the original source when it is unavailable.
 
 ### Audio Waveform Extraction
 

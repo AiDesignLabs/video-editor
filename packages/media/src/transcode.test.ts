@@ -8,6 +8,10 @@ const { state } = vi.hoisted(() => ({
     disposed: 0,
     canDecode: true,
     hasVideoTrack: true,
+    hasAudioTrack: false,
+    audioCanDecode: true,
+    audioSampleCount: 0,
+    encodedAudioBuffers: 0,
     /** Source frames the fake decoder hands out. */
     sampleCount: 5,
     closedSamples: 0,
@@ -102,6 +106,12 @@ vi.mock('mediabunny', () => {
         : null
     }
 
+    async getPrimaryAudioTrack() {
+      return state.hasAudioTrack
+        ? { canDecode: async () => state.audioCanDecode }
+        : null
+    }
+
     async computeDuration() {
       return 10
     }
@@ -129,6 +139,18 @@ vi.mock('mediabunny', () => {
           close: () => {
             state.closedSamples += 1
           },
+        }
+      }
+    }
+  }
+
+  class AudioSampleSink {
+    constructor(public track: unknown) {}
+    async* samples() {
+      for (let i = 0; i < state.audioSampleCount; i++) {
+        yield {
+          toAudioBuffer: () => ({ index: i }),
+          close() {},
         }
       }
     }
@@ -176,10 +198,15 @@ vi.mock('mediabunny', () => {
       get fileExtension() { return '.webm' }
       get mimeType() { return 'video/webm' }
     },
-    AudioBufferSource: class { async add() {} },
+    AudioBufferSource: class {
+      async add() {
+        state.encodedAudioBuffers += 1
+      }
+    },
     Output,
     StreamTarget,
     VideoSampleSink,
+    AudioSampleSink,
     QUALITY_HIGH: 'high',
     QUALITY_MEDIUM: 'medium',
   }
@@ -220,6 +247,10 @@ beforeEach(() => {
   state.disposed = 0
   state.canDecode = true
   state.hasVideoTrack = true
+  state.hasAudioTrack = false
+  state.audioCanDecode = true
+  state.audioSampleCount = 0
+  state.encodedAudioBuffers = 0
   state.sampleCount = 5
   state.closedSamples = 0
   state.draws = 0
@@ -287,6 +318,33 @@ beforeEach(() => {
 })
 
 describe('transcode', () => {
+  it('streams the source audio track into every rendition', async () => {
+    state.hasAudioTrack = true
+    state.audioSampleCount = 3
+
+    await transcode({
+      source: new Blob(),
+      renditions: renditions(
+        { id: 'proxy', height: 360 },
+        { id: 'preview', height: 720 },
+      ),
+      openSink: () => createSink().stream,
+    })
+
+    expect(state.encodedAudioBuffers).toBe(6)
+  })
+
+  it('fails instead of silently dropping an undecodable audio track', async () => {
+    state.hasAudioTrack = true
+    state.audioCanDecode = false
+
+    await expect(transcode({
+      source: new Blob(),
+      renditions: renditions({ id: 'proxy', height: 360 }),
+      openSink: () => createSink().stream,
+    })).rejects.toThrow('cannot decode the source audio track')
+  })
+
   it('decodes once and feeds every rendition from the same frames', async () => {
     const result = await transcode({
       source: new Blob(),

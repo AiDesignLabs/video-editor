@@ -195,10 +195,10 @@ function previewActionLabel(asset: MediaAsset) {
   if (progress !== undefined)
     return `取消 ${Math.round(progress * 100)}%`
   if (asset.proxyStatus === 'ready')
-    return '预览就绪'
+    return '优化版就绪'
   if (asset.proxyStatus === 'stale')
     return '重新生成'
-  return '生成预览'
+  return '生成优化版'
 }
 
 async function handlePreviewVersion(asset: MediaAsset) {

@@ -37,11 +37,20 @@ async function createSourceVideo() {
   expect(supportError).toBeNull()
 
   const output = createCollectingSink()
+  const audio = new AudioBuffer({
+    length: Math.round(0.4 * 48_000),
+    numberOfChannels: 1,
+    sampleRate: 48_000,
+  })
+  const channel = audio.getChannelData(0)
+  for (let i = 0; i < channel.length; i++)
+    channel[i] = Math.sin(2 * Math.PI * 440 * i / audio.sampleRate) * 0.2
   const result = await renderCanvasToVideo({
     canvas,
     durationMs: 400,
     fps: 5,
     sink: output.sink,
+    audio,
     renderFrame({ frameIndex }) {
       context.fillStyle = frameIndex === 0 ? '#c9342f' : '#2474a8'
       context.fillRect(0, 0, canvas.width, canvas.height)
@@ -62,9 +71,13 @@ describe('media asset preview generation', () => {
     await removeDir(manifestDir)
   })
 
-  it('generates a smaller OPFS preview and keeps export on the original', async () => {
+  it('generates an OPFS editing MP4 with audio for preview and export', async () => {
     const catalog = createMediaAssetCatalog({ resourceDir, manifestDir })
-    const source = await catalog.import(await createSourceVideo())
+    const sourceFile = await createSourceVideo()
+    const sourceInput = openMediaInput(sourceFile)
+    await expect(sourceInput.meta()).resolves.toMatchObject({ hasAudio: true })
+    sourceInput.dispose()
+    const source = await catalog.import(sourceFile)
     const progress: number[] = []
 
     const updated = await catalog.generatePreviewVersion(source.id, {
@@ -76,7 +89,7 @@ describe('media asset preview generation', () => {
 
     expect(updated.proxyStatus).toBe('ready')
     expect(await catalog.list()).toHaveLength(1)
-    expect(await catalog.resolveForPreview(source.id)).not.toBe(await catalog.resolveForExport(source.id))
+    expect(await catalog.resolveForPreview(source.id)).toBe(await catalog.resolveForExport(source.id))
     expect(progress.at(-1)).toBe(1)
 
     const previewFile = await catalog.getPreviewBlob(source.id)
@@ -87,6 +100,7 @@ describe('media asset preview generation', () => {
         width: 32,
         height: 32,
         hasVideo: true,
+        hasAudio: true,
       })
     }
     finally {

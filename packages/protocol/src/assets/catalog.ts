@@ -55,11 +55,15 @@ export interface GenerateMediaAssetPreviewOptions {
   height?: number
   /** Video bitrate in bits per second. */
   videoBitrate?: number
+  /** AAC audio bitrate in bits per second. */
+  audioBitrate?: number
   /** Maximum interval between key frames. */
   keyFrameIntervalMs?: number
   onProgress?: (progress: MediaAssetPreviewProgress) => void
   signal?: AbortSignal
 }
+
+const EDITING_PROXY_PROFILE = 'editing-mp4-v1'
 
 export interface MediaAssetPreviewResolveContext {
   media: 'visual' | 'audio'
@@ -83,7 +87,8 @@ function getProxyStatus(asset: AssetMeta, assets: readonly AssetMeta[]): MediaAs
   const proxies = assets.filter(candidate => candidate.derivation?.sourceAssetId === asset.id)
   if (!proxies.length)
     return 'none'
-  return proxies.some(proxy => proxy.derivation?.sourceRevision === (asset.revision ?? 1))
+  return proxies.some(proxy => proxy.derivation?.sourceRevision === (asset.revision ?? 1)
+    && proxy.derivation.profile === EDITING_PROXY_PROFILE)
     ? 'ready'
     : 'stale'
 }
@@ -166,14 +171,14 @@ export function createMediaAssetCatalogFromLibrary(
 
   async function getPreviewBlob(id: string): Promise<Blob | undefined> {
     await requireOriginal(id)
-    return await library.getAssetFile(id, { preferProxy: true })
+    return await library.getAssetFile(id, { preferProxy: true, proxyProfile: EDITING_PROXY_PROFILE })
   }
 
   async function getThumbnails(id: string, options?: GenerateThumbnailsOptions): Promise<Thumbnail[]> {
     const asset = await requireOriginal(id)
     if (asset.kind !== 'video')
       throw new Error(`Media asset ${id} is not a video`)
-    const url = await library.resolveAssetUrl(id, { preferProxy: true })
+    const url = await library.resolveAssetUrl(id, { preferProxy: true, proxyProfile: EDITING_PROXY_PROFILE })
     if (!url)
       throw new Error(`No preview source for media asset ${id}`)
     return await generateThumbnails(url, options)
@@ -203,13 +208,16 @@ export function createMediaAssetCatalogFromLibrary(
     if (options.signal?.aborted)
       throw new DOMException('Preview generation aborted', 'AbortError')
 
-    const height = options.height ?? Math.min(asset.height ?? 360, 360)
-    const videoBitrate = options.videoBitrate ?? 600_000
+    const height = options.height ?? Math.min(asset.height ?? 1080, 1080)
+    const videoBitrate = options.videoBitrate
+    const audioBitrate = options.audioBitrate ?? 192_000
     const keyFrameIntervalMs = options.keyFrameIntervalMs ?? 1000
     if (!Number.isFinite(height) || height <= 0)
       throw new TypeError('Preview height must be greater than 0')
-    if (!Number.isFinite(videoBitrate) || videoBitrate <= 0)
+    if (videoBitrate !== undefined && (!Number.isFinite(videoBitrate) || videoBitrate <= 0))
       throw new TypeError('Preview video bitrate must be greater than 0')
+    if (!Number.isFinite(audioBitrate) || audioBitrate <= 0)
+      throw new TypeError('Preview audio bitrate must be greater than 0')
     if (!Number.isFinite(keyFrameIntervalMs) || keyFrameIntervalMs <= 0)
       throw new TypeError('Preview key frame interval must be greater than 0')
 
@@ -223,12 +231,13 @@ export function createMediaAssetCatalogFromLibrary(
       const generated = await dependencies.generatePreviewFile(source, asset.name, {
         height,
         videoBitrate,
+        audioBitrate,
         keyFrameIntervalMs,
         onProgress: options.onProgress,
         signal: options.signal,
       })
       try {
-        await library.importProxy(id, generated.file)
+        await library.importProxy(id, generated.file, EDITING_PROXY_PROFILE)
       }
       finally {
         // Cleanup must not replace a more useful import/revision error.
@@ -262,10 +271,14 @@ export function createMediaAssetCatalogFromLibrary(
     getThumbnails,
     getWaveform,
     generatePreviewVersion,
-    resolveForPreview: (id, _fallbackUrl, context) => library.resolveAssetUrl(id, {
-      preferProxy: context?.media !== 'audio',
+    resolveForPreview: (id, _fallbackUrl, _context) => library.resolveAssetUrl(id, {
+      preferProxy: true,
+      proxyProfile: EDITING_PROXY_PROFILE,
     }),
-    resolveForExport: id => library.resolveAssetUrl(id),
+    resolveForExport: id => library.resolveAssetUrl(id, {
+      preferProxy: true,
+      proxyProfile: EDITING_PROXY_PROFILE,
+    }),
     remove,
   }
 }

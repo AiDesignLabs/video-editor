@@ -52,9 +52,9 @@ editor.commands.addSegment({
 后续协议版本可以允许仅保存 `assetId`；在此之前保留 `url`，避免破坏旧工程和离线恢复能力。
 
 `getPreviewBlob()`、`getThumbnails()` 和 `getWaveform()` 按素材 ID 读取预览数据，不要求调用方
-处理 OPFS `File` 或资源 URL。`resolveForPreview()` 可以选择当前有效的预览版本，
-`resolveForExport()` 始终选择原始素材。两个 resolver 可直接传给 renderer 和 compose，不要求
-调用方理解 `preferProxy`。
+处理 OPFS `File` 或资源 URL。`resolveForPreview()` 和 `resolveForExport()` 优先选择当前有效的
+编辑优化版 MP4；不存在符合当前 source revision 与 profile 的派生素材时回退原始素材。两个
+resolver 可直接传给 renderer 和 compose，不要求调用方理解 `preferProxy`。
 
 视频预览版本通过 `generatePreviewVersion()` 生成：
 
@@ -69,8 +69,10 @@ await assets.generatePreviewVersion(asset.id, {
 await renderer.refreshAssets()
 ```
 
-默认参数为 360p、600 kbps 和 1 秒关键帧间隔。调用方可以调整参数，但不接触生成文件、代理 ID
-或 source revision。已有当前预览版本时直接返回素材状态，不重复编码；非视频素材会明确失败。
+默认最高保留 1080p，使用高质量 H.264、192 kbps AAC 和 1 秒关键帧间隔。音频按解码块流式
+转码，不把长片音轨完整读入内存。调用方可以调整参数，但不接触生成文件、代理 ID、source
+revision 或生成 profile。已有当前编辑优化版时直接返回素材状态，不重复编码；非视频素材会明确
+失败。
 
 ## 4. PixiJS 边界
 
@@ -78,9 +80,8 @@ await renderer.refreshAssets()
 不能依赖 PixiJS 的全局资源注册表。renderer 可以在内部使用 PixiJS 的图片加载能力，但
 `MediaAsset`、`assetId` 和 proxy 关系不得映射为 PixiJS 的公共资源身份。
 
-当前视频预览版本只包含画面。renderer 使用同一个 `resolveForPreview()` 分别解析画面和音频：
-画面选择当前预览版本，音频选择当前原始素材，避免代理生成后丢失视频原声。普通集成仍只需传入
-一个 resolver。
+编辑优化版同时包含 H.264 画面和 AAC 音频。renderer 使用同一个 `resolveForPreview()` 分别解析
+画面和音频，两者选择同一个当前编辑优化版。普通集成仍只需传入一个 resolver。
 
 完整转换顺序为：
 
@@ -98,8 +99,8 @@ assetId -> MediaAsset -> 原始素材或预览版本 -> URL / OPFS File -> 解�
 - 缺少删除保护协议提供者时，`MediaAssetCatalog.remove()` 明确失败，不允许绕过引用检查。
 - 存储适配、proxy 生成和诊断工具在 `protocol` 包内部直接使用素材 repository；未来确需向外部
   开放时，应增加可独立构建和测试的正式子路径。
-- 预览版本编码通过 `@video-editor/media` 完成，临时输出和素材二进制写入 OPFS；这些步骤不进入
-  公共 API。
+- 编辑优化版编码通过 `@video-editor/media` 完成，临时输出和素材二进制写入 OPFS；这些步骤不
+  进入公共 API。旧 profile 的派生素材会自动过期，不会进入预览或合成。
 
 ## 6. Agent 使用
 

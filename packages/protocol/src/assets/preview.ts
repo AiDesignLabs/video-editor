@@ -3,7 +3,8 @@ import { transcode } from '@video-editor/media'
 
 export interface GenerateVideoPreviewFileOptions {
   height: number
-  videoBitrate: number
+  videoBitrate?: number
+  audioBitrate: number
   keyFrameIntervalMs: number
   onProgress?: (progress: TranscodeProgress) => void
   signal?: AbortSignal
@@ -26,7 +27,7 @@ function createPreviewName(sourceName: string) {
   return `${base}.preview.mp4`
 }
 
-/** Encode one preview version into a temporary OPFS file without buffering it in JS memory. */
+/** Encode one editing MP4 into a temporary OPFS file without buffering it in JS memory. */
 export async function generateVideoPreviewFile(
   source: Blob | string,
   sourceName: string,
@@ -52,6 +53,7 @@ export async function generateVideoPreviewFile(
       }],
       openSink: async () => await handle.createWritable(),
       pipelineDepth: 4,
+      audioBitrate: options.audioBitrate,
       onProgress: options.onProgress,
       signal: options.signal,
     })

@@ -28,6 +28,7 @@ const proxy: AssetMeta = {
     kind: 'proxy',
     sourceAssetId: source.id,
     sourceRevision: 2,
+    profile: 'editing-mp4-v1',
   },
 }
 
@@ -85,10 +86,13 @@ describe('media asset catalog', () => {
       durationMs: 5000,
     })
     await expect(catalog.resolveForPreview(source.id)).resolves.toBe(proxy.url)
-    await expect(catalog.resolveForPreview(source.id, source.url, { media: 'audio' })).resolves.toBe(source.url)
-    await expect(catalog.resolveForExport(source.id)).resolves.toBe(source.url)
+    await expect(catalog.resolveForPreview(source.id, source.url, { media: 'audio' })).resolves.toBe(proxy.url)
+    await expect(catalog.resolveForExport(source.id)).resolves.toBe(proxy.url)
     await expect(catalog.getPreviewBlob(source.id)).resolves.toBe(preview)
-    expect(library.getAssetFile).toHaveBeenCalledWith(source.id, { preferProxy: true })
+    expect(library.getAssetFile).toHaveBeenCalledWith(source.id, {
+      preferProxy: true,
+      proxyProfile: 'editing-mp4-v1',
+    })
   })
 
   it('generates and registers a preview version without exposing its file', async () => {
@@ -111,11 +115,11 @@ describe('media asset catalog', () => {
     })
 
     expect(generatePreviewFile).toHaveBeenCalledWith(sourceFile, source.name, expect.objectContaining({
-      height: 360,
-      videoBitrate: 600_000,
+      height: 1080,
+      audioBitrate: 192_000,
       keyFrameIntervalMs: 1000,
     }))
-    expect(library.importProxy).toHaveBeenCalledWith(source.id, previewFile)
+    expect(library.importProxy).toHaveBeenCalledWith(source.id, previewFile, 'editing-mp4-v1')
     expect(cleanup).toHaveBeenCalledTimes(1)
   })
 

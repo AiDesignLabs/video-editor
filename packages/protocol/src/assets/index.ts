@@ -18,11 +18,15 @@ export interface AssetDerivation {
   kind: 'proxy'
   sourceAssetId: string
   sourceRevision: number
+  /** Internal generation recipe. Missing on legacy derivatives. */
+  profile?: string
 }
 
 export interface AssetUrlResolutionOptions {
-  /** Use a current proxy when one exists. Export should leave this false. */
+  /** Use a current proxy when one exists. */
   preferProxy?: boolean
+  /** Require a proxy produced by this generation recipe. */
+  proxyProfile?: string
 }
 
 export interface AssetMeta {
@@ -49,7 +53,7 @@ export interface AssetMeta {
 
 export interface AssetLibrary {
   importAsset: (file: File) => Promise<AssetMeta>
-  importProxy: (sourceAssetId: string, file: File) => Promise<AssetMeta>
+  importProxy: (sourceAssetId: string, file: File, profile?: string) => Promise<AssetMeta>
   /** Newest first. */
   listAssets: () => Promise<AssetMeta[]>
   getAsset: (id: string) => Promise<AssetMeta | undefined>
@@ -99,7 +103,8 @@ function resolveAssetRecord(
   return assets
     .filter(asset => asset.derivation?.kind === 'proxy'
       && asset.derivation.sourceAssetId === target.id
-      && asset.derivation.sourceRevision === (target.revision ?? 1))
+      && asset.derivation.sourceRevision === (target.revision ?? 1)
+      && (options.proxyProfile === undefined || asset.derivation.profile === options.proxyProfile))
     .sort((a, b) => b.createdAt - a.createdAt)[0] ?? target
 }
 
@@ -159,6 +164,7 @@ function isAssetMeta(value: unknown): value is AssetMeta {
       && typeof meta.derivation.sourceAssetId === 'string'
       && Number.isInteger(meta.derivation.sourceRevision)
       && meta.derivation.sourceRevision > 0
+      && (meta.derivation.profile === undefined || typeof meta.derivation.profile === 'string')
     ))
     && (meta.previousUrls === undefined || (Array.isArray(meta.previousUrls) && meta.previousUrls.every(url => typeof url === 'string')))
 }
@@ -332,7 +338,7 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
     return await storeAsset(file)
   }
 
-  async function importProxy(sourceAssetId: string, file: File): Promise<AssetMeta> {
+  async function importProxy(sourceAssetId: string, file: File, profile?: string): Promise<AssetMeta> {
     const source = await getAsset(sourceAssetId)
     if (!source)
       throw new Error(`No source asset with id ${sourceAssetId}`)
@@ -340,6 +346,7 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
       kind: 'proxy',
       sourceAssetId,
       sourceRevision: source.revision ?? 1,
+      ...(profile ? { profile } : {}),
     })
   }
 

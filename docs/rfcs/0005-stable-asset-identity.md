@@ -37,9 +37,9 @@
 并把旧地址保存在 `previousUrls`。旧地址继续参与旧协议的引用检查，对应二进制在素材真正删除前
 保留。
 
-代理素材通过 `derivation` 记录 `sourceAssetId` 和生成时的 `sourceRevision`。预览请求
-`preferProxy` 时只选择与原始素材当前 revision 一致的代理；导出不请求代理，继续使用原始地址。
-原始素材 revision 变化后，旧代理可追踪但被视为过期，不会继续进入预览。
+代理素材通过 `derivation` 记录 `sourceAssetId`、生成时的 `sourceRevision` 和内部生成 profile。
+预览或合成请求 `preferProxy` 时，只选择与原始素材当前 revision 和所需 profile 一致的代理。
+原始素材 revision 或生成 profile 变化后，旧代理可追踪但被视为过期，不会继续进入预览或合成。
 
 缩略图、波形和媒体元数据以实际来源 URL 建立缓存键。素材重新关联或删除时，
 `invalidateResourceDerivatives()` 清理旧 URL 的上述派生缓存。波形缓存键同时包含资源目录、采样数
@@ -47,6 +47,6 @@
 
 ## 5. P0-C 实现
 
-`MediaAssetCatalog.generatePreviewVersion()` 已补齐代理生成、进度和取消，并沿用本 RFC 的来源
-revision 校验。长片任务队列仍属于后续范围；当前每个调用创建一个生成任务，同一素材不能并行
-生成多个预览版本。
+`MediaAssetCatalog.generatePreviewVersion()` 已补齐编辑优化版 MP4 的生成、进度和取消，并沿用
+本 RFC 的来源 revision 与 profile 校验。长片任务队列仍属于后续范围；当前每个调用创建一个
+生成任务，同一素材不能并行生成多个编辑优化版。

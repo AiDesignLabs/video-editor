@@ -64,10 +64,10 @@ const binding = await assets.bindForSegment(asset.id)
 Spread `binding` into the matching audio, image, or video segment input. The binding contains the
 compatibility URL required by the current protocol; application code must not construct or rewrite it.
 
-Use `assets.resolveForPreview` as the renderer resolver and `assets.resolveForExport` as the compose
-resolver. Do not use the preview resolver for export.
+Use `assets.resolveForPreview` as the renderer resolver and `assets.resolveForExport` as the compose resolver.
+Both prefer the current editing MP4 and fall back to the original, but keep the purpose-specific APIs separate.
 
-Generate a smaller video preview without handling files or proxy records:
+Generate an editing MP4 without handling files or proxy records:
 
 ```ts
 const controller = new AbortController()
@@ -78,9 +78,8 @@ await assets.generatePreviewVersion(asset.id, {
 await renderer.refreshAssets()
 ```
 
-The renderer asks the preview resolver separately for visual and audio media. The catalog selects the current
-preview version for video frames and the original source for video audio. Application code still passes only
-`assets.resolveForPreview`.
+The generated MP4 contains H.264 video and AAC audio. The catalog uses it for preview and compose only while its
+source revision and generation profile are current. Application code does not split visual and audio sources.
 
 Use `assets.getPreviewBlob(asset.id)`, `assets.getThumbnails(asset.id, options)`, and
 `assets.getWaveform(asset.id, options)` for asset UI. Do not resolve an asset URL and call the low-level

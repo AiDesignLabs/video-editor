@@ -2,6 +2,7 @@ import type { FrameTiming } from './encoder'
 import type { MediaWriteSink } from './types'
 import {
   ALL_FORMATS,
+  AudioSampleSink,
   BlobSource,
   canDecodeVideo,
   canEncodeVideo,
@@ -90,6 +91,10 @@ export interface TranscodeOptions {
    * heap — write it to OPFS or straight into an upload.
    */
   openSink: (rendition: Rendition) => MediaWriteSink | Promise<MediaWriteSink>
+  /** Preserve the primary audio track as AAC when present. Defaults to true. */
+  audio?: boolean
+  /** Target AAC bitrate in bits per second. */
+  audioBitrate?: number
   /**
    * For a rendition whose output size equals the source, feed the decoded frame
    * straight to the encoder instead of drawing it into a canvas and capturing
@@ -325,11 +330,16 @@ export async function transcode(options: TranscodeOptions): Promise<TranscodeRes
   const input = new Input({ formats: ALL_FORMATS, source: createSource(source) })
 
   try {
-    const track = await input.getPrimaryVideoTrack()
+    const [track, audioTrack] = await Promise.all([
+      input.getPrimaryVideoTrack(),
+      options.audio === false ? Promise.resolve(null) : input.getPrimaryAudioTrack(),
+    ])
     if (!track)
       throw new Error('transcode: the source has no video track')
     if (!(await track.canDecode()))
       throw new Error('transcode: this browser cannot decode the source video track')
+    if (audioTrack && !(await audioTrack.canDecode()))
+      throw new Error('transcode: this browser cannot decode the source audio track')
 
     const framesTotal = (await track.computePacketStats()).packetCount
     const sourceWidth = track.displayWidth
@@ -379,6 +389,8 @@ export async function transcode(options: TranscodeOptions): Promise<TranscodeRes
         latencyMode: rendition.latencyMode,
         hardwareAcceleration: rendition.hardwareAcceleration,
         frameRate: sourceFrameRate,
+        withAudio: !!audioTrack,
+        audioBitrate: options.audioBitrate,
         onEncoderConfig: (config) => {
           encoderConfig = config
         },
@@ -424,6 +436,24 @@ export async function transcode(options: TranscodeOptions): Promise<TranscodeRes
     let lastFrameEndedAt = loopStartedAt
 
     try {
+      // Feed audio before video. The output container fixes its track layout
+      // when media starts arriving, so an audio track first used after every
+      // video frame may be omitted even though it was registered up front.
+      if (audioTrack) {
+        const audioSink = new AudioSampleSink(audioTrack)
+        for await (const sample of audioSink.samples()) {
+          if (signal?.aborted) {
+            sample.close()
+            throw new DOMException('transcode aborted', 'AbortError')
+          }
+
+          const buffer = sample.toAudioBuffer()
+          sample.close()
+          await Promise.all(targets.map(target => target.encoder.setAudio(buffer)))
+        }
+        lastFrameEndedAt = performance.now()
+      }
+
       for await (const sample of sampleSink.samples()) {
         const receivedAt = performance.now()
         stages.decodeWaitMs += receivedAt - lastFrameEndedAt

@@ -17,7 +17,7 @@
 ```text
 assetId
   -> MediaAsset record
-  -> original or current preview version
+  -> original or current editing MP4
   -> URL or OPFS File
   -> media decoder
   -> PixiJS Texture for visual media
@@ -31,9 +31,9 @@ Renderer code may use PixiJS loading internally, but PixiJS keys are not asset I
 Use `MediaAssetCatalog` for imports, lists, segment bindings, removal, and preview/export resolvers.
 It hides URLs, revisions, proxy IDs, and OPFS details from normal integrations.
 
-Use `MediaAssetCatalog.generatePreviewVersion()` to create video preview media. The method streams encoded
-bytes through a temporary OPFS file, records the result against the current source revision, and supports
-progress plus cancellation. After it completes, refresh active renderers so they resolve the new visual source.
+Use `MediaAssetCatalog.generatePreviewVersion()` to create an editing MP4 with H.264 video and AAC audio. The
+method streams encoded bytes through a temporary OPFS file, records the result against the current source revision
+and generation profile, and supports progress plus cancellation. After it completes, refresh active renderers.
 
 `AssetLibrary` is not a public package export. Use its source module only while implementing or debugging the
 `protocol` package itself:
@@ -44,9 +44,6 @@ progress plus cancellation. After it completes, refresh active renderers so they
 - derived-cache invalidation;
 - raw OPFS file access.
 
-When a source revision changes, an older proxy is stale and must not be used for preview. Export resolves
-the original media even when a current proxy exists. Removing media requires all open and stored protocols
-for reference checks; never pass an incomplete list to bypass deletion protection.
-
-Generated video previews currently contain visual media only. The renderer resolves video audio from the
-original source while resolving frames from the current preview. Do not make application code split these paths.
+When a source revision or generation profile changes, an older proxy is stale and must not be used for preview or
+compose. Both resolvers prefer the current editing MP4 and fall back to the original media. Removing media requires
+all open and stored protocols for reference checks; never pass an incomplete list to bypass deletion protection.

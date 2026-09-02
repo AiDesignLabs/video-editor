@@ -116,16 +116,21 @@ describe('asset library', () => {
   it('tracks a proxy against the source revision and stops using it when stale', async () => {
     const library = createLibrary()
     const source = await library.importAsset(await createPngFile('source.png', 8, 6))
-    const proxy = await library.importProxy(source.id, await createPngFile('proxy.png', 4, 3))
+    const proxy = await library.importProxy(source.id, await createPngFile('proxy.png', 4, 3), 'editing-mp4-v1')
 
     expect(proxy.derivation).toEqual({
       kind: 'proxy',
       sourceAssetId: source.id,
       sourceRevision: 1,
+      profile: 'editing-mp4-v1',
     })
     expect((await library.listAssetDerivatives(source.id)).map(asset => asset.id)).toEqual([proxy.id])
     expect(await library.isAssetDerivativeStale(proxy.id)).toBe(false)
     expect(await library.resolveAssetUrl(source.id, { preferProxy: true })).toBe(proxy.url)
+    expect(await library.resolveAssetUrl(source.id, {
+      preferProxy: true,
+      proxyProfile: 'legacy-profile',
+    })).toBe(source.url)
     expect(await library.resolveAssetUrl(source.id)).toBe(source.url)
 
     await expect(library.removeAsset(source.id, { protocols: [] }))
