@@ -10,6 +10,7 @@ import type {
 import { createVideoProtocolManager } from '@video-editor/protocol'
 import { computed } from '@vue/reactivity'
 import { createBatchCommands } from './batch'
+import { createKeyframeCommands } from './keyframes'
 import { createPluginManager } from './plugin'
 import { createSegmentRegistry } from './segment'
 import { createStructuralSelectors } from './selectors'
@@ -56,6 +57,10 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     updateSegment: protocolManager.updateSegment,
     getSegment: protocolManager.getSegment,
   })
+  const keyframes = createKeyframeCommands({
+    getSegment: protocolManager.getSegment,
+    updateSegment: protocolManager.updateSegment,
+  })
 
   const commands: EditorCoreCommands = {
     setCurrentTime: (time) => {
@@ -78,6 +83,10 @@ export function createEditorCore(options: EditorCoreOptions): EditorCore {
     updateTrack: protocolManager.updateTrack,
     setCanvasSize: protocolManager.setCanvasSize,
     setFps: protocolManager.setFps,
+    upsertKeyframe: keyframes.upsertKeyframe,
+    moveKeyframe: keyframes.moveKeyframe,
+    removeKeyframe: keyframes.removeKeyframe,
+    setKeyframeEasing: keyframes.setKeyframeEasing,
     replaceTrackId: protocolManager.replaceTrackId,
     replaceSegmentId: protocolManager.replaceSegmentId,
     moveSegments: batch.moveSegments,

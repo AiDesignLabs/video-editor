@@ -19,6 +19,7 @@ import type {
 } from './types'
 import { MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS } from '@video-editor/protocol'
 import { sampleKeyframes } from '@video-editor/shared'
+import { checkKeyframeCommand } from './keyframes'
 
 /**
  * How a keyframe property falls back when the segment has no curve for it.
@@ -334,6 +335,12 @@ export function createStructuralSelectors(deps: StructuralSelectorDeps) {
           return refused(`track index must be between 0 and ${Math.max(0, tracks.length - 1)}`)
         return allowed
       }
+
+      case 'upsertKeyframe':
+      case 'moveKeyframe':
+      case 'removeKeyframe':
+      case 'setKeyframeEasing':
+        return checkKeyframeCommand(check, findSegment)
     }
   }
 

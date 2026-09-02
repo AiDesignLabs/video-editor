@@ -77,7 +77,10 @@ P0 拆成三个顺序交付的门槛，避免所有基础能力集中在一个�
 - [x] 轨道结构：`addTrack`、`removeTrack`、`moveTrack` 已覆盖新增、删除和重排，并提供对应
       `canRun` 查询。删除非空轨道会在一个历史项中同时删除其片段；删除主画面轨后会提升另一条
       画面轨并重建连续时间线。新增的第一条画面轨自动成为主轨，失败和无操作均不写入历史。
-- 关键帧：新增或更新、移动、删除单个关键帧，以及修改缓动。
+- [x] 关键帧：`upsertKeyframe`、`moveKeyframe`、`removeKeyframe`、
+      `setKeyframeEasing` 已覆盖新增或更新、移动、删除单个关键帧，以及修改缓动。时间使用片段
+      相对毫秒并限制在片段时长内；移动到已有关键帧的时刻会被拒绝，不会静默覆盖。删除最后一个
+      关键帧时会同步清理空属性轨道。每条命令对应一个 History 项，并支持整体撤销、重做。
 - 批量操作入口，见下一节。
 
 **查询完备性。已完成。** agent 必须先理解才能编辑，缺少查询层就只能拿整个协议自己解析 ——
@@ -93,8 +96,9 @@ P0 拆成三个顺序交付的门槛，避免所有基础能力集中在一个�
       复用 `@video-editor/shared` 的 `sampleKeyframes`，与预览、导出同一套纯函数。
 - [x] 选中态与可执行性查询：`getSelection()`；`canRun(check)` 回答某命令此刻是否可执行及
       原因，覆盖 undo / redo / removeSegment / duplicateSegment / splitSegment / addTransition /
-      setCanvasSize / setFps / addTrack / removeTrack / moveTrack。测试断言 `canRun` 的判断与命令
-      的实际行为一致，两者不允许分歧。
+      setCanvasSize / setFps / addTrack / removeTrack / moveTrack / upsertKeyframe /
+      moveKeyframe / removeKeyframe / setKeyframeEasing。测试断言 `canRun` 的判断与命令的实际行为
+      一致，两者不允许分歧。
 
 **语义化操作日志。** History 记录的是 immer patch，人类看不懂，无法据此审阅 agent 的提案。
 需要在事务上附带语义描述（例如 `split-segment`、`replace-source` 及其参数），用于：
@@ -455,13 +459,15 @@ i18n 方案，当前只能通过覆盖 slot 或分叉来本地化，与"宿主�
 
 ### 命令层测试覆盖
 
-**状态：已完成。** `editor-core` 此前没有任何测试文件，现在有 55 个用例（Node 环境，
+**状态：已完成。** `editor-core` 此前没有任何测试文件，现在有 95 个用例（Node 环境，
 `vitest.config.ts` 把 `@video-editor/*` 别名指向源码）：
 
 - `core.test.ts`：状态派生、片段增删改、分割、裁剪、画布尺寸、查询、事务。
 - `batch.test.ts`：四个批量命令的原子性、失败回滚、去重、波纹删除顺序和事务嵌套。
 - `commands.test.ts`：转场命令、`updateTrack`、`duplicateSegment`、`replaceTrackId` /
   `replaceSegmentId`，以及插件与 segment registry 的生命周期。
+- `selectors.test.ts`：时间点、结构、属性采样、选中态和 `canRun` 查询。
+- `keyframes.test.ts`：关键帧新增或更新、移动、删除、缓动、边界校验和历史记录。
 
 补覆盖的过程中发现并修掉了两个协议层缺陷：`moveSegment` 省略 `targetTrackId` 时会丢片段
 却返回成功；命令返回 `false`（拒绝执行）时仍会因转场同步写入而压入一个历史项。

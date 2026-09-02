@@ -1,5 +1,6 @@
 export { createBatchCommands } from './batch'
 export { createEditorCore } from './core'
+export { checkKeyframeCommand, createKeyframeCommands } from './keyframes'
 export { createPluginManager } from './plugin'
 export { createSegmentRegistry } from './segment'
 export { createStructuralSelectors } from './selectors'
@@ -22,7 +23,11 @@ export type {
   EditorCoreServices,
   EditorCoreState,
   EditorSelection,
+  KeyframeCommandCheck,
+  KeyframeCommandResult,
+  MoveKeyframeOptions,
   MoveSegmentOptions,
+  RemoveKeyframeOptions,
   RemoveSegmentOptions,
   ResizeSegmentOptions,
   SampledProperty,
@@ -38,7 +43,9 @@ export type {
   SegmentsAtOptions,
   SetCanvasSizeResult,
   SetFpsResult,
+  SetKeyframeEasingOptions,
   TrackGap,
   TrackMutableFields,
   TrackStructureResult,
+  UpsertKeyframeOptions,
 } from './types'

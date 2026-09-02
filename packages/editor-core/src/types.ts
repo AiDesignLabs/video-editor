@@ -1,5 +1,5 @@
 import type { createVideoProtocolManager } from '@video-editor/protocol'
-import type { IKeyframeProperty, ITrackType, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
+import type { IKeyframeEasing, IKeyframeProperty, ITrackType, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
 import type { ComputedRef, DeepReadonly } from '@vue/reactivity'
 
 /** Internal protocol manager type used to align editor-core signatures with protocol behavior. */
@@ -97,6 +97,48 @@ export interface EditorSelection {
   trackId?: string
 }
 
+export interface UpsertKeyframeOptions {
+  segmentId: string
+  property: IKeyframeProperty
+  /** Segment-relative timeline time in ms. */
+  timeMs: number
+  value: number
+  /** When omitted, an existing frame keeps its easing. */
+  easing?: IKeyframeEasing
+}
+
+export interface MoveKeyframeOptions {
+  segmentId: string
+  property: IKeyframeProperty
+  /** Current segment-relative timeline time in ms. */
+  timeMs: number
+  /** New segment-relative timeline time in ms. */
+  toTimeMs: number
+}
+
+export interface RemoveKeyframeOptions {
+  segmentId: string
+  property: IKeyframeProperty
+  /** Segment-relative timeline time in ms. */
+  timeMs: number
+}
+
+export interface SetKeyframeEasingOptions extends RemoveKeyframeOptions {
+  /** Omit to restore linear easing. */
+  easing?: IKeyframeEasing
+}
+
+export interface KeyframeCommandResult {
+  success: boolean
+  error?: string
+}
+
+export type KeyframeCommandCheck
+  = | { command: 'upsertKeyframe', input: UpsertKeyframeOptions }
+    | { command: 'moveKeyframe', input: MoveKeyframeOptions }
+    | { command: 'removeKeyframe', input: RemoveKeyframeOptions }
+    | { command: 'setKeyframeEasing', input: SetKeyframeEasingOptions }
+
 /** The commands `canRun` can answer for, with the arguments each needs. */
 export type CommandCheck
   = | { command: 'undo' }
@@ -110,6 +152,7 @@ export type CommandCheck
     | { command: 'addTrack', input: AddTrackOptions }
     | { command: 'removeTrack', trackId: string }
     | { command: 'moveTrack', trackId: string, toIndex: number }
+    | KeyframeCommandCheck
 
 export interface CommandCheckResult {
   ok: boolean
@@ -207,6 +250,14 @@ export interface EditorCoreCommands {
   setCanvasSize: ProtocolManager['setCanvasSize']
   /** Set the project frame rate as a single undoable step. */
   setFps: ProtocolManager['setFps']
+  /** Insert a keyframe, or update the value at the same property and time. */
+  upsertKeyframe: (input: UpsertKeyframeOptions) => KeyframeCommandResult
+  /** Move one keyframe without replacing a frame already at the target time. */
+  moveKeyframe: (input: MoveKeyframeOptions) => KeyframeCommandResult
+  /** Remove one keyframe and clean up its empty property track. */
+  removeKeyframe: (input: RemoveKeyframeOptions) => KeyframeCommandResult
+  /** Change one keyframe's outgoing easing; omit easing to restore linear. */
+  setKeyframeEasing: (input: SetKeyframeEasingOptions) => KeyframeCommandResult
   /** Replace a track id (useful for migrations). */
   replaceTrackId: ProtocolManager['replaceTrackId']
   /** Replace a segment id (useful for migrations). */
