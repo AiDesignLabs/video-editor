@@ -5,6 +5,8 @@ A CapCut-inspired video editor built as a monorepo with headless core architectu
 ## Documentation
 
 - [Feature Roadmap](./docs/feature-roadmap.md) - Current capabilities and planned editing features
+- [Media Asset Public API](./docs/rfcs/0006-media-asset-public-api.md) - Stable media identity and storage boundaries
+- [Agent Skill](./skills/video-editor/SKILL.md) - Safe command, proposal, and asset workflows for coding agents
 - [Audio Waveform API](./WAVEFORM.md) - Extract and visualize audio waveforms
 - [Architecture Guide](./CLAUDE.md) - Project structure and conventions
 

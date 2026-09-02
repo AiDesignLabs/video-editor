@@ -1,0 +1,4 @@
+interface:
+  display_name: Video Editor
+  short_description: Build and edit timelines through the safe public API
+  default_prompt: Use $video-editor to build or modify a video editing workflow with the repository public APIs.
