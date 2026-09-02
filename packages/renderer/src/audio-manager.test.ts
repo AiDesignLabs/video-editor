@@ -24,11 +24,10 @@ class MockAudioElement {
     }
   }
 
-  private sourceUrl: string
+  readonly url: string
   readonly duration: number
   preload = 'auto'
   loop = false
-  playsInline = false
   volume = 1
   playbackRate = 1
   private pausedFlag = true
@@ -38,22 +37,10 @@ class MockAudioElement {
   pauseCalls = 0
 
   constructor(url: string) {
-    this.sourceUrl = url
+    this.url = url
     this.duration = MockAudioElement.options.duration
     this.rejectNonZeroSeek = MockAudioElement.options.rejectNonZeroSeek
     MockAudioElement.instances.push(this)
-  }
-
-  get src() {
-    return this.sourceUrl
-  }
-
-  set src(value: string) {
-    this.sourceUrl = value
-  }
-
-  get url() {
-    return this.sourceUrl
   }
 
   get paused() {
@@ -272,13 +259,6 @@ describe('audioManager audio-element seek guards', () => {
   beforeEach(() => {
     MockAudioElement.reset()
     vi.stubGlobal('Audio', MockAudioElement as unknown as typeof Audio)
-    vi.stubGlobal('document', {
-      createElement: (tagName: string) => {
-        if (tagName !== 'video')
-          throw new Error(`Unexpected media element: ${tagName}`)
-        return new MockAudioElement('')
-      },
-    })
     vi.stubGlobal('window', {
       AudioContext: MockAudioContext,
       webkitAudioContext: MockAudioContext,
@@ -336,7 +316,6 @@ describe('audioManager audio-element seek guards', () => {
     const element = MockAudioElement.instances[0]
     expect(element).toBeDefined()
     expect(element?.url).toBe('https://example.com/video.mp4')
-    expect(element?.playsInline).toBe(true)
     expect(element?.currentTime).toBeCloseTo(1.5, 6)
     expect(element?.volume).toBeCloseTo(0.7, 6)
     expect(element?.playbackRate).toBeCloseTo(1.25, 6)
@@ -394,13 +373,6 @@ describe('audioManager decoded buffer audio', () => {
   beforeEach(() => {
     MockAudioElement.reset()
     vi.stubGlobal('Audio', MockAudioElement as unknown as typeof Audio)
-    vi.stubGlobal('document', {
-      createElement: (tagName: string) => {
-        if (tagName !== 'video')
-          throw new Error(`Unexpected media element: ${tagName}`)
-        return new MockAudioElement('')
-      },
-    })
     vi.stubGlobal('window', {
       AudioContext: MockAudioContext,
       webkitAudioContext: MockAudioContext,
