@@ -233,6 +233,9 @@ History 需要满足：
 - [x] 原始素材通过 revision 标识来源版本，代理素材记录生成时的来源 ID 和 revision；预览只使用
       当前 revision 的代理，导出仍解析为原始素材。原始地址变化或素材删除时，同步清理该 URL
       派生的缩略图、波形和媒体元数据缓存。
+- [x] `MediaAssetCatalog` 作为普通集成入口，隐藏 proxy、revision、OPFS 和 PixiJS 资源细节；
+      低层 `AssetLibrary` 仅用于高级存储与代理素材集成，详见
+      [RFC 0006](./rfcs/0006-media-asset-public-api.md)。
 - [x] 替换是一个原子事务，一次撤销完整回退。
 
 ### 导出任务可靠性

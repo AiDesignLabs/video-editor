@@ -7,7 +7,7 @@ import type { Ref } from 'vue'
 import type { ExportSettings } from './export-options'
 import type { GizmoTransformPatch } from './gizmo/types'
 import { createEditorCore } from '@video-editor/editor-core'
-import { createAssetLibrary, createProjectStore, generateThumbnails } from '@video-editor/protocol'
+import { createAssetLibrary, createMediaAssetCatalog, createProjectStore, generateThumbnails } from '@video-editor/protocol'
 import { createExportTask, createRenderer, listEffectDefinitions, listTransitionDefinitions } from '@video-editor/renderer'
 import { CanvasSizePanel, createDefaultToolbarActions, mergeToolbarActions, PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
@@ -191,6 +191,7 @@ const editor = boot.editor
 const { state, commands } = editor
 const protocol = state.protocol
 const assetLibrary = createAssetLibrary()
+const assetCatalog = createMediaAssetCatalog({ library: assetLibrary })
 const scrub = state.currentTime
 const selectedSegmentId = computed({
   get: () => state.selectedSegmentId.value ?? null,
@@ -436,7 +437,7 @@ async function mountRendererInstance(options: {
     protocol,
     autoPlay: false,
     videoSourceMode: 'auto' as const,
-    resolveAssetUrl: (assetId: string) => assetLibrary.resolveAssetUrl(assetId, { preferProxy: true }),
+    resolveAssetUrl: assetCatalog.resolveForPreview,
     appOptions: {
       ...fitToAspectRatio(
         host?.clientWidth || 1280,
@@ -1010,7 +1011,7 @@ async function runCompose(settings: ExportSettings) {
       ...composeOptions.clipOptions,
       rendererOptions: {
         ...composeOptions.clipOptions?.rendererOptions,
-        resolveAssetUrl: (assetId: string) => assetLibrary.resolveAssetUrl(assetId),
+        resolveAssetUrl: assetCatalog.resolveForExport,
       },
     },
   })

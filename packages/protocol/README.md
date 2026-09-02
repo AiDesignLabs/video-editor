@@ -18,6 +18,22 @@ pnpm add @video-editor/protocol
 
 ## Quick Start
 
+### Managed Media
+
+```typescript
+import { createMediaAssetCatalog } from '@video-editor/protocol'
+
+const assets = createMediaAssetCatalog({
+  getProtectedProtocols: () => [editor.commands.exportProtocol()],
+})
+
+const asset = await assets.import(file)
+const binding = await assets.bindForSegment(asset.id)
+```
+
+Use `MediaAssetCatalog` in application code. It hides OPFS files, proxy records, revisions, and changing
+resource URLs. Use the lower-level `AssetLibrary` only for storage adapters, proxy generation, or diagnostics.
+
 ### Audio Waveform Extraction
 
 ```typescript
@@ -29,15 +45,15 @@ const waveform = await extractWaveform('/audio.mp3', { samples: 1000 })
 // Generate SVG path for rendering
 const svgPath = peaksToSvgPath(waveform.peaks, 800, 100)
 
-console.log(waveform.peaks)     // number[] - normalized 0-1
-console.log(waveform.duration)  // number - seconds
+console.log(waveform.peaks) // number[] - normalized 0-1
+console.log(waveform.duration) // number - seconds
 ```
 
 ### Protocol Management
 
 ```typescript
-import { createVideoProtocolManager } from '@video-editor/protocol'
 import type { IVideoProtocol } from '@video-editor/protocol'
+import { createVideoProtocolManager } from '@video-editor/protocol'
 
 const protocol: IVideoProtocol = { /* ... */ }
 const manager = createVideoProtocolManager(protocol)
@@ -77,6 +93,7 @@ See [WAVEFORM.md](../../WAVEFORM.md) for detailed waveform API documentation.
 ## Exports
 
 ### Waveform
+
 - `extractWaveform(url, options)` - Extract waveform from URL
 - `extractWaveformFromBuffer(buffer, cacheKey, options)` - Extract from ArrayBuffer
 - `clearWaveformCache(url?)` - Clear waveform cache
@@ -84,11 +101,13 @@ See [WAVEFORM.md](../../WAVEFORM.md) for detailed waveform API documentation.
 - `peaksToBars(peaks, width)` - Generate bar data
 
 ### Protocol
+
 - `createVideoProtocolManager(protocol)` - Create protocol manager
 - `createValidator()` - Create protocol validator
 - `parse(protocolString)` - Parse and validate protocol JSON
 
 ### Resources
+
 - `createResourceManager(dir?)` - Create resource manager
 - `generateThumbnails(url, options)` - Generate video thumbnails
 - `getMp4Meta(url)` - Extract MP4 metadata

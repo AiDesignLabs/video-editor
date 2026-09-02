@@ -13,6 +13,14 @@ export type {
   AssetRemovalContext,
   AssetUrlResolutionOptions,
 } from './assets'
+export { createMediaAssetCatalog } from './assets/catalog'
+export type {
+  MediaAsset,
+  MediaAssetCatalog,
+  MediaAssetCatalogOptions,
+  MediaAssetProxyStatus,
+  SegmentAssetBinding,
+} from './assets/catalog'
 export { createVideoProtocolManager, MAX_CANVAS_SIZE, MIN_CANVAS_SIZE, MIN_FPS } from './manage'
 export type {
   AddTrackOptions,

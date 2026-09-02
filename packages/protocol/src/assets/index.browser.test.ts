@@ -138,6 +138,9 @@ describe('asset library', () => {
     expect(await library.isAssetDerivativeStale(proxy.id)).toBe(true)
     expect(await library.resolveAssetUrl(source.id, { preferProxy: true })).toBe(updated.url)
     expect(await library.resolveAssetUrl(proxy.id)).toBe(updated.url)
+
+    await library.removeAsset(source.id, { protocols: [], removeDerivatives: true })
+    expect(await library.listAssets()).toEqual([])
   })
 
   it('clears derived thumbnail storage when an asset is relinked', async () => {

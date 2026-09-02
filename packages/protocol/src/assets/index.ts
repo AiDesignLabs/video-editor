@@ -70,6 +70,8 @@ export interface AssetReference {
 export interface AssetRemovalContext {
   /** Every open or stored protocol that must remain valid after deletion. */
   protocols: readonly IVideoProtocol[]
+  /** Also remove derived assets after checking that none of them are referenced. */
+  removeDerivatives?: boolean
 }
 
 export interface AssetLibraryOptions {
@@ -411,33 +413,47 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
       if (!target)
         return undefined
 
-      const derivatives = assets.filter(asset => asset.derivation?.sourceAssetId === id)
-      if (derivatives.length) {
+      const removedIds = new Set([id])
+      let foundDerivative = true
+      while (foundDerivative) {
+        foundDerivative = false
+        for (const asset of assets) {
+          if (asset.derivation && removedIds.has(asset.derivation.sourceAssetId) && !removedIds.has(asset.id)) {
+            removedIds.add(asset.id)
+            foundDerivative = true
+          }
+        }
+      }
+      const derivatives = assets.filter(asset => asset.id !== id && removedIds.has(asset.id))
+      if (derivatives.length && !context.removeDerivatives) {
         const derivativeIds = derivatives.map(asset => asset.id).join(', ')
         throw new Error(`Cannot remove asset ${id}; derived asset(s) still exist: ${derivativeIds}`)
       }
 
-      const references = context.protocols.flatMap(protocol => findAssetReferences(protocol, target))
+      const targets = [target, ...derivatives]
+      const references = targets.flatMap(asset => context.protocols.flatMap(protocol => findAssetReferences(protocol, asset)))
       if (references.length) {
         const segments = references.map(reference => reference.segmentId).join(', ')
         throw new Error(`Cannot remove asset ${id}; referenced by segment(s): ${segments}`)
       }
 
-      await writeManifest(manifestPath, assets.filter(asset => asset.id !== id))
-      return target
+      await writeManifest(manifestPath, assets.filter(asset => !removedIds.has(asset.id)))
+      return targets
     })
 
     if (!removed)
       return
 
-    for (const url of new Set([removed.url, ...(removed.previousUrls ?? [])])) {
-      await invalidateResourceDerivatives(url, resourceDir)
-      try {
-        await resourceManager.remove(url)
-      }
-      catch (error) {
-        // The manifest entry is already gone; a stale binary is harmless.
-        console.error(`[assets] failed to remove binary for asset "${id}"`, error)
+    for (const asset of removed) {
+      for (const url of new Set([asset.url, ...(asset.previousUrls ?? [])])) {
+        await invalidateResourceDerivatives(url, resourceDir)
+        try {
+          await resourceManager.remove(url)
+        }
+        catch (error) {
+          // The manifest entry is already gone; a stale binary is harmless.
+          console.error(`[assets] failed to remove binary for asset "${asset.id}"`, error)
+        }
       }
     }
   }
