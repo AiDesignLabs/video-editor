@@ -7,6 +7,8 @@ const { state } = vi.hoisted(() => ({
     videoTrack: undefined as Record<string, unknown> | undefined,
     audioTrack: undefined as Record<string, unknown> | undefined,
     videoSamples: [] as Array<{ timestamp: number, draw: ReturnType<typeof vi.fn>, close: ReturnType<typeof vi.fn> }>,
+    videoSampleRequests: [] as number[],
+    videoSequenceRequests: [] as number[][],
     audioSamples: [] as Array<{ timestamp: number, buffer: MockAudioBuffer }>,
   },
 }))
@@ -62,7 +64,15 @@ vi.mock('mediabunny', () => ({
   },
   VideoSampleSink: class {
     async getSample(timestamp: number) {
+      state.videoSampleRequests.push(timestamp)
       return state.videoSamples.find(s => s.timestamp === timestamp) ?? null
+    }
+
+    async* samplesAtTimestamps(timestamps: Iterable<number>) {
+      const requested = [...timestamps]
+      state.videoSequenceRequests.push(requested)
+      for (const timestamp of requested)
+        yield state.videoSamples.find(s => s.timestamp === timestamp) ?? null
     }
   },
   CanvasSink: class {},
@@ -86,6 +96,8 @@ describe('openMediaInput', () => {
     state.videoTrack = undefined
     state.audioTrack = undefined
     state.videoSamples.length = 0
+    state.videoSampleRequests.length = 0
+    state.videoSequenceRequests.length = 0
     state.audioSamples.length = 0
   })
 
@@ -119,6 +131,38 @@ describe('openMediaInput', () => {
     const ctx = { canvas: { width: 10, height: 10 } } as unknown as CanvasRenderingContext2D
     await expect(handle.drawFrame(ctx, 0)).rejects.toThrow('draw failed')
     expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('decodes a prepared frame sequence through one optimized iterator', async () => {
+    state.videoTrack = { canDecode: async () => true }
+    const first = { timestamp: 0, draw: vi.fn(), close: vi.fn() }
+    const second = { timestamp: 0.04, draw: vi.fn(), close: vi.fn() }
+    state.videoSamples.push(first, second)
+
+    const handle = openMediaInput(new Blob())
+    handle.prepareVideoFrameSequence([0, 40])
+    const ctx = { canvas: { width: 320, height: 180 } } as unknown as CanvasRenderingContext2D
+
+    await expect(handle.drawFrame(ctx, 0)).resolves.toBe(true)
+    await expect(handle.drawFrame(ctx, 40)).resolves.toBe(true)
+
+    expect(state.videoSequenceRequests).toEqual([[0, 0.04]])
+    expect(state.videoSampleRequests).toEqual([])
+    expect(first.close).toHaveBeenCalledTimes(1)
+    expect(second.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls back to random access when rendering leaves the prepared sequence', async () => {
+    state.videoTrack = { canDecode: async () => true }
+    state.videoSamples.push({ timestamp: 0.5, draw: vi.fn(), close: vi.fn() })
+
+    const handle = openMediaInput(new Blob())
+    handle.prepareVideoFrameSequence([0, 40])
+    const ctx = { canvas: { width: 320, height: 180 } } as unknown as CanvasRenderingContext2D
+
+    await expect(handle.drawFrame(ctx, 500)).resolves.toBe(true)
+
+    expect(state.videoSampleRequests).toEqual([0.5])
   })
 
   it('stitches decoded audio chunks into one buffer at sample-accurate offsets', async () => {

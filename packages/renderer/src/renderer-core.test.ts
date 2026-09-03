@@ -36,6 +36,7 @@ const { audioManagerInstances, mediaInputHandles, mediaMockState, opfsState } = 
     canDecodeVideo: ReturnType<typeof vi.fn>
     canDecodeAudio: ReturnType<typeof vi.fn>
     drawFrame: ReturnType<typeof vi.fn>
+    prepareVideoFrameSequence: ReturnType<typeof vi.fn>
     thumbnails: ReturnType<typeof vi.fn>
     decodeAudioSlice: ReturnType<typeof vi.fn>
     dispose: ReturnType<typeof vi.fn>
@@ -82,6 +83,7 @@ vi.mock('@video-editor/media', () => ({
         }
         return true
       }),
+      prepareVideoFrameSequence: vi.fn(),
       thumbnails: vi.fn(async () => []),
       decodeAudioSlice: vi.fn(async () => undefined),
       dispose: vi.fn(),
@@ -592,6 +594,42 @@ describe('createRenderer video segment preloading', () => {
 
       expect(mediaInputHandles[0]?.drawFrame).toHaveBeenCalled()
       expect(mediaInputHandles[0]?.decodeAudioSlice).not.toHaveBeenCalled()
+    }
+    finally {
+      restore()
+      renderer.destroy()
+    }
+  })
+
+  it('prepares the decoder with the export frame schedule', async () => {
+    mediaInputHandles.length = 0
+    const { restore } = stubVideoRenderGlobals()
+    const segment = createVideoSegment('video-1', 0, 1000)
+    const protocol = ref<IVideoProtocol>({
+      id: 'renderer-video-schedule',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [{
+        trackId: 'frames-track',
+        trackType: 'frames',
+        isMain: true,
+        children: [segment],
+      }],
+    })
+    const frameSequence = [0, 100, 200]
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as any,
+      manualRender: true,
+      warmUpResources: false,
+      videoFrameSchedule: new Map([[segment.id, frameSequence]]),
+    })
+
+    try {
+      await renderer.renderAt(0)
+      expect(mediaInputHandles[0]?.prepareVideoFrameSequence).toHaveBeenCalledWith(frameSequence)
     }
     finally {
       restore()

@@ -5,13 +5,13 @@ import type { RendererOptions } from './renderer-core'
 import type { ComposeAudioInput } from './timeline'
 import { checkEncoderSupport, createEncoder, openMediaInput } from '@video-editor/media'
 import { DEFAULT_RESOURCE_DIR, getResourceKey } from '@video-editor/protocol'
-import { normalizePlayRate, sourceSpanMs } from '@video-editor/shared'
+import { isVideoFramesSegment, normalizePlayRate, sourceSpanMs } from '@video-editor/shared'
 import { file as opfsFile } from 'opfs-tools'
 import { Application } from 'pixi.js'
 import { resolveProtocolAssetUrls } from './asset-resolution'
 import { reverseAudioBufferInPlace } from './helpers'
 import { createRenderer } from './renderer-core'
-import { createComposeAudioInputs, sampleFrames } from './timeline'
+import { createComposeAudioInputs, createEmptyEvaluatorState, createVisualRenderItems, evaluateTimelinePlan, sampleFrames } from './timeline'
 
 export interface ComposeClipOptions {
   appOptions?: Partial<ApplicationOptions>
@@ -76,6 +76,30 @@ function abortError(message: string): Error {
 const RESOURCE_TIMEOUT_MS = 12000
 const MIX_SAMPLE_RATE = 48000
 
+function createVideoFrameSchedule(protocol: IVideoProtocol, durationMs: number, fps: number) {
+  const schedule = new Map<string, number[]>()
+  const totalFrames = Math.max(1, Math.ceil(durationMs / 1000 * fps))
+  const frameDurationMs = 1000 / fps
+
+  for (let i = 0; i < totalFrames; i++) {
+    const atMs = Math.min(i * frameDurationMs, durationMs)
+    const visualPlan = evaluateTimelinePlan(protocol, {
+      atMs,
+      windowStartMs: atMs,
+      windowEndMs: atMs,
+      fps,
+    }, createEmptyEvaluatorState()).plan.visuals
+    for (const visual of createVisualRenderItems(protocol, visualPlan)) {
+      if (!isVideoFramesSegment(visual.segment) || visual.segment.reversed === true)
+        continue
+      const timestamps = schedule.get(visual.segment.id) ?? []
+      timestamps.push(visual.sourceTimeMs)
+      schedule.set(visual.segment.id, timestamps)
+    }
+  }
+
+  return schedule
+}
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = globalThis.setTimeout(() => {
@@ -314,6 +338,7 @@ export async function composeProtocol(
     clipOptions?.rendererOptions?.resolveAssetUrl,
   )
   throwIfAborted(opts.signal, 'resolving assets')
+  const videoFrameSchedule = new Map<string, number[]>()
 
   const app = new Application()
   await app.init({
@@ -345,6 +370,7 @@ export async function composeProtocol(
       autoPlay: false,
       freezeOnPause: false,
       manualRender: true,
+      videoFrameSchedule,
     })
 
     throwIfAborted(opts.signal, 'preparing the renderer')
@@ -352,6 +378,8 @@ export async function composeProtocol(
     const durationMs = renderer.duration.value
     if (!durationMs)
       throw new Error('composeProtocol: protocol has no duration')
+    for (const [segmentId, timestamps] of createVideoFrameSchedule(renderProtocol, durationMs, fps))
+      videoFrameSchedule.set(segmentId, timestamps)
 
     const audioBuffer = opts.audio === false
       ? undefined
@@ -376,7 +404,6 @@ export async function composeProtocol(
     let cancelled = false
     const totalFrames = Math.max(1, Math.ceil(durationMs / 1000 * fps))
     const frameDurationMs = 1000 / fps
-
     let settleCompletion: () => void = () => {}
     let failCompletion: (reason: Error) => void = () => {}
     const completion = new Promise<void>((resolve, reject) => {

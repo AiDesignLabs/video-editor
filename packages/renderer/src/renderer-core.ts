@@ -82,6 +82,8 @@ export interface RendererOptions {
   manualRender?: boolean
   videoSourceMode?: 'auto' | 'element'
   warmUpResources?: boolean
+  /** Ordered source timestamps used by offline export to keep video decoding sequential. */
+  videoFrameSchedule?: ReadonlyMap<string, readonly number[]>
   /** Resolve a stable asset id to its current URL before media is loaded. */
   resolveAssetUrl?: AssetUrlResolver
 }
@@ -818,7 +820,11 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
     if (allowDecoder) {
       let decoderLoadError: unknown
-      const spriteFromDecoder = await loadVideoSpriteViaDecoder(segment.url).catch((err) => {
+      const spriteFromDecoder = await loadVideoSpriteViaDecoder(
+        segment.url,
+        undefined,
+        opts.videoFrameSchedule?.get(segment.id),
+      ).catch((err) => {
         decoderLoadError = err
         if (!urlKey || !decoderErrorLoggedKeys.has(urlKey)) {
           if (urlKey)
@@ -1152,7 +1158,11 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     })
   }
 
-  async function loadVideoSpriteViaDecoder(url: string, reuse?: { sprite: Sprite, oldTexture?: Texture }): Promise<VideoEntry | undefined> {
+  async function loadVideoSpriteViaDecoder(
+    url: string,
+    reuse?: { sprite: Sprite, oldTexture?: Texture },
+    frameSequence?: readonly number[],
+  ): Promise<VideoEntry | undefined> {
     let file: ReturnType<typeof opfsFile> | undefined
     if (shouldUseResourceManager(url)) {
       await resourceManager.add(url).catch(() => {})
@@ -1170,6 +1180,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
           decoderUnsupportedKeys.add(urlKey)
         return undefined
       }
+      if (frameSequence?.length)
+        handle.prepareVideoFrameSequence(frameSequence)
 
       const { width, height } = await handle.meta()
       const canvas = document.createElement('canvas')

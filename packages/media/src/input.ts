@@ -48,6 +48,8 @@ export interface MediaInputHandle {
    * Returns false when no frame exists at that timestamp.
    */
   drawFrame: (ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, timeMs: number) => Promise<boolean>
+  /** Prepare an ordered frame sequence so export can reuse one decoder pipeline. */
+  prepareVideoFrameSequence: (timestampsMs: readonly number[]) => void
   /** Decode thumbnails of the video track resized to `width` pixels. */
   thumbnails: (width: number, options?: MediaThumbnailOptions) => Promise<MediaThumbnail[]>
   /**
@@ -66,6 +68,17 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
   })
 
   let videoSink: VideoSampleSink | undefined
+  let scheduledVideoSamples: ReturnType<VideoSampleSink['samplesAtTimestamps']> | undefined
+  let scheduledVideoTimestamps: readonly number[] = []
+  let scheduledVideoIndex = 0
+
+  function clearVideoFrameSequence() {
+    if (scheduledVideoSamples)
+      void scheduledVideoSamples.return(undefined)
+    scheduledVideoSamples = undefined
+    scheduledVideoTimestamps = []
+    scheduledVideoIndex = 0
+  }
 
   async function getVideoTrack() {
     return await input.getPrimaryVideoTrack()
@@ -109,8 +122,28 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
         if (!track)
           return false
         videoSink = new VideoSampleSink(track)
+        if (scheduledVideoTimestamps.length) {
+          scheduledVideoSamples = videoSink.samplesAtTimestamps(
+            scheduledVideoTimestamps.map(timestampMs => timestampMs / 1000),
+          )
+        }
       }
-      const sample = await videoSink.getSample(timeMs / 1000)
+      let sample
+      const scheduledTimestamp = scheduledVideoTimestamps[scheduledVideoIndex]
+      if (
+        scheduledVideoSamples
+        && scheduledTimestamp !== undefined
+        && Math.abs(scheduledTimestamp - timeMs) < 0.01
+      ) {
+        scheduledVideoIndex++
+        const result = await scheduledVideoSamples.next()
+        sample = result.done ? null : result.value
+      }
+      else {
+        if (scheduledVideoSamples)
+          clearVideoFrameSequence()
+        sample = await videoSink.getSample(timeMs / 1000)
+      }
       if (!sample)
         return false
       try {
@@ -120,6 +153,14 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
       finally {
         sample.close()
       }
+    },
+
+    prepareVideoFrameSequence(timestampsMs) {
+      clearVideoFrameSequence()
+      if (!timestampsMs.length)
+        return
+      scheduledVideoTimestamps = [...timestampsMs]
+      scheduledVideoSamples = videoSink?.samplesAtTimestamps(timestampsMs.map(timestampMs => timestampMs / 1000))
     },
 
     async thumbnails(width, options) {
@@ -181,6 +222,7 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
     },
 
     dispose() {
+      clearVideoFrameSequence()
       void input.dispose()
     },
   }

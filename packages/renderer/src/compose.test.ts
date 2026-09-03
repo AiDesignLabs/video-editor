@@ -43,6 +43,7 @@ vi.mock('@video-editor/media', () => ({
     canDecodeVideo: vi.fn(async () => false),
     canDecodeAudio: vi.fn(async () => false),
     drawFrame: vi.fn(async () => false),
+    prepareVideoFrameSequence: vi.fn(),
     thumbnails: vi.fn(async () => []),
     decodeAudioSlice: vi.fn(async () => undefined),
     dispose: vi.fn(),
@@ -134,7 +135,7 @@ describe('composeProtocol', () => {
       audio: false,
     })
 
-    await waitForEncoding()
+    await result.completion
 
     // 100ms at 30fps → ceil(3) = 3 frames.
     expect(encoderCalls.addFrame).toHaveLength(3)
@@ -198,6 +199,29 @@ describe('composeProtocol', () => {
     expect(rendererCalls.options).not.toHaveProperty('resolveAssetUrl')
     expect(source.tracks[0].children[0].url).toBe('https://old.example.com/image.png')
     expect(resolver).toHaveBeenCalledTimes(1)
+  })
+
+  it('provides ordered source timestamps for forward video export', async () => {
+    const source = createProtocol()
+    source.tracks.push({
+      trackId: 'frames-1',
+      trackType: 'frames',
+      isMain: true,
+      children: [{
+        id: 'video-1',
+        segmentType: 'frames',
+        type: 'video',
+        url: 'https://example.com/video.mp4',
+        startTime: 0,
+        endTime: 100,
+        fromTime: 500,
+      }],
+    })
+
+    await composeProtocol(source, { audio: false })
+
+    const schedule = rendererCalls.options?.videoFrameSchedule as ReadonlyMap<string, readonly number[]>
+    expect(schedule.get('video-1')).toEqual([500, 500 + 1000 / 30, 500 + 2000 / 30])
   })
 
   it('reports the mp4 container by default', async () => {
