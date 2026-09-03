@@ -18,6 +18,7 @@ export { checkEncoderSupport, createEncoder, createMp4Encoder } from './encoder'
 export type {
   MediaInputHandle,
   MediaMeta,
+  MediaMetaOptions,
   MediaThumbnail,
   MediaThumbnailOptions,
 } from './input'

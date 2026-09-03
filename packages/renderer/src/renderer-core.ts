@@ -1186,7 +1186,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       if (frameSequence?.length)
         handle.prepareVideoFrameSequence(frameSequence)
 
-      const { width, height } = await handle.meta()
+      const { width, height } = await handle.meta({ includeFrameRate: false })
       const canvas = document.createElement('canvas')
       canvas.width = width || 1
       canvas.height = height || 1

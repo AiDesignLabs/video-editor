@@ -37,12 +37,17 @@ export interface MediaThumbnailOptions {
   stepMs?: number
 }
 
+export interface MediaMetaOptions {
+  /** Set false when the caller only needs dimensions and duration. */
+  includeFrameRate?: boolean
+}
+
 /**
  * A handle over one opened media file. All timestamps on this interface are in
  * milliseconds; conversion to the underlying seconds-based API happens inside.
  */
 export interface MediaInputHandle {
-  meta: () => Promise<MediaMeta>
+  meta: (options?: MediaMetaOptions) => Promise<MediaMeta>
   canDecodeVideo: () => Promise<boolean>
   canDecodeAudio: () => Promise<boolean>
   /**
@@ -91,13 +96,13 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
   }
 
   return {
-    async meta() {
+    async meta(options = {}) {
       const [durationSec, videoTrack, audioTrack] = await Promise.all([
         input.computeDuration(),
         getVideoTrack(),
         getAudioTrack(),
       ])
-      const frameRate = videoTrack
+      const frameRate = videoTrack && options.includeFrameRate !== false
         ? await videoTrack.computeFrameRateMetrics({ targetPacketCount: 256 })
             .then(metrics => metrics.bestGuessFrameRate)
             .catch(() => 0)

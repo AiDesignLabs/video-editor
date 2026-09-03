@@ -442,8 +442,11 @@ export async function composeProtocol(
 
     void (async () => {
       try {
-        if (audioBuffer)
+        if (audioBuffer) {
+          const audioEncodeStartedAt = performance.now()
           await encoder.setAudio(audioBuffer)
+          timings.audioMs += performance.now() - audioEncodeStartedAt
+        }
         for (let i = 0; i < totalFrames; i++) {
           if (cancelled)
             return

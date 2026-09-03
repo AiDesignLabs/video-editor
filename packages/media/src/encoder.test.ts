@@ -6,6 +6,8 @@ const { state } = vi.hoisted(() => ({
     canEncodeVideo: true,
     canEncodeAudio: true,
     encodeVideoCalls: [] as Array<[string, Record<string, unknown>]>,
+    videoSampleCloseCalls: 0,
+    videoAddError: undefined as Error | undefined,
   },
 }))
 
@@ -55,12 +57,18 @@ vi.mock('mediabunny', () => {
 
   class VideoSampleSource {
     constructor(public options: Record<string, unknown>) {}
-    add = vi.fn(async () => {})
+    add = vi.fn(async () => {
+      if (state.videoAddError)
+        throw state.videoAddError
+    })
   }
 
   class VideoSample {
     constructor(public data: unknown, public init?: Record<string, unknown>) {}
-    close() {}
+    close() {
+      state.videoSampleCloseCalls++
+      ;(this.data as { close?: () => void }).close?.()
+    }
   }
 
   class AudioBufferSource {
@@ -126,8 +134,15 @@ function fakeCanvas() {
 
 // Node has no WebCodecs; `addFrame()` captures the canvas with `new VideoFrame()`.
 vi.stubGlobal('VideoFrame', class {
+  closed = false
   constructor(public source: unknown, public init: unknown) {}
-  close() {}
+  clone() {
+    return new VideoFrame(this.source as CanvasImageSource, this.init as VideoFrameInit)
+  }
+
+  close() {
+    this.closed = true
+  }
 })
 
 describe('createEncoder', () => {
@@ -184,6 +199,8 @@ describe('createEncoder', () => {
 describe('createMp4Encoder', () => {
   beforeEach(() => {
     state.outputs.length = 0
+    state.videoSampleCloseCalls = 0
+    state.videoAddError = undefined
   })
 
   it('still produces an mp4 encoder with the legacy signature', async () => {
@@ -194,6 +211,44 @@ describe('createMp4Encoder', () => {
     await handle.addFrame(0, 33)
     await handle.finalize()
     expect(handle.stream).toBeInstanceOf(ReadableStream)
+  })
+
+  it('closes the sample created for a captured canvas frame', async () => {
+    const handle = createMp4Encoder({ canvas: fakeCanvas() })
+
+    await handle.addFrame(0, 33)
+
+    expect(state.videoSampleCloseCalls).toBe(1)
+  })
+
+  it('closes an owned clone without closing a caller-provided frame', async () => {
+    const handle = createMp4Encoder({ canvas: fakeCanvas() })
+    const frame = new VideoFrame(fakeCanvas(), { timestamp: 0 })
+
+    await handle.addVideoFrame(frame, 0, 33)
+
+    expect(state.videoSampleCloseCalls).toBe(1)
+    expect((frame as VideoFrame & { closed: boolean }).closed).toBe(false)
+  })
+
+  it('closes the captured sample when video submission fails', async () => {
+    state.videoAddError = new Error('video submission failed')
+    const handle = createMp4Encoder({ canvas: fakeCanvas() })
+
+    await expect(handle.addFrame(0, 33)).rejects.toThrow('video submission failed')
+
+    expect(state.videoSampleCloseCalls).toBe(1)
+  })
+
+  it('closes the owned clone after failure without closing the caller frame', async () => {
+    state.videoAddError = new Error('video submission failed')
+    const handle = createMp4Encoder({ canvas: fakeCanvas() })
+    const frame = new VideoFrame(fakeCanvas(), { timestamp: 0 })
+
+    await expect(handle.addVideoFrame(frame, 0, 33)).rejects.toThrow('video submission failed')
+
+    expect(state.videoSampleCloseCalls).toBe(1)
+    expect((frame as VideoFrame & { closed: boolean }).closed).toBe(false)
   })
 })
 

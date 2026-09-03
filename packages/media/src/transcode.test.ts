@@ -39,7 +39,12 @@ vi.mock('mediabunny', () => {
 
     /** A cheap second reference, like the real one; tagged so tests can tell it from a canvas capture. */
     toVideoFrame() {
-      return { source: { passthrough: true, width: 1920, height: 1080 }, close() {} }
+      const source = { passthrough: true, width: 1920, height: 1080 }
+      return {
+        source,
+        clone: () => ({ source, close() {} }),
+        close() {},
+      }
     }
 
     close() {}
@@ -135,7 +140,14 @@ vi.mock('mediabunny', () => {
           draw: () => {
             state.draws += 1
           },
-          toVideoFrame: () => ({ source: { passthrough: true, width: 1920, height: 1080 }, close() {} }),
+          toVideoFrame: () => {
+            const source = { passthrough: true, width: 1920, height: 1080 }
+            return {
+              source,
+              clone: () => ({ source, close() {} }),
+              close() {},
+            }
+          },
           close: () => {
             state.closedSamples += 1
           },

@@ -115,6 +115,20 @@ describe('openMediaInput', () => {
     expect(computeFrameRateMetrics).toHaveBeenCalledWith({ targetPacketCount: 256 })
   })
 
+  it('skips the frame-rate probe when metadata is needed for rendering only', async () => {
+    const computeFrameRateMetrics = vi.fn(async () => ({ bestGuessFrameRate: 24 }))
+    state.videoTrack = {
+      computeFrameRateMetrics,
+      getDisplayWidth: async () => 1920,
+      getDisplayHeight: async () => 1080,
+    }
+
+    const meta = await openMediaInput(new Blob()).meta({ includeFrameRate: false })
+
+    expect(meta.fps).toBe(0)
+    expect(computeFrameRateMetrics).not.toHaveBeenCalled()
+  })
+
   it('converts drawFrame milliseconds to seconds and closes the sample', async () => {
     state.videoTrack = { canDecode: async () => true }
     const draw = vi.fn()

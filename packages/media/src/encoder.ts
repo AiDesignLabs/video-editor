@@ -296,19 +296,23 @@ export function createEncoder(options: EncoderOptions): EncoderHandle {
         timestamp: Math.round(timestampMs * 1000),
         duration: Math.round(durationMs * 1000),
       })
+      let sample: VideoSample | undefined
       const submitStartedAt = performance.now()
       try {
-        await started
-        await videoSource.add(new VideoSample(frame, {
+        sample = new VideoSample(frame, {
           timestamp: timestampMs / 1000,
           duration: durationMs / 1000,
-        }))
+        })
+        await started
+        await videoSource.add(sample)
       }
       finally {
-        // The source does not own the frame (it was built from a VideoFrame),
-        // and `add()` has already handed the pixels to the encoder by the time
-        // it resolves, so this is the right moment to release it.
-        frame.close()
+        // VideoSampleSource does not take ownership of caller-created samples.
+        // Closing the wrapper also releases its VideoFrame and unregisters its finalizer.
+        if (sample)
+          sample.close()
+        else
+          frame.close()
       }
       return {
         captureMs: submitStartedAt - captureStartedAt,
@@ -319,10 +323,21 @@ export function createEncoder(options: EncoderOptions): EncoderHandle {
     async addVideoFrame(frame, timestampMs, durationMs) {
       await started
       const submitStartedAt = performance.now()
-      await videoSource.add(new VideoSample(frame, {
-        timestamp: timestampMs / 1000,
-        duration: durationMs / 1000,
-      }))
+      const ownedFrame = frame.clone()
+      let sample: VideoSample | undefined
+      try {
+        sample = new VideoSample(ownedFrame, {
+          timestamp: timestampMs / 1000,
+          duration: durationMs / 1000,
+        })
+        await videoSource.add(sample)
+      }
+      finally {
+        if (sample)
+          sample.close()
+        else
+          ownedFrame.close()
+      }
       return { captureMs: 0, submitMs: performance.now() - submitStartedAt }
     },
 

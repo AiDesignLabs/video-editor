@@ -631,6 +631,7 @@ describe('createRenderer video segment preloading', () => {
     try {
       await renderer.renderAt(0)
       expect(mediaInputHandles[0]?.prepareVideoFrameSequence).toHaveBeenCalledWith(frameSequence)
+      expect(mediaInputHandles[0]?.meta).toHaveBeenCalledWith({ includeFrameRate: false })
       expect(audioManagerInstances[0]?.applyTimelinePlan).not.toHaveBeenCalled()
     }
     finally {
