@@ -49,6 +49,8 @@ export interface AssetMeta {
   /** Video / image only. */
   width?: number
   height?: number
+  /** Best estimate of the video's intended frames per second. */
+  fps?: number
 }
 
 export interface AssetLibrary {
@@ -158,6 +160,7 @@ function isAssetMeta(value: unknown): value is AssetMeta {
     && isAssetKind(meta.kind)
     && typeof meta.sizeBytes === 'number'
     && typeof meta.createdAt === 'number'
+    && (meta.fps === undefined || (Number.isFinite(meta.fps) && meta.fps > 0))
     && (meta.revision === undefined || (Number.isInteger(meta.revision) && meta.revision > 0))
     && (meta.derivation === undefined || (
       meta.derivation.kind === 'proxy'
@@ -244,7 +247,12 @@ async function probeImageSize(url: string, resourceDir: string) {
 async function probeMetadata(url: string, kind: AssetKind, resourceDir: string): Promise<Partial<AssetMeta>> {
   if (kind === 'video') {
     const meta = await getMp4Meta(url, { resourceDir })
-    return { durationMs: meta.durationMs, width: meta.width, height: meta.height }
+    return {
+      durationMs: meta.durationMs,
+      width: meta.width,
+      height: meta.height,
+      ...(meta.fps > 0 ? { fps: meta.fps } : {}),
+    }
   }
 
   if (kind === 'audio') {
@@ -268,8 +276,28 @@ export function createAssetLibrary(options: AssetLibraryOptions = {}): AssetLibr
   const resourceManager = createResourceManager({ dir: resourceDir })
 
   async function listAssets(): Promise<AssetMeta[]> {
-    const assets = await readManifest(manifestPath)
-    return [...assets].sort((a, b) => b.createdAt - a.createdAt)
+    return await enqueueManifestJob(manifestPath, async () => {
+      const assets = await readManifest(manifestPath)
+      let changed = false
+      for (let index = 0; index < assets.length; index++) {
+        const asset = assets[index]!
+        if (asset.derivation || asset.kind !== 'video' || asset.fps !== undefined)
+          continue
+        try {
+          const metadata = await probeMetadata(asset.url, asset.kind, resourceDir)
+          if (metadata.fps !== undefined) {
+            assets[index] = { ...asset, fps: metadata.fps }
+            changed = true
+          }
+        }
+        catch (error) {
+          console.error(`[assets] failed to backfill frame rate for "${asset.name}"`, error)
+        }
+      }
+      if (changed)
+        await writeManifest(manifestPath, assets)
+      return [...assets].sort((a, b) => b.createdAt - a.createdAt)
+    })
   }
 
   async function getAsset(id: string): Promise<AssetMeta | undefined> {

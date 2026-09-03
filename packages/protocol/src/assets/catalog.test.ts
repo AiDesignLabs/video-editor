@@ -14,6 +14,7 @@ const source: AssetMeta = {
   durationMs: 5000,
   width: 1920,
   height: 1080,
+  fps: 23.976,
 }
 
 const proxy: AssetMeta = {
@@ -66,6 +67,7 @@ describe('media asset catalog', () => {
       durationMs: source.durationMs,
       width: source.width,
       height: source.height,
+      fps: source.fps,
       proxyStatus: 'ready',
     }])
     expect(assets[0]).not.toHaveProperty('url')
@@ -84,6 +86,7 @@ describe('media asset catalog', () => {
       url: source.url,
       kind: 'video',
       durationMs: 5000,
+      fps: 23.976,
     })
     await expect(catalog.resolveForPreview(source.id)).resolves.toBe(proxy.url)
     await expect(catalog.resolveForPreview(source.id, source.url, { media: 'audio' })).resolves.toBe(proxy.url)

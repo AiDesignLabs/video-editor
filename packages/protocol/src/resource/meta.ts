@@ -9,6 +9,7 @@ export interface Mp4Meta {
   durationMs: number
   width: number
   height: number
+  fps: number
   audioSampleRate: number
   audioChanCount: number
 }
@@ -53,6 +54,7 @@ export function getMp4Meta(url: string, options?: { resourceDir?: string }): Pro
         durationMs: meta.durationMs,
         width: meta.width,
         height: meta.height,
+        fps: meta.fps,
         audioSampleRate: meta.audioSampleRate,
         audioChanCount: meta.audioChanCount,
       }
@@ -77,6 +79,7 @@ async function getMp4MetaViaVideoElement(url: string, file?: OTFile): Promise<Mp
       durationMs: 0,
       width: 0,
       height: 0,
+      fps: 0,
       audioSampleRate: 0,
       audioChanCount: 0,
     }
@@ -129,6 +132,7 @@ async function getMp4MetaViaVideoElement(url: string, file?: OTFile): Promise<Mp
       durationMs,
       width: video.videoWidth || 0,
       height: video.videoHeight || 0,
+      fps: 0,
       audioSampleRate: 0,
       audioChanCount: 0,
     }
@@ -139,6 +143,7 @@ async function getMp4MetaViaVideoElement(url: string, file?: OTFile): Promise<Mp
       durationMs: 0,
       width: 0,
       height: 0,
+      fps: 0,
       audioSampleRate: 0,
       audioChanCount: 0,
     }

@@ -69,7 +69,8 @@ function formatDuration(ms: number | undefined) {
 
 function describe(asset: MediaAsset) {
   const duration = formatDuration(asset.durationMs)
-  return duration ? `${duration} · ${formatBytes(asset.sizeBytes)}` : formatBytes(asset.sizeBytes)
+  const details = [duration, asset.fps ? `${asset.fps} FPS` : null, formatBytes(asset.sizeBytes)]
+  return details.filter(Boolean).join(' · ')
 }
 
 /** Build a preview object url for one asset; failures simply fall back to the kind glyph. */

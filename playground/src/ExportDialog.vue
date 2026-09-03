@@ -77,10 +77,11 @@ watch(() => props.open, (open) => {
 
 function confirm() {
   const bitrate = form.videoBitrateMbps
+  const fps = Number(form.fps)
   const settings: ExportSettings = {
     width: resolution.value.width,
     height: resolution.value.height,
-    fps: Math.max(1, Math.round(form.fps) || props.sourceFps),
+    fps: Number.isFinite(fps) && fps >= 1 ? fps : props.sourceFps,
     format: form.format,
     videoCodec: form.videoCodec,
     videoBitrateMbps: typeof bitrate === 'number' && bitrate > 0 ? bitrate : null,

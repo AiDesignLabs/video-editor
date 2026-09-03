@@ -15,6 +15,8 @@ export interface MediaMeta {
   width: number
   /** Display height in pixels (rotation-aware). Zero when the file has no video track. */
   height: number
+  /** Best estimate of the primary video track's intended frames per second. Zero when unavailable. */
+  fps: number
   /** Audio sample rate in Hz. Zero when the file has no audio track. */
   audioSampleRate: number
   /** Audio channel count. Zero when the file has no audio track. */
@@ -95,10 +97,18 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
         getVideoTrack(),
         getAudioTrack(),
       ])
+      const frameRate = videoTrack
+        ? await videoTrack.computeFrameRateMetrics({ targetPacketCount: 256 })
+            .then(metrics => metrics.bestGuessFrameRate)
+            .catch(() => 0)
+        : 0
       return {
         durationMs: Math.max(0, Math.round(durationSec * 1000)),
         width: videoTrack ? await videoTrack.getDisplayWidth() : 0,
         height: videoTrack ? await videoTrack.getDisplayHeight() : 0,
+        fps: Number.isFinite(frameRate) && frameRate > 0
+          ? Math.round(frameRate * 1000) / 1000
+          : 0,
         audioSampleRate: audioTrack ? await audioTrack.getSampleRate() : 0,
         audioChanCount: audioTrack ? await audioTrack.getNumberOfChannels() : 0,
         hasVideo: !!videoTrack,

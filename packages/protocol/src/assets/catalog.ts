@@ -20,6 +20,7 @@ export interface MediaAsset {
   durationMs?: number
   width?: number
   height?: number
+  fps?: number
   proxyStatus: MediaAssetProxyStatus
 }
 
@@ -32,6 +33,7 @@ export interface SegmentAssetBinding {
   durationMs?: number
   width?: number
   height?: number
+  fps?: number
 }
 
 export interface MediaAssetCatalogOptions {
@@ -103,6 +105,7 @@ function toMediaAsset(asset: AssetMeta, assets: readonly AssetMeta[]): MediaAsse
     durationMs: asset.durationMs,
     width: asset.width,
     height: asset.height,
+    fps: asset.fps,
     proxyStatus: getProxyStatus(asset, assets),
   }
 }
@@ -166,6 +169,7 @@ export function createMediaAssetCatalogFromLibrary(
       durationMs: asset.durationMs,
       width: asset.width,
       height: asset.height,
+      fps: asset.fps,
     }
   }
 

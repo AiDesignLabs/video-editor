@@ -946,7 +946,16 @@ function handleAssetAdd(asset: SegmentAssetBinding) {
     volume: 1,
     extra: { label },
   }
-  const result = commands.addSegment(segment, framesTrackId)
+  const sourceFps = typeof asset.fps === 'number' && Number.isFinite(asset.fps) && asset.fps >= 1
+    ? asset.fps
+    : undefined
+  const shouldAdoptSourceFps = sourceFps !== undefined
+    && !mainFramesTrack.value?.children.some(child => child.segmentType === 'frames' && child.type === 'video')
+  const result = commands.transaction(() => {
+    if (shouldAdoptSourceFps)
+      commands.setFps(sourceFps)
+    return commands.addSegment(segment, framesTrackId)
+  }, { label: 'add-video-asset', data: { assetId: asset.assetId, sourceFps } }).value
   commands.setSelectedSegment(result.id)
 }
 
@@ -994,6 +1003,19 @@ async function runThumbnailDemo() {
 }
 
 const exportDialogOpen = ref(false)
+const exportSuggestedFps = ref(protocol.value.fps)
+
+async function openExportDialog() {
+  exportSuggestedFps.value = protocol.value.fps
+  const mainVideos = mainFramesTrack.value?.children
+    .filter((segment): segment is IVideoFramesSegment => segment.segmentType === 'frames' && segment.type === 'video') ?? []
+  if (mainVideos.length === 1 && mainVideos[0]!.assetId) {
+    const asset = await assetCatalog.get(mainVideos[0]!.assetId)
+    if (asset?.fps && asset.fps >= 1 && asset.fps < exportSuggestedFps.value)
+      exportSuggestedFps.value = asset.fps
+  }
+  exportDialogOpen.value = true
+}
 
 /** `20260828-153012`, stable and file-system friendly. */
 function exportTimestamp() {
@@ -1416,7 +1438,7 @@ function handleAddSegmentClick(data: {
         <button class="tool" :class="{ 'tool--active': drawerOpen && drawerTab === 'demo' }" @click="openDrawer('demo')">
           演示
         </button>
-        <button class="export" :disabled="isExporting" @click="exportDialogOpen = true">
+        <button class="export" :disabled="isExporting" @click="openExportDialog">
           <span v-if="!isExporting" class="export__icon i-creatly-download" aria-hidden="true" />
           {{ isExporting ? `导出中 ${Math.round(exportProgress * 100)}%` : '导出视频' }}
         </button>
@@ -1504,7 +1526,7 @@ function handleAddSegmentClick(data: {
       :open="exportDialogOpen"
       :source-width="protocol.width"
       :source-height="protocol.height"
-      :source-fps="protocol.fps"
+      :source-fps="exportSuggestedFps"
       @close="exportDialogOpen = false"
       @confirm="runCompose"
     />

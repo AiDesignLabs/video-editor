@@ -101,6 +101,20 @@ describe('openMediaInput', () => {
     state.audioSamples.length = 0
   })
 
+  it('reports a rounded frame-rate estimate from a bounded packet probe', async () => {
+    const computeFrameRateMetrics = vi.fn(async () => ({ bestGuessFrameRate: 24000 / 1001 }))
+    state.videoTrack = {
+      computeFrameRateMetrics,
+      getDisplayWidth: async () => 1920,
+      getDisplayHeight: async () => 1080,
+    }
+
+    const meta = await openMediaInput(new Blob()).meta()
+
+    expect(meta.fps).toBe(23.976)
+    expect(computeFrameRateMetrics).toHaveBeenCalledWith({ targetPacketCount: 256 })
+  })
+
   it('converts drawFrame milliseconds to seconds and closes the sample', async () => {
     state.videoTrack = { canDecode: async () => true }
     const draw = vi.fn()
