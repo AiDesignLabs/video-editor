@@ -602,6 +602,7 @@ describe('createRenderer video segment preloading', () => {
   })
 
   it('prepares the decoder with the export frame schedule', async () => {
+    audioManagerInstances.length = 0
     mediaInputHandles.length = 0
     const { restore } = stubVideoRenderGlobals()
     const segment = createVideoSegment('video-1', 0, 1000)
@@ -630,6 +631,7 @@ describe('createRenderer video segment preloading', () => {
     try {
       await renderer.renderAt(0)
       expect(mediaInputHandles[0]?.prepareVideoFrameSequence).toHaveBeenCalledWith(frameSequence)
+      expect(audioManagerInstances[0]?.applyTimelinePlan).not.toHaveBeenCalled()
     }
     finally {
       restore()

@@ -1230,6 +1230,10 @@ function formatRealtimeFactor(factor: number) {
   return `${factor < 10 ? factor.toFixed(2) : factor.toFixed(1)}× 实时`
 }
 
+function formatPhaseTime(ms: number) {
+  return `${(Math.max(0, ms) / 1000).toFixed(2)}s`
+}
+
 // --- Transition editor -----------------------------------------------------
 
 const DEFAULT_TRANSITION_DURATION_MS = 500
@@ -1618,6 +1622,44 @@ function handleAddSegmentClick(data: {
               <span class="drawer__hint mono">{{ composeState.fileName }}</span>
               <a class="tool" :href="composeState.blobUrl" :download="composeState.fileName">下载文件</a>
             </div>
+            <dl class="compose-performance">
+              <div>
+                <dt>准备</dt>
+                <dd class="mono">
+                  {{ formatPhaseTime(exportResult.performance.setupMs) }}
+                </dd>
+              </div>
+              <div>
+                <dt>音频</dt>
+                <dd class="mono">
+                  {{ formatPhaseTime(exportResult.performance.audioMs) }}
+                </dd>
+              </div>
+              <div>
+                <dt>渲染 / 解码</dt>
+                <dd class="mono">
+                  {{ formatPhaseTime(exportResult.performance.renderMs) }}
+                </dd>
+              </div>
+              <div>
+                <dt>帧复制</dt>
+                <dd class="mono">
+                  {{ formatPhaseTime(exportResult.performance.captureMs) }}
+                </dd>
+              </div>
+              <div>
+                <dt>编码等待</dt>
+                <dd class="mono">
+                  {{ formatPhaseTime(exportResult.performance.encodeWaitMs) }}
+                </dd>
+              </div>
+              <div>
+                <dt>收尾</dt>
+                <dd class="mono">
+                  {{ formatPhaseTime(exportResult.performance.finalizeMs) }}
+                </dd>
+              </div>
+            </dl>
           </template>
           <p v-else class="drawer__empty">
             点击右上角「导出视频」，在弹窗中选择分辨率、帧率、格式与编码后开始合成，结果会在这里预览与下载。

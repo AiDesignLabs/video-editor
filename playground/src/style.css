@@ -570,6 +570,37 @@ body {
   transition: width 0.2s ease;
 }
 
+.compose-performance {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--line);
+}
+
+.compose-performance > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--shell-deep);
+}
+
+.compose-performance dt {
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.compose-performance dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+}
+
 .compose-video {
   width: 100%;
   max-height: 22vh;

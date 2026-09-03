@@ -154,6 +154,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const decoderUnsupportedKeys = new Set<string>()
   const decoderErrorLoggedKeys = new Set<string>()
   const videoSourceMode = opts.videoSourceMode ?? 'auto'
+  const offlineComposition = opts.videoFrameSchedule !== undefined
   type VideoEntry = (
     | {
       kind: 'decoder'
@@ -226,6 +227,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   function resetSchedulerState() {
+    if (offlineComposition)
+      return
     previewRunner.reset()
     audioManager.resetTimelineState({ stop: true })
   }
@@ -235,7 +238,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   function syncAudioWithScheduler(protocol: IVideoProtocol, at: number) {
-    if (isPlaying.value)
+    if (offlineComposition || isPlaying.value)
       return
 
     const plan = previewRunner.evaluate(protocol, at)

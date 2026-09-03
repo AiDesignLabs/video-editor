@@ -61,6 +61,7 @@ vi.mock('@video-editor/media', () => ({
       addFrame: vi.fn(async (timestampMs: number, durationMs: number) => {
         encoderCalls.addFrame.push([timestampMs, durationMs])
         await encoderCalls.addFrameImpl?.(timestampMs, durationMs)
+        return { captureMs: 0, submitMs: 0 }
       }),
       setAudio: encoderCalls.setAudio,
       finalize: encoderCalls.finalize,
@@ -146,6 +147,7 @@ describe('composeProtocol', () => {
     expect(progress.at(-1)).toBe(1)
     expect([...progress].sort((a, b) => a - b)).toEqual(progress)
     expect(result.durationMs).toBe(100)
+    expect(result.performance.totalMs).toBeGreaterThanOrEqual(0)
     expect(rendererCalls.destroyed).toBe(true)
   })
 

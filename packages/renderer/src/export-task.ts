@@ -1,6 +1,6 @@
 import type { IVideoProtocol } from '@video-editor/shared'
 import type { Ref } from '@vue/reactivity'
-import type { ComposeProtocolOptions } from './compose'
+import type { ComposePerformance, ComposeProtocolOptions } from './compose'
 import { readonly, shallowRef } from '@vue/reactivity'
 import { composeProtocol } from './compose'
 
@@ -25,6 +25,8 @@ export interface ExportTaskResult {
   elapsedMs: number
   /** Exported media seconds per wall-clock second. `1` means realtime speed. */
   realtimeFactor: number
+  /** Detailed compose phase timing, finalized with the result. */
+  performance: ComposePerformance
 }
 
 export interface ExportTaskState {
@@ -172,6 +174,7 @@ export function createExportTask(
           width: composed.width,
           height: composed.height,
           ...finalTiming,
+          performance: { ...composed.performance },
         },
       })
     }

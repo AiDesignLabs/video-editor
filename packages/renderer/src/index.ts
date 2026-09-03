@@ -3,6 +3,7 @@ export type { AssetResolutionContext, AssetUrlResolver } from './asset-resolutio
 export { composeProtocol } from './compose'
 export type {
   ComposeClipOptions,
+  ComposePerformance,
   ComposeProtocolOptions,
   ComposeProtocolResult,
 } from './compose'

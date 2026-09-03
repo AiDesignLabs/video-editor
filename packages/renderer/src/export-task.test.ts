@@ -47,6 +47,15 @@ vi.mock('./compose', () => ({
       durationMs: 2000,
       mimeType: 'video/mp4',
       fileExtension: '.mp4',
+      performance: {
+        setupMs: 10,
+        audioMs: 20,
+        renderMs: 30,
+        captureMs: 40,
+        encodeWaitMs: 50,
+        finalizeMs: 60,
+        totalMs: 210,
+      },
       destroy: composeCalls.destroy,
     }
   },
@@ -102,6 +111,7 @@ describe('createExportTask', () => {
     expect(task.state.value.result?.durationMs).toBe(2000)
     expect(task.state.value.result?.elapsedMs).toBeGreaterThanOrEqual(0)
     expect(task.state.value.result?.realtimeFactor).toBeGreaterThanOrEqual(0)
+    expect(task.state.value.result?.performance.renderMs).toBe(30)
   })
 
   it('exports the protocol as it was when the task was created', async () => {

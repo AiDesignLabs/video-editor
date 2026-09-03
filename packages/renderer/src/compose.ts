@@ -54,6 +54,8 @@ export interface ComposeProtocolResult {
   mimeType: string
   /** Container file extension including the dot, e.g. `.mp4`. */
   fileExtension: string
+  /** Mutable counters finalized when `completion` settles. */
+  performance: ComposePerformance
   /**
    * Settles when encoding ends. Resolves only once the video, the requested
    * audio and every frame have been written; rejects with the encoding error
@@ -65,6 +67,16 @@ export interface ComposeProtocolResult {
   completion: Promise<void>
   /** Stop the export, release resources and reject `completion` with an `AbortError`. */
   destroy: () => void
+}
+
+export interface ComposePerformance {
+  setupMs: number
+  audioMs: number
+  renderMs: number
+  captureMs: number
+  encodeWaitMs: number
+  finalizeMs: number
+  totalMs: number
 }
 
 function abortError(message: string): Error {
@@ -310,6 +322,16 @@ export async function composeProtocol(
   protocol: IVideoProtocol,
   opts: ComposeProtocolOptions = {},
 ): Promise<ComposeProtocolResult> {
+  const composeStartedAt = performance.now()
+  const timings: ComposePerformance = {
+    setupMs: 0,
+    audioMs: 0,
+    renderMs: 0,
+    captureMs: 0,
+    encodeWaitMs: 0,
+    finalizeMs: 0,
+    totalMs: 0,
+  }
   const { onProgress, clipOptions } = opts
 
   const width = opts.width ?? protocol.width
@@ -380,7 +402,9 @@ export async function composeProtocol(
       throw new Error('composeProtocol: protocol has no duration')
     for (const [segmentId, timestamps] of createVideoFrameSchedule(renderProtocol, durationMs, fps))
       videoFrameSchedule.set(segmentId, timestamps)
+    timings.setupMs = performance.now() - composeStartedAt
 
+    const audioStartedAt = performance.now()
     const audioBuffer = opts.audio === false
       ? undefined
       : await renderAudioMix(
@@ -389,6 +413,7 @@ export async function composeProtocol(
           clipOptions?.rendererOptions?.resourceDir ?? DEFAULT_RESOURCE_DIR,
           opts.signal,
         )
+    timings.audioMs = performance.now() - audioStartedAt
 
     throwIfAborted(opts.signal, 'preparing the encoder')
 
@@ -423,11 +448,18 @@ export async function composeProtocol(
           if (cancelled)
             return
           const timestampMs = i * frameDurationMs
+          const renderStartedAt = performance.now()
           await renderer!.renderAt(Math.min(timestampMs, durationMs))
-          await encoder.addFrame(timestampMs, frameDurationMs)
+          timings.renderMs += performance.now() - renderStartedAt
+          const frameTiming = await encoder.addFrame(timestampMs, frameDurationMs)
+          timings.captureMs += frameTiming.captureMs
+          timings.encodeWaitMs += frameTiming.submitMs
           onProgress?.(Math.min(0.95, ((i + 1) / totalFrames) * 0.95))
         }
+        const finalizeStartedAt = performance.now()
         await encoder.finalize()
+        timings.finalizeMs = performance.now() - finalizeStartedAt
+        timings.totalMs = performance.now() - composeStartedAt
         onProgress?.(1)
         settleCompletion()
       }
@@ -438,6 +470,7 @@ export async function composeProtocol(
           // the stream must not end up with a truncated file it believes is
           // complete.
           await encoder.abort(error).catch(() => {})
+          timings.totalMs = performance.now() - composeStartedAt
           failCompletion(error)
         }
       }
@@ -470,6 +503,7 @@ export async function composeProtocol(
       durationMs,
       mimeType: encoder.mimeType,
       fileExtension: encoder.fileExtension,
+      performance: timings,
       completion,
       destroy,
     }
