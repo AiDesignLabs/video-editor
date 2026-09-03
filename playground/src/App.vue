@@ -227,6 +227,8 @@ const composeState = reactive({
 })
 const exportStatus = computed(() => exportTask.value?.state.value.status ?? 'pending')
 const exportProgress = computed(() => exportTask.value?.state.value.progress ?? 0)
+const exportElapsedMs = computed(() => exportTask.value?.state.value.elapsedMs ?? 0)
+const exportRealtimeFactor = computed(() => exportTask.value?.state.value.realtimeFactor ?? 0)
 const exportError = computed(() => exportTask.value?.state.value.error?.message ?? null)
 const exportResult = computed(() => exportTask.value?.state.value.result ?? null)
 const isExporting = computed(() => exportStatus.value === 'running')
@@ -1214,6 +1216,20 @@ function formatBytes(size: number) {
   return `${(size / 1024 ** power).toFixed(power === 0 ? 0 : 1)} ${units[power]}`
 }
 
+function formatElapsedTime(ms: number) {
+  const totalSeconds = Math.max(0, ms) / 1000
+  if (totalSeconds < 60)
+    return `${totalSeconds.toFixed(1)} 秒`
+  const minutes = Math.floor(totalSeconds / 60)
+  return `${minutes} 分 ${(totalSeconds % 60).toFixed(1)} 秒`
+}
+
+function formatRealtimeFactor(factor: number) {
+  if (!Number.isFinite(factor) || factor <= 0)
+    return '—'
+  return `${factor < 10 ? factor.toFixed(2) : factor.toFixed(1)}× 实时`
+}
+
 // --- Transition editor -----------------------------------------------------
 
 const DEFAULT_TRANSITION_DURATION_MS = 500
@@ -1559,6 +1575,10 @@ function handleAddSegmentClick(data: {
               <div class="compose-progress__fill" :style="{ width: `${exportProgress * 100}%` }" />
             </div>
             <span class="mono">{{ Math.round(exportProgress * 100) }}%</span>
+            <div class="compose-progress__metrics">
+              <span>用时 <strong class="mono">{{ formatElapsedTime(exportElapsedMs) }}</strong></span>
+              <span>速度 <strong class="mono">{{ formatRealtimeFactor(exportRealtimeFactor) }}</strong></span>
+            </div>
             <button class="tool" @click="cancelExport">
               取消导出
             </button>
@@ -1568,6 +1588,8 @@ function handleAddSegmentClick(data: {
               合成失败：{{ exportError }}
             </p>
             <div class="drawer__meta">
+              <span class="mono">用时 {{ formatElapsedTime(exportElapsedMs) }}</span>
+              <span class="mono">速度 {{ formatRealtimeFactor(exportRealtimeFactor) }}</span>
               <span class="drawer__hint">导出参数已保留，可直接重试。</span>
               <button class="tool" @click="retryExport">
                 重试导出
@@ -1579,6 +1601,8 @@ function handleAddSegmentClick(data: {
               导出已取消。
             </p>
             <div class="drawer__meta">
+              <span class="mono">用时 {{ formatElapsedTime(exportElapsedMs) }}</span>
+              <span class="mono">速度 {{ formatRealtimeFactor(exportRealtimeFactor) }}</span>
               <button class="tool" @click="retryExport">
                 重新导出
               </button>
@@ -1589,6 +1613,8 @@ function handleAddSegmentClick(data: {
             <div class="drawer__meta">
               <span class="mono">{{ formatTimecode(exportResult.durationMs) }}</span>
               <span class="mono">{{ formatBytes(exportResult.byteLength) }}</span>
+              <span class="mono">用时 {{ formatElapsedTime(exportResult.elapsedMs) }}</span>
+              <span class="mono">速度 {{ formatRealtimeFactor(exportResult.realtimeFactor) }}</span>
               <span class="drawer__hint mono">{{ composeState.fileName }}</span>
               <a class="tool" :href="composeState.blobUrl" :download="composeState.fileName">下载文件</a>
             </div>

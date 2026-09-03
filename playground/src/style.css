@@ -542,6 +542,20 @@ body {
   gap: 10px;
 }
 
+.compose-progress__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  width: 100%;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.compose-progress__metrics strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .compose-progress__bar {
   flex: 1;
   height: 6px;

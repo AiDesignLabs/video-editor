@@ -21,12 +21,20 @@ export interface ExportTaskResult {
   durationMs: number
   width: number
   height: number
+  /** Total wall-clock time spent exporting. */
+  elapsedMs: number
+  /** Exported media seconds per wall-clock second. `1` means realtime speed. */
+  realtimeFactor: number
 }
 
 export interface ExportTaskState {
   status: ExportTaskStatus
   /** 0…1. Stays at its last value when the task fails or is cancelled. */
   progress: number
+  /** Wall-clock time spent on the current attempt. */
+  elapsedMs: number
+  /** Processed media duration divided by elapsed time. */
+  realtimeFactor: number
   /** Present once the task succeeds. */
   result?: ExportTaskResult
   /** Present once the task fails. Cancelling is not a failure and sets no error. */
@@ -90,6 +98,8 @@ export function createExportTask(
   const state = shallowRef<ExportTaskState>({
     status: 'pending',
     progress: 0,
+    elapsedMs: 0,
+    realtimeFactor: 0,
     canRetry: false,
   })
 
@@ -99,10 +109,33 @@ export function createExportTask(
 
   let running: Promise<ExportTaskState> | undefined
   let controller: AbortController | undefined
+  const durationMs = snapshot.tracks.reduce((maximum, track) => {
+    return track.children.reduce((trackMaximum, segment) => Math.max(trackMaximum, segment.endTime), maximum)
+  }, 0)
 
   async function run(): Promise<ExportTaskState> {
     controller = new AbortController()
-    patch({ status: 'running', progress: 0, result: undefined, error: undefined, canRetry: false })
+    const startedAt = performance.now()
+    const timing = (progress = state.value.progress) => {
+      const elapsedMs = Math.max(0, performance.now() - startedAt)
+      return {
+        elapsedMs,
+        realtimeFactor: elapsedMs > 0 ? durationMs * progress / elapsedMs : 0,
+      }
+    }
+    patch({
+      status: 'running',
+      progress: 0,
+      elapsedMs: 0,
+      realtimeFactor: 0,
+      result: undefined,
+      error: undefined,
+      canRetry: false,
+    })
+    const timingTimer = globalThis.setInterval(() => {
+      if (state.value.status === 'running')
+        patch(timing())
+    }, 200)
 
     let composed: Awaited<ReturnType<typeof composeProtocol>> | undefined
     try {
@@ -112,7 +145,7 @@ export function createExportTask(
         onProgress: (progress) => {
           // A cancelled task must not keep animating a progress bar.
           if (state.value.status === 'running')
-            patch({ progress })
+            patch({ progress, ...timing(progress) })
         },
       })
 
@@ -124,9 +157,11 @@ export function createExportTask(
         composed.completion,
       ])
 
+      const finalTiming = timing(1)
       patch({
         status: 'success',
         progress: 1,
+        ...finalTiming,
         canRetry: false,
         result: {
           blob: written.blob,
@@ -136,6 +171,7 @@ export function createExportTask(
           durationMs: composed.durationMs,
           width: composed.width,
           height: composed.height,
+          ...finalTiming,
         },
       })
     }
@@ -143,11 +179,12 @@ export function createExportTask(
       const error = toError(err)
       composed?.destroy()
       if (isAbort(error) || controller.signal.aborted)
-        patch({ status: 'cancelled', canRetry: true })
+        patch({ status: 'cancelled', ...timing(), canRetry: true })
       else
-        patch({ status: 'failed', error, canRetry: true })
+        patch({ status: 'failed', ...timing(), error, canRetry: true })
     }
     finally {
+      globalThis.clearInterval(timingTimer)
       running = undefined
     }
 

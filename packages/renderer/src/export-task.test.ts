@@ -89,6 +89,8 @@ describe('createExportTask', () => {
 
     expect(task.state.value.status).toBe('pending')
     expect(task.state.value.progress).toBe(0)
+    expect(task.state.value.elapsedMs).toBe(0)
+    expect(task.state.value.realtimeFactor).toBe(0)
 
     await task.start()
 
@@ -98,6 +100,8 @@ describe('createExportTask', () => {
     expect(task.state.value.result?.byteLength).toBe(4)
     expect(task.state.value.result?.mimeType).toBe('video/mp4')
     expect(task.state.value.result?.durationMs).toBe(2000)
+    expect(task.state.value.result?.elapsedMs).toBeGreaterThanOrEqual(0)
+    expect(task.state.value.result?.realtimeFactor).toBeGreaterThanOrEqual(0)
   })
 
   it('exports the protocol as it was when the task was created', async () => {
@@ -208,6 +212,41 @@ describe('createExportTask', () => {
     composeCalls.emitProgress?.(0.5)
     // The task finished; a late progress callback must not walk it backwards.
     expect(task.state.value.progress).toBe(1)
+  })
+
+  it('reports elapsed time and realtime export speed while running and after success', async () => {
+    let now = 100
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    composeCalls.release = () => {}
+    const protocol = createProtocol()
+    protocol.tracks.push({
+      trackId: 'text',
+      trackType: 'text',
+      children: [{
+        id: 'title',
+        segmentType: 'text',
+        startTime: 0,
+        endTime: 2000,
+        texts: [],
+      }],
+    })
+    const task = createExportTask(protocol, { audio: false })
+
+    const pending = task.start()
+    await Promise.resolve()
+    now = 1100
+    composeCalls.emitProgress?.(0.5)
+
+    expect(task.state.value.elapsedMs).toBe(1000)
+    expect(task.state.value.realtimeFactor).toBe(1)
+
+    composeCalls.release?.()
+    now = 2100
+    await pending
+
+    expect(task.state.value.result?.elapsedMs).toBe(2000)
+    expect(task.state.value.result?.realtimeFactor).toBe(1)
+    nowSpy.mockRestore()
   })
 
   it('streams to a sink instead of collecting a blob', async () => {
