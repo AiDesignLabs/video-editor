@@ -9,9 +9,11 @@ export default defineConfig({
     dts({
       tsconfigPath: './tsconfig.build.json',
       include: ['src', '2d'],
-      outDir: 'dist',
+      outDirs: 'dist',
       insertTypesEntry: true,
-      rollupTypes: true,
+      bundleTypes: {
+        invokeOptions: { typescriptCompilerFolder: undefined },
+      },
       copyDtsFiles: false,
     }),
   ],

@@ -1,9 +1,7 @@
 catalogMode: prefer
-
 cleanupUnusedCatalogs: true
-shellEmulator: true
-
 trustPolicy: off
+shellEmulator: true
 
 packages:
   - packages/*
@@ -11,43 +9,46 @@ packages:
   - playground
   - '!**/test/**'
 
-catalog:
-  '@antfu/eslint-config': ^6.7.3
-  '@creatly/figma-icons': 0.0.3-beta.1
-  '@iconify-json/ri': ^1.2.6
-  '@types/node': ^25.0.3
-  '@unocss/eslint-plugin': ^66.5.10
-  '@unocss/reset': ^66.5.10
-  '@vitejs/plugin-vue': ^6.0.3
-  '@vitest/browser': ^4.0.16
-  '@vitest/browser-playwright': ^4.0.16
-  '@vue/reactivity': ^3.5.26
-  '@vueuse/core': ^14.1.0
-  '@wendraw/starry': 0.0.4-beta.1
-  ajv: ^8.17.1
-  ajv-errors: ^3.0.0
-  ajv-formats: ^3.0.1
-  ajv-keywords: ^5.1.0
-  bumpp: ^10.3.2
-  chalk: ^5.6.2
-  eslint: ^9.39.2
-  eslint-plugin-format: ^1.0.2
-  immer: ^11.1.0
-  lint-staged: ^16.2.7
-  mediabunny: ^1.55.3
-  opfs-tools: ^0.7.4
-  pixi.js: ^8.14.3
-  playwright: ^1.57.0
-  simple-git-hooks: ^2.13.1
-  typescript: ^5.9.3
-  unocss: ^66.5.10
-  unplugin-auto-import: ^20.3.0
-  vite: ^7.3.0
-  vite-plugin-dts: ^4.5.4
-  vitest: ^4.0.16
-  vue: ^3.5.26
-  vue-tsc: ^3.2.1
 allowBuilds:
   esbuild: true
   msw: true
   simple-git-hooks: true
+
+catalog:
+  '@antfu/eslint-config': ^9.5.1
+  '@creatly/figma-icons': 0.0.3-beta.1
+  '@iconify-json/ri': ^1.2.10
+  '@microsoft/api-extractor': ^7.59.0
+  '@types/node': ^26.4.1
+  '@typescript/native': npm:typescript@^7.0.2
+  '@unocss/eslint-plugin': ^66.9.2
+  '@unocss/reset': ^66.9.2
+  '@vitejs/plugin-vue': ^6.0.8
+  '@vitest/browser': ^4.1.11
+  '@vitest/browser-playwright': ^4.1.11
+  '@vue/reactivity': ^3.5.42
+  '@vueuse/core': ^14.4.0
+  '@wendraw/starry': 0.0.4-beta.1
+  ajv: ^8.20.0
+  ajv-errors: ^3.0.0
+  ajv-formats: ^3.0.1
+  ajv-keywords: ^5.1.0
+  bumpp: ^12.2.3
+  chalk: ^6.0.0
+  eslint: ^10.9.1
+  eslint-plugin-format: ^2.0.1
+  immer: ^11.1.18
+  lint-staged: ^17.4.1
+  mediabunny: ^1.55.5
+  opfs-tools: ^0.7.4
+  pixi.js: ^8.20.1
+  playwright: ^1.62.1
+  simple-git-hooks: ^2.14.0
+  typescript: npm:@typescript/typescript6@^6.0.2
+  unocss: ^66.9.2
+  unplugin-auto-import: ^21.1.0
+  vite: ^8.2.2
+  vite-plugin-dts: ^5.1.0
+  vitest: ^4.1.11
+  vue: ^3.5.42
+  vue-tsc: ^3.3.11

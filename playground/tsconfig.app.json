@@ -6,7 +6,7 @@
     "rootDir": "..",
     "paths": {
       "@video-editor/*": [
-        "packages/*/src/index.ts"
+        "../packages/*/src/index.ts"
       ]
     },
     "typeRoots": [

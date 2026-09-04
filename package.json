@@ -2,9 +2,9 @@
   "name": "video-editor-monorepo",
   "version": "1.0.0-beta.2",
   "private": true,
-  "packageManager": "pnpm@12.1.0",
+  "packageManager": "pnpm@12.3.1",
   "engines": {
-    "node": ">=18"
+    "node": "^24.11.0"
   },
   "scripts": {
     "dev": "pnpm -C playground dev",
@@ -20,13 +20,15 @@
     "preinstall": "npx only-allow pnpm",
     "postinstall": "npx simple-git-hooks",
     "sizecheck": "npx vite-bundle-visualizer",
-    "update:dependencies": "taze -r -w"
+    "update:dependencies": "taze -r -w --request-timeout 30000 --retry 6 --concurrency 4"
   },
   "devDependencies": {
     "@antfu/eslint-config": "catalog:",
     "@creatly/figma-icons": "catalog:",
     "@iconify-json/ri": "catalog:",
+    "@microsoft/api-extractor": "catalog:",
     "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
     "@unocss/eslint-plugin": "catalog:",
     "@unocss/reset": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
