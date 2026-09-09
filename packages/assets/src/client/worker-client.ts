@@ -11,6 +11,7 @@ export class AssetWorkerClient {
   private closed = false
 
   constructor(private readonly worker: SharedWorker, private readonly expectedCacheNamespace: string) {
+    worker.addEventListener('error', this.onWorkerError)
     worker.port.addEventListener('message', this.onMessage)
     worker.port.start()
   }
@@ -42,7 +43,16 @@ export class AssetWorkerClient {
   }
 
   subscribe(listener: (event: AssetEvent) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener) }
-  close() { this.closed = true; this.worker.port.removeEventListener('message', this.onMessage); this.worker.port.close(); for (const item of this.pending.values()) { clearTimeout(item.timeout); item.reject(new Error('Asset worker client closed.')) }; this.pending.clear() }
+  close() { this.closed = true; this.worker.removeEventListener('error', this.onWorkerError); this.worker.port.removeEventListener('message', this.onMessage); this.worker.port.close(); for (const item of this.pending.values()) { clearTimeout(item.timeout); item.reject(new Error('Asset worker client closed.')) }; this.pending.clear() }
+
+  private readonly onWorkerError = (event: Event) => {
+    const message = 'message' in event && typeof event.message === 'string' ? event.message : 'Asset worker failed to load.'
+    for (const item of this.pending.values()) {
+      clearTimeout(item.timeout)
+      item.reject(new AssetError('ASSET_WORKER_INITIALIZATION_FAILED', message))
+    }
+    this.pending.clear()
+  }
 
   private readonly onMessage = (message: MessageEvent<AssetWorkerResponse>) => {
     if (message.data.type === 'event') { for (const listener of this.listeners) listener(message.data.event); return }
