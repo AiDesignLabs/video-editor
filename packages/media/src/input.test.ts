@@ -90,7 +90,13 @@ vi.mock('mediabunny', () => ({
         yield state.videoSamples.find(s => s.timestamp === timestamp) ?? null
     }
   },
-  CanvasSink: class {},
+  CanvasSink: class {
+    async* canvasesAtTimestamps(timestamps: number[]) {
+      for (const timestamp of timestamps) {
+        yield { canvas: { toBlob: (callback: (blob: Blob) => void) => callback(new Blob([String(timestamp)])) } }
+      }
+    }
+  },
   AudioSampleSink: class {
     async* samples(startSec: number, endSec: number) {
       for (const sample of state.audioSamples) {
@@ -107,6 +113,19 @@ vi.mock('mediabunny', () => ({
 }))
 
 describe('openMediaInput', () => {
+  it('uses the supplied thumbnail window without scanning duration and publishes each result', async () => {
+    const computeDuration = vi.fn(() => {
+      throw new Error('Duration scan must not run')
+    })
+    state.videoTrack = { canDecode: async () => true, computeDuration }
+    const published: number[] = []
+    const handle = openMediaInput('https://example.com/large.mov')
+    const result = await handle.thumbnails(100, { startMs: 0, endMs: 2000, stepMs: 1000, onThumbnail: thumbnail => published.push(thumbnail.tsMs) })
+    expect(computeDuration).not.toHaveBeenCalled()
+    expect(published).toEqual([0, 1000, 2000])
+    expect(result.map(thumbnail => thumbnail.tsMs)).toEqual(published)
+    handle.dispose()
+  })
   beforeEach(() => {
     state.videoTrack = undefined
     state.audioTrack = undefined

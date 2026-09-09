@@ -55,11 +55,12 @@ export {
   generateThumbnails,
   getMp4Meta,
   getResourceKey,
+  installResourceCacheAdapter,
   invalidateResourceDerivatives,
   peaksToBars,
   peaksToSvgPath,
 } from './resource'
-export type { GenerateThumbnailsOptions, Thumbnail, WaveformData, WaveformOptions } from './resource'
+export type { CachedResourceFile, GenerateThumbnailsOptions, ResourceCacheAdapter, Thumbnail, WaveformData, WaveformOptions } from './resource'
 export {
   fileTo,
   getResourceType,

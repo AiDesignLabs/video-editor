@@ -150,11 +150,16 @@ async function getAudioArrayBuffer(url: string, resourceDir: string, signal: Abo
   // Try OPFS cache first
   const file = await getCachedResourceFile(url, resourceDir)
   if (file) {
-    const originFile = await file.getOriginFile()
-    if (originFile) {
-      const buffer = await originFile.arrayBuffer()
-      throwIfMediaAnalysisAborted(signal)
-      return buffer
+    try {
+      const originFile = await file.getOriginFile()
+      if (originFile) {
+        const buffer = await originFile.arrayBuffer()
+        throwIfMediaAnalysisAborted(signal)
+        return buffer
+      }
+    }
+    finally {
+      file.release?.()
     }
   }
 
@@ -188,7 +193,7 @@ function extractPeaks(
 
   if (samplesPerPeak === 0) {
     // Audio is too short, return empty peaks
-    return Array.from({ length: samples }, () => 0)
+    return Array.from<number>({ length: samples }).fill(0)
   }
 
   const peaks: number[] = []

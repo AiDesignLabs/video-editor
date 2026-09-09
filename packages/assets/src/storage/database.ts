@@ -7,7 +7,16 @@ export const ASSET_DATABASE_VERSION = 1
 
 export interface StoredAssetRecord extends AssetRecord { cacheNamespace: string }
 export interface StoredAssetVariantRecord extends AssetVariantRecord { cacheNamespace: string }
+export interface AssetDownloadCheckpoint {
+  totalBytes: number
+  downloadedBytes: number
+  etag?: string
+  lastModified?: string
+  chunks: Array<{ path: string, size: number }>
+  pendingPath?: string
+}
 export interface AssetCacheEntry {
+  download?: AssetDownloadCheckpoint
   cacheKey: string
   cacheNamespace: string
   assetId: string

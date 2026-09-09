@@ -51,6 +51,7 @@ export function attachAssetWorkerPort(runtime: AssetWorkerRuntime, port: Message
       case 'release': result = runtime.release(operation.leaseId); break
       case 'sweep': result = await runtime.sweep(); break
       case 'clear-cache': result = await runtime.clearCache(); break
+      case 'evict': result = await runtime.evict(operation.ref); break
       case 'stage-upload': result = await runtime.stageUpload(operation.job, operation.file); break
       case 'list-upload-jobs': result = await runtime.listUploadJobs(); break
       case 'get-upload-job': result = await runtime.getUploadJob(operation.jobId); break

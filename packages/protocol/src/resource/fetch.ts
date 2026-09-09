@@ -1,4 +1,5 @@
 import type { file as OPFSFile } from 'opfs-tools'
+import type { CachedResourceFile } from './adapter'
 
 export type OPFSToolFile = ReturnType<typeof OPFSFile>
 
@@ -49,12 +50,13 @@ export function fileTo(type: IResType) {
   }[type]
 }
 
-async function fileToImage(file: OPFSToolFile) {
+async function fileToImage(file: CachedResourceFile) {
   const img = new Image()
   const originFile = await file.getOriginFile()
   if (!originFile)
     return
 
   img.src = URL.createObjectURL(originFile)
+  await img.decode()
   return img
 }

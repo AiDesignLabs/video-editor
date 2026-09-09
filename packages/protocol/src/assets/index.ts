@@ -241,6 +241,7 @@ async function probeImageSize(url: string, resourceDir: string) {
   }
   finally {
     bitmap.close()
+    cached?.release?.()
   }
 }
 

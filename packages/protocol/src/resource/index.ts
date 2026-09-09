@@ -1,4 +1,5 @@
 import { dir as _dir, file as _file } from 'opfs-tools'
+import { getResourceCacheAdapter } from './adapter'
 import { ensureResourceCached, getCachedResourceFile, waitForResourceDirectoryWrites, waitForResourceWrite } from './cache'
 import { DEFAULT_RESOURCE_DIR } from './constants'
 import { fileTo, getResourceType } from './fetch'
@@ -25,34 +26,27 @@ export function createResourceManager(opts?: { dir?: string }) {
     await ensureResourceCached(url, dir, opts)
   }
 
-  async function exists(url: string) {
-    if (!url)
-      return false
-
-    const path = getResourceOpfsPath(dir, url)
-    if (!path)
-      return false
-
-    return Boolean(await getCachedResourceFile(url, dir))
-  }
-
   async function get(url: string): Promise<unknown> {
-    if (!(await exists(url)))
+    const file = await getCachedResourceFile(url, dir)
+    if (!file)
       return
+    try {
+      const inferred = inferResourceTypeFromUrl(url)
+      const type = inferred ?? (await getResourceType(url).then(r => r.type).catch(() => undefined))
+      if (!type)
+        return
 
-    const inferred = inferResourceTypeFromUrl(url)
-    const type = inferred ?? (await getResourceType(url).then(r => r.type).catch(() => undefined))
-    if (!type)
-      return
-
-    const path = getResourceOpfsPath(dir, url)
-    if (!path)
-      return
-    const file = _file(path)
-    return fileTo(type)(file)
+      return await fileTo(type)(file)
+    }
+    finally {
+      file.release?.()
+    }
   }
 
   async function remove(url: string) {
+    const adapter = /^https?:\/\//i.test(url) && getResourceCacheAdapter()
+    if (adapter)
+      return await adapter.remove(url)
     if (!url)
       return
 
@@ -70,6 +64,9 @@ export function createResourceManager(opts?: { dir?: string }) {
   }
 
   async function clear() {
+    const adapter = getResourceCacheAdapter()
+    if (adapter)
+      await adapter.clear()
     await waitForResourceDirectoryWrites(dir)
     if (!(await _dir(dir).exists()))
       return
@@ -82,9 +79,12 @@ export function createResourceManager(opts?: { dir?: string }) {
     get,
     remove,
     clear,
+    getFile: (url: string) => getCachedResourceFile(url, dir),
   }
 }
 
+export { installResourceCacheAdapter } from './adapter'
+export type { CachedResourceFile, ResourceCacheAdapter } from './adapter'
 export { DEFAULT_RESOURCE_DIR } from './constants'
 export { getResourceKey } from './key'
 export { clearMp4MetaCache, getMp4Meta } from './meta'

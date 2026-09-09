@@ -38,6 +38,7 @@ export interface MediaThumbnail {
 }
 
 export interface MediaThumbnailOptions {
+  onThumbnail?: (thumbnail: MediaThumbnail) => void
   startMs?: number
   endMs?: number
   stepMs?: number
@@ -234,7 +235,7 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
       if (!track || !(await track.canDecode()))
         return []
 
-      const durationMs = Math.round(await track.computeDuration() * 1000)
+      const durationMs = options?.endMs ?? Math.round(await track.computeDuration() * 1000)
       const startMs = Math.max(0, options?.startMs ?? 0)
       const endMs = Math.min(durationMs, options?.endMs ?? durationMs)
       const stepMs = Math.max(1, options?.stepMs ?? 1000)
@@ -254,8 +255,11 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
         if (!wrapped)
           continue
         const img = await canvasToBlob(wrapped.canvas)
-        if (img)
-          results.push({ tsMs, img })
+        if (img) {
+          const thumbnail = { tsMs, img }
+          results.push(thumbnail)
+          options?.onThumbnail?.(thumbnail)
+        }
       }
       return results
     },

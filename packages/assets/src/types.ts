@@ -54,6 +54,8 @@ export interface AssetJobSnapshot {
   updatedAt: number
 }
 export interface AssetCacheSnapshot {
+  downloadedBytes?: number
+  totalBytes?: number
   ref: AssetVariantRef
   status: AssetCacheStatus | 'not-cached'
   sizeBytes?: number

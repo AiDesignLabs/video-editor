@@ -21,6 +21,7 @@ const props = defineProps<{
    * audio/mute machinery stays inert for them.
    */
   segment: IFramesSegmentUnion | IStickerSegment
+  coverUrl?: string
 }>()
 const emit = defineEmits<{
   (e: 'toggleVideoMute', payload: { segmentId: string, muted: boolean }): void
@@ -136,7 +137,7 @@ watch(
  * tiled by time rather than rendering one element per extracted frame.
  */
 const thumbnailTiles = computed(() => buildThumbnailTiles({
-  frames: thumbnailItems.value,
+  frames: thumbnailItems.value.length ? thumbnailItems.value : props.coverUrl ? [{ tsMs: 0, url: props.coverUrl }] : [],
   width: containerWidth.value,
   durationMs: Math.max((props.segment.endTime ?? 0) - (props.segment.startTime ?? 0), 0),
   fromTimeMs: (props.segment as { fromTime?: number }).fromTime ?? 0,
@@ -219,19 +220,23 @@ async function loadVideoThumbnails(request: VideoThumbnailRequest) {
   } satisfies Partial<VideoThumbnailExtractionDiagnostics>)
 
   try {
-    const metadata = await getMp4Meta(request.url)
-    if (currentJobId !== jobId || abortController.signal.aborted)
-      return
-
-    const options = videoThumbnailExtractionModel.resolveOptions(request, metadata.durationUs)
+    // The protocol already defines the source window; do not scan the entire file for duration.
+    const options = videoThumbnailExtractionModel.resolveOptions(request, 0)
     extractionStartedAt = readThumbnailClock()
     thumbnailDiagnostics.metadataDurationMs = resolveThumbnailDuration(startedAt, extractionStartedAt)
-    thumbnailDiagnostics.sourceDurationMs = Math.round(metadata.durationUs / 1000)
     thumbnailDiagnostics.requestedStartUs = options.start
     thumbnailDiagnostics.requestedEndUs = options.end
     thumbnailDiagnostics.requestedStepUs = options.step
     thumbnailDiagnostics.stage = 'extracting'
-    const shots = await generateThumbnails(request.url, { ...options, signal: abortController.signal })
+    const shots = await generateThumbnails(request.url, { ...options, signal: abortController.signal, onThumbnail: (thumbnail) => {
+      if (currentJobId !== jobId || abortController.signal.aborted)
+        return
+      const tsMs = Math.round(thumbnail.ts / 1000)
+      if (thumbnailItems.value.some(item => item.tsMs === tsMs))
+        return
+      thumbnailItems.value.push({ tsMs, url: URL.createObjectURL(thumbnail.img) })
+      thumbnailDiagnostics.resultCount = thumbnailItems.value.length
+    } })
     if (currentJobId !== jobId)
       return
 
@@ -240,6 +245,7 @@ async function loadVideoThumbnails(request: VideoThumbnailRequest) {
       url: URL.createObjectURL(thumb.img),
     }))
     const completedAt = readThumbnailClock()
+    cleanupThumbnails()
     thumbnailItems.value = previews
     thumbnailDiagnostics.extractionDurationMs = resolveThumbnailDuration(extractionStartedAt, completedAt)
     thumbnailDiagnostics.totalDurationMs = resolveThumbnailDuration(startedAt, completedAt)
@@ -375,7 +381,7 @@ const videoWaveformDisplay = computed(() => {
   const fullDurationMs = waveformState.data.duration * 1000
   const peaks = waveformState.data.peaks
   if (!Number.isFinite(fullDurationMs) || fullDurationMs <= 0 || peaks.length === 0)
-    return { peaks: Array.from({ length: barsByWidth }, () => 0), coveragePercent: 100 }
+    return { peaks: Array.from<number>({ length: barsByWidth }).fill(0), coveragePercent: 100 }
 
   const sourceStartMs = Math.max(segment.fromTime ?? 0, 0)
   const playRate = Math.max(segment.playRate ?? 1, 0.0001)

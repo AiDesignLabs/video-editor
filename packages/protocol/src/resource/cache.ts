@@ -1,5 +1,8 @@
 import type { OTFile } from 'opfs-tools'
+import type { CachedResourceFile } from './adapter'
 import { file as opfsFile, write as opfsWrite } from 'opfs-tools'
+import { getResourceCacheAdapter } from './adapter'
+import { DEFAULT_RESOURCE_DIR } from './constants'
 import { getResourceOpfsPath } from './key'
 
 interface CacheResourceOptions {
@@ -8,20 +11,30 @@ interface CacheResourceOptions {
 
 const inflightWritesByPath = new Map<string, Promise<void>>()
 
-export async function getCachedResourceFile(url: string, resourceDir: string): Promise<OTFile | undefined> {
+export async function getCachedResourceFile(url: string, resourceDir: string, options?: { waitForWrite?: boolean }): Promise<CachedResourceFile | undefined> {
+  const adapter = /^https?:\/\//i.test(url) && getResourceCacheAdapter()
+  if (adapter)
+    return await adapter.get(url)
   const path = getResourceOpfsPath(resourceDir, url)
   if (!path)
     return undefined
 
-  await waitForResourceWrite(path)
-  return await getExistingFile(path)
+  if (options?.waitForWrite !== false)
+    await waitForResourceWrite(path)
+  return await getExistingFile(path) ?? await getLegacyLocalFile(url, resourceDir)
 }
 
 export async function ensureResourceCached(
   url: string,
   resourceDir: string,
   options?: CacheResourceOptions,
-): Promise<OTFile | undefined> {
+): Promise<CachedResourceFile | undefined> {
+  const adapter = /^https?:\/\//i.test(url) && getResourceCacheAdapter()
+  if (adapter) {
+    cancelBody(options?.body)
+    await adapter.ensure(url)
+    return undefined
+  }
   if (!url || url.startsWith('data:') || url.startsWith('blob:')) {
     cancelBody(options?.body)
     return undefined
@@ -42,7 +55,7 @@ export async function ensureResourceCached(
 
   const temporaryPath = createTemporaryPath(path)
   // Claim the path before the first asynchronous filesystem lookup yields.
-  const job = writeResourceIfMissing(url, path, temporaryPath, options?.body)
+  const job = writeResourceIfMissing(url, path, temporaryPath, resourceDir, options?.body)
   inflightWritesByPath.set(path, job)
 
   try {
@@ -80,9 +93,10 @@ async function writeResourceIfMissing(
   url: string,
   path: string,
   temporaryPath: string,
+  resourceDir: string,
   providedBody?: ReadableStream<BufferSource>,
 ) {
-  const existing = await getExistingFile(path)
+  const existing = await getExistingFile(path) ?? await getLegacyLocalFile(url, resourceDir)
   if (existing) {
     cancelBody(providedBody)
     return
@@ -128,6 +142,13 @@ async function getExistingFile(path: string): Promise<OTFile | undefined> {
     return undefined
   }
   return undefined
+}
+
+async function getLegacyLocalFile(url: string, resourceDir: string) {
+  // Keep existing local imports readable. Remote migration belongs to Asset Service.
+  if (resourceDir !== DEFAULT_RESOURCE_DIR || !url.startsWith('local-asset://'))
+    return undefined
+  return await getExistingFile(getResourceOpfsPath('/video-editor-res', url))
 }
 
 async function removeFileIfExists(file: OTFile) {

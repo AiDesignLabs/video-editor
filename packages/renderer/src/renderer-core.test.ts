@@ -55,6 +55,7 @@ vi.mock('@video-editor/protocol', () => ({
   createResourceManager: () => ({
     add: resourceAdd,
     get: vi.fn(async () => undefined),
+    getFile: vi.fn(async () => opfsState.exists ? { getOriginFile: async () => opfsState.originFile } : undefined),
   }),
   getResourceKey: (url: string) => url,
 }))
@@ -537,7 +538,8 @@ describe('createRenderer render ownership', () => {
 })
 
 describe('createRenderer video segment preloading', () => {
-  it('resolves video segment audio from an OPFS object URL', async () => {
+  it.each([false, true])('resolves video segment audio from OPFS with streaming=%s', async (streamRemoteMedia) => {
+    resourceAdd.mockClear()
     audioManagerInstances.length = 0
     opfsState.exists = true
     opfsState.originFile = { name: 'video-1.mp4' } as File
@@ -565,18 +567,23 @@ describe('createRenderer video segment preloading', () => {
       ],
     })
     const videoSegment = protocol.value.tracks[0]!.children[0] as IVideoFramesSegment
-    videoSegment.url = 'local-asset://video-1/video-1.mp4'
+    if (!streamRemoteMedia)
+      videoSegment.url = 'local-asset://video-1/video-1.mp4'
 
     const renderer = await createRenderer({
       protocol,
       app: createMockApp() as unknown as Parameters<typeof createRenderer>[0]['app'],
       manualRender: true,
+      streamRemoteMedia,
+      warmUpResources: false,
     })
 
     try {
       const audioManager = getAudioManagerInstance()
       expect(audioManager.options?.resolveMediaElementUrl?.(videoSegment)).toBe('blob:opfs-video-1')
       expect(createObjectURL).toHaveBeenCalledWith(opfsState.originFile)
+      if (streamRemoteMedia)
+        expect(resourceAdd).not.toHaveBeenCalled()
     }
     finally {
       renderer.destroy()

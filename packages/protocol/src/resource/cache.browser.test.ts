@@ -48,6 +48,6 @@ describe('shared resource cache writes', () => {
 
     expect(finalPathWasVisible).toBe(false)
     expect(readSettledBeforeFinish).toBe(false)
-    expect(await cachedFile?.text()).toBe('first-second')
+    expect(await (await cachedFile?.getOriginFile())?.text()).toBe('first-second')
   })
 })

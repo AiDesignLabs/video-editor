@@ -51,6 +51,8 @@ export interface AssetService<TContext = unknown> {
   sweep: () => Promise<AssetCacheReport>
   clearCache: () => Promise<AssetCacheReport>
   release: (leaseId: string) => void
+  renew: (leaseId: string) => Promise<void>
+  evict: (ref: ResolveAssetRequest['ref']) => Promise<AssetCacheReport>
   requestPersistentStorage: () => Promise<boolean>
   close: () => void
 }
@@ -151,6 +153,8 @@ export function createAssetService<TContext = unknown, TPrepared = unknown>(opti
       } }
     },
     ensureCached: input => request<AssetJobSnapshot>({ type: 'ensure-cached', request: input }, CACHE_OPERATION_TIMEOUT_MS),
+    renew: leaseId => request<void>({ type: 'renew', leaseId }),
+    evict: ref => request<AssetCacheReport>({ type: 'evict', ref }),
     async getJobStatus(jobId) { return localJobs.get(jobId) ?? await request<AssetJobSnapshot | undefined>({ type: 'get-job-status', jobId }) },
     upload(input) {
       const jobId = crypto.randomUUID()

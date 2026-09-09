@@ -1,4 +1,5 @@
 import type { MediaInputHandle } from '@video-editor/media'
+import type { CachedResourceFile } from '@video-editor/protocol'
 import type { IAudioSegment, IKeyframeProperty, ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { ComputedRef, Ref, ShallowRef } from '@vue/reactivity'
 import type { Application, ApplicationOptions, Filter as PixiFilter } from 'pixi.js'
@@ -20,7 +21,6 @@ import {
   unref,
   watch,
 } from '@vue/reactivity'
-import { file as opfsFile } from 'opfs-tools'
 import { Container, ImageSource, Sprite, Texture } from 'pixi.js'
 import { createApp as create2dApp } from './2d'
 import { resolveProtocolAssetUrls } from './asset-resolution'
@@ -48,7 +48,6 @@ import {
   evaluateTimelinePlan,
 } from './timeline'
 
-const DEFAULT_RES_DIR = '/video-editor-res'
 const VIDEO_PRELOAD_LOOKAHEAD_MS = 1500
 const VIDEO_PRELOAD_LIMIT = 2
 
@@ -167,6 +166,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   app.stage.addChild(layer)
 
   const resourceManager = createResourceManager({ dir: opts.resourceDir })
+  const resourceFiles = new Map<string, CachedResourceFile>()
   const resourceWarmUp = new Set<string>()
   const displayCache = new Map<string, PixiDisplayObject>()
   const textDisplayIds = new Set<string>()
@@ -542,7 +542,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
           continue
         if ((segment.volume ?? 1) <= 0)
           continue
-        if (segment.url.startsWith('local-asset://'))
+        if (segment.url.startsWith('local-asset://') || (opts.streamRemoteMedia && /^https?:\/\//i.test(segment.url)))
           localSources.push(ensureMediaElementObjectUrl(segment.url))
       }
     }
@@ -551,6 +551,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   function cleanupCache(protocol: IVideoProtocol) {
     const activeUrls = new Set([...collectResourceUrls(protocol), ...collectResourceUrls(validatedAudioProtocol.value)])
+    for (const [url, file] of resourceFiles) {
+      if (!activeUrls.has(url)) {
+        file.release?.()
+        resourceFiles.delete(url)
+      }
+    }
     for (const [url, handle] of streamingMediaInputs) {
       if (!activeUrls.has(url)) {
         handle.dispose()
@@ -1080,27 +1086,28 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   async function getOpfsFile(url: string) {
-    const dir = opts.resourceDir ?? DEFAULT_RES_DIR
-    try {
-      const key = getResourceKey(url)
-      if (!key)
+    const existing = resourceFiles.get(url)
+    if (existing)
+      return existing
+    const file = await resourceManager.getFile(url)
+    if (file) {
+      if (rendererDestroyed) {
+        file.release?.()
         return undefined
-      const file = opfsFile(`${dir}/${key}`, 'r')
-      if (await file.exists())
-        return file
+      }
+      resourceFiles.get(url)?.release?.()
+      resourceFiles.set(url, file)
     }
-    catch {
-      return undefined
-    }
-    return undefined
+    return file
   }
 
   async function loadAudioBuffer(segment: IAudioSegment | IVideoFramesSegment): Promise<AudioBuffer | undefined> {
     if (!segment.url)
       return undefined
-    let file: ReturnType<typeof opfsFile> | undefined
-    if (!opts.streamRemoteMedia && shouldUseResourceManager(segment.url)) {
-      await resourceManager.add(segment.url).catch(() => {})
+    let file: CachedResourceFile | undefined
+    if (shouldUseResourceManager(segment.url)) {
+      if (!opts.streamRemoteMedia)
+        await resourceManager.add(segment.url).catch(() => {})
       file = await getOpfsFile(segment.url)
     }
     const originFile = file ? await file.getOriginFile() : undefined
@@ -1144,8 +1151,6 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   async function ensureMediaElementObjectUrl(url: string): Promise<string | undefined> {
     // Hosts using Asset Service own remote caching. Keep local protocol resources resolvable.
-    if (opts.streamRemoteMedia && !url.startsWith('local-asset://'))
-      return undefined
     if (!shouldUseResourceManager(url))
       return undefined
 
@@ -1162,7 +1167,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       return await loading
 
     const job = (async () => {
-      await resourceManager.add(url).catch(() => {})
+      if (!opts.streamRemoteMedia || url.startsWith('local-asset://'))
+        await resourceManager.add(url).catch(() => {})
       const file = await getOpfsFile(url)
       if (!file)
         return undefined
@@ -1270,9 +1276,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     reuse?: { sprite: Sprite, oldTexture?: Texture },
     frameSequence?: readonly number[],
   ): Promise<VideoEntry | undefined> {
-    let file: ReturnType<typeof opfsFile> | undefined
-    if (!opts.streamRemoteMedia && shouldUseResourceManager(url)) {
-      await resourceManager.add(url).catch(() => {})
+    let file: CachedResourceFile | undefined
+    if (shouldUseResourceManager(url)) {
+      if (!opts.streamRemoteMedia)
+        await resourceManager.add(url).catch(() => {})
       file = await getOpfsFile(url)
     }
 
@@ -1453,6 +1460,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   function destroy() {
+    resourceFiles.forEach(file => file.release?.())
+    resourceFiles.clear()
     rendererDestroyed = true
     assetResolutionRevision += 1
     pause()

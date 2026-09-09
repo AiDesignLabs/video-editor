@@ -1,4 +1,4 @@
-import type { OTFile } from 'opfs-tools'
+import type { CachedResourceFile } from './adapter'
 import { openMediaInput } from '@video-editor/media'
 import { getCachedResourceFile } from './cache'
 import { DEFAULT_RESOURCE_DIR } from './constants'
@@ -65,6 +65,7 @@ export function getMp4Meta(url: string, options?: { resourceDir?: string }): Pro
     }
     finally {
       handle.dispose()
+      file?.release?.()
     }
   })()
 
@@ -72,7 +73,7 @@ export function getMp4Meta(url: string, options?: { resourceDir?: string }): Pro
   return job
 }
 
-async function getMp4MetaViaVideoElement(url: string, file?: OTFile): Promise<Mp4Meta> {
+async function getMp4MetaViaVideoElement(url: string, file?: CachedResourceFile): Promise<Mp4Meta> {
   if (typeof document === 'undefined') {
     return {
       durationUs: 0,

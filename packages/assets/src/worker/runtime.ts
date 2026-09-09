@@ -5,6 +5,7 @@ import { createCacheKey, getCacheObjectPath } from '../cache/key'
 import { AssetError, AssetPersistenceUnavailableError, AssetUnavailableError } from '../errors'
 import { createAssetFileStore } from '../storage/asset-file-store'
 import { openAssetDatabase } from '../storage/database'
+import { AssetDownloadHttpError, downloadResumable } from './resumable-download'
 
 const DAY = 86_400_000
 const WRITER_LEASE_MS = 60_000
@@ -19,6 +20,8 @@ export interface AssetWorkerRuntimeOptions {
   maxConcurrentDownloads?: number
   maxConcurrentBackgroundDownloads?: number
   writerLeaseMs?: number
+  downloadChunkSizeBytes?: number
+  legacyResourceDirectory?: string
 }
 
 interface WriterClaim {
@@ -222,10 +225,14 @@ export class AssetWorkerRuntime {
 
   release(leaseId: string) { this.leases.delete(leaseId) }
 
-  async sweep(reason: AssetCacheReport['reason'] = 'scheduled'): Promise<AssetCacheReport> {
+  async evict(ref: ResolveAssetRequest['ref']): Promise<AssetCacheReport> {
+    return await this.sweep('explicit', await createCacheKey(this.options.cacheNamespace, ref))
+  }
+
+  async sweep(reason: AssetCacheReport['reason'] = 'scheduled', onlyCacheKey?: string): Promise<AssetCacheReport> {
     const database = this.requireDatabase()
-    const entries = (await database.getAll('cacheEntries')).filter(entry => entry.cacheNamespace === this.options.cacheNamespace)
-    const trackedBytes = entries.reduce((sum, entry) => sum + (entry.status === 'ready' ? entry.sizeBytes ?? 0 : 0), 0)
+    const entries = (await database.getAll('cacheEntries')).filter(entry => entry.cacheNamespace === this.options.cacheNamespace && (!onlyCacheKey || entry.cacheKey === onlyCacheKey))
+    const trackedBytes = entries.reduce((sum, entry) => sum + (entry.sizeBytes ?? entry.download?.downloadedBytes ?? 0), 0)
     const estimate = await globalThis.navigator?.storage?.estimate?.().catch(() => undefined)
     const knownQuota = Number.isFinite(estimate?.quota) && (estimate?.quota ?? 0) > 0
     const knownUsage = Number.isFinite(estimate?.usage) && (estimate?.usage ?? -1) >= 0
@@ -236,22 +243,36 @@ export class AssetWorkerRuntime {
     const forceLru = reason === 'explicit' || reason === 'quota-error' || reason === 'quota-pressure' || trackedBytes > highWaterMark || originPressure
     const now = this.now()
     const leasedKeys = new Set([...this.leases.values()].filter(lease => lease.expiresAt > now).map(lease => lease.cacheKey))
-    const candidates = entries.filter(entry => entry.status !== 'ready' || (!leasedKeys.has(entry.cacheKey) && (entry.leaseProtectionUntil ?? 0) <= now))
+    const candidates = entries.filter(entry => (reason === 'explicit' || (entry.writerLeaseUntil ?? 0) <= now)
+      && (entry.status !== 'ready' || (!leasedKeys.has(entry.cacheKey) && (entry.leaseProtectionUntil ?? 0) <= now)))
       .sort((a, b) => Number(a.status === 'ready') - Number(b.status === 'ready') || a.lastAccessAt - b.lastAccessAt)
     let remaining = trackedBytes
     let removedEntries = 0
     let removedBytes = 0
     for (const entry of candidates) {
-      if (entry.status === 'ready' && entry.evictAfter > now && (!forceLru || remaining <= lowWaterMark))
+      if (reason !== 'explicit' && (entry.status === 'ready' || entry.download) && entry.evictAfter > now && (!forceLru || remaining <= lowWaterMark))
         continue
       const variant = await this.getVariant(entry)
       if (entry.status === 'ready' && variant?.remoteRecovery === 'none')
         continue
+      const transaction = database.transaction('cacheEntries', 'readwrite')
+      const current = await transaction.store.get(entry.cacheKey)
+      if (!current || current.writerEpoch !== entry.writerEpoch || current.updatedAt !== entry.updatedAt
+        || current.leaseProtectionUntil !== entry.leaseProtectionUntil
+        || (reason !== 'explicit' && (current.writerLeaseUntil ?? 0) > this.now())) {
+        await transaction.done
+        continue
+      }
+      await transaction.store.delete(entry.cacheKey)
+      await transaction.done
       await this.files.remove(entry.opfsPath)
-      await database.delete('cacheEntries', entry.cacheKey)
+      for (const chunk of entry.download?.chunks ?? [])
+        await this.files.remove(chunk.path)
+      if (entry.download?.pendingPath)
+        await this.files.remove(entry.download.pendingPath)
       removedEntries++
-      removedBytes += entry.sizeBytes ?? 0
-      remaining -= entry.sizeBytes ?? 0
+      removedBytes += entry.sizeBytes ?? entry.download?.downloadedBytes ?? 0
+      remaining -= entry.sizeBytes ?? entry.download?.downloadedBytes ?? 0
     }
     if (reason === 'explicit') {
       for (const entry of entries.filter(item => !candidates.includes(item))) {
@@ -389,39 +410,72 @@ export class AssetWorkerRuntime {
       return await this.waitForWriter(cacheKey, request, claimResult.leaseUntil)
     const claim = claimResult.claim
     const entry = claim.entry
-    await database.put('jobs', { cacheNamespace: this.options.cacheNamespace, jobId, kind: 'cache', dedupeKey: cacheKey, status: 'running', phase: 'downloading', progress: 0, createdAt: now, updatedAt: now })
-    const temporaryPath = `/video-editor-assets/v1/temp/${jobId}/${crypto.randomUUID()}.partial`
+    const initialProgress = entry.download ? entry.download.downloadedBytes / entry.download.totalBytes : 0
+    await database.put('jobs', { cacheNamespace: this.options.cacheNamespace, jobId, kind: 'cache', dedupeKey: cacheKey, status: 'running', phase: 'downloading', progress: initialProgress, createdAt: now, updatedAt: now })
+    const temporaryPath = getCacheObjectPath(cacheKey).replace(/\.bin$/, `-${jobId}.bin`)
+    let committed = false
     const lease = this.maintainWriterLease(claim)
     try {
       let size: number | undefined
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const response = await this.fetcher(request.url)
-        if (!response.ok || !response.body)
-          throw new Error(`Asset download failed (${response.status} ${response.statusText}).`)
+      const legacy = await this.readLegacyResource(request)
+      for (let attempt = 0; attempt < 3; attempt++) {
         entry.status = 'writing'
         entry.updatedAt = this.now()
         if (!await this.updateWriterClaim(claim, { status: entry.status, updatedAt: entry.updatedAt }))
           throw new Error('Asset cache writer lost ownership before staging.')
         try {
-          size = await this.files.writeTemporary(temporaryPath, response.body, numberHeader(response.headers.get('content-length')))
+          size = legacy
+            ? await this.files.writeTemporary(temporaryPath, legacy.file.stream() as ReadableStream<BufferSource>, legacy.file.size)
+            : await downloadResumable({
+                url: request.url,
+                outputPath: temporaryPath,
+                chunkDirectory: `/video-editor-assets/v1/temp/downloads/${cacheKey}`,
+                chunkSize: positiveInteger(this.options.downloadChunkSizeBytes ?? 8 * 1024 * 1024, 'downloadChunkSizeBytes'),
+                checkpoint: entry.download,
+                files: this.files,
+                fetch: this.fetcher,
+                assertOwnership: async () => {
+                  if (lease.lostOwnership() || !await this.ownsWriterClaim(claim))
+                    throw new Error('Asset cache writer lost ownership during download.')
+                },
+                save: async (download) => {
+                  if (!await this.updateWriterClaim(claim, { download, updatedAt: this.now() }))
+                    throw new Error('Asset cache writer lost ownership while saving download progress.')
+                  entry.download = download
+                  const progress = download ? download.downloadedBytes / download.totalBytes : 0
+                  await database.put('jobs', { cacheNamespace: this.options.cacheNamespace, jobId, kind: 'cache', dedupeKey: cacheKey, status: 'running', phase: 'downloading', progress, createdAt: now, updatedAt: this.now() })
+                  this.emit({ type: 'cache-updated', cache: this.toCacheSnapshot(entry) })
+                  this.emit({ type: 'job-updated', job: { jobId, kind: 'cache', status: 'running', phase: 'downloading', progress, updatedAt: this.now() } })
+                },
+              })
           if (lease.lostOwnership() || !await this.ownsWriterClaim(claim))
             throw new Error('Asset cache writer lost ownership before commit.')
-          await this.files.commitTemporary(temporaryPath, entry.opfsPath)
           break
         }
         catch (error) {
-          if (!(error instanceof DOMException && error.name === 'QuotaExceededError') || attempt === 1)
+          const quotaError = error instanceof DOMException && error.name === 'QuotaExceededError'
+          const transientError = error instanceof TypeError || (error instanceof AssetDownloadHttpError && (error.status >= 500 || error.status === 408 || error.status === 429))
+          if (attempt === 2 || (!quotaError && !transientError) || !await this.ownsWriterClaim(claim))
             throw error
           entry.retryCount++
-          await this.sweep('quota-error')
+          if (quotaError)
+            await this.sweep('quota-error')
+          else
+            await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)))
         }
       }
       if (size === undefined)
         throw new Error('Asset cache write did not complete.')
-      const readyEntry = await this.finalizeWriterClaim(claim, size)
+      const chunks = entry.download?.chunks ?? []
+      const readyEntry = await this.finalizeWriterClaim(claim, size, temporaryPath)
       if (!readyEntry)
         throw new Error('Asset cache writer lost ownership while finalizing.')
       Object.assign(entry, readyEntry)
+      committed = true
+      if (legacy)
+        await this.files.remove(legacy.path).catch(() => {})
+      for (const chunk of chunks)
+        await this.files.remove(chunk.path).catch(() => {})
       const job: AssetJobSnapshot = { jobId, kind: 'cache', status: 'succeeded', progress: 1, updatedAt: entry.updatedAt }
       await database.put('jobs', { cacheNamespace: this.options.cacheNamespace, jobId, kind: 'cache', dedupeKey: cacheKey, status: 'succeeded', progress: 1, createdAt: now, updatedAt: entry.updatedAt, expiresAt: now + 7 * DAY })
       this.emit({ type: 'cache-updated', cache: this.toCacheSnapshot(entry) }); this.emit({ type: 'job-updated', job })
@@ -438,8 +492,25 @@ export class AssetWorkerRuntime {
     }
     finally {
       await lease.stop()
-      await this.files.remove(temporaryPath).catch(() => {})
+      if (!committed)
+        await this.files.remove(temporaryPath).catch(() => {})
     }
+  }
+
+  private async readLegacyResource(request: CacheAssetRequest) {
+    if (!this.options.legacyResourceDirectory)
+      return undefined
+    const variant = await this.getVariant(request.ref)
+    if (!variant?.sizeBytes || variant.sizeBytes <= 0)
+      return undefined
+    const url = new URL(request.url)
+    // Old keys discarded every query parameter. Only signing parameters are safe.
+    if ([...url.searchParams.keys()].some(key => !['Expires', 'OSSAccessKeyId', 'Signature', 'security-token', 'response-content-disposition'].includes(key)))
+      return undefined
+    const key = `${url.protocol.slice(0, -1)}/${encodeURIComponent(url.host)}/${url.pathname.split('/').filter(Boolean).map(part => encodeURIComponent(part)).join('/')}`
+    const path = `${this.options.legacyResourceDirectory}/${key}`
+    const file = await this.files.read(path, variant.remoteFileId ?? variant.variantId, variant.contentType)
+    return file?.size === variant.sizeBytes ? { path, file } : undefined
   }
 
   private async writeLocalFile(cacheKey: string, variant: AssetVariantRecord, file: File): Promise<AssetJobSnapshot> {
@@ -463,6 +534,8 @@ export class AssetWorkerRuntime {
     const entry = claim.entry
     await database.put('jobs', { cacheNamespace: this.options.cacheNamespace, jobId, kind: 'cache', dedupeKey: cacheKey, status: 'running', phase: 'writing', progress: 0, createdAt: now, updatedAt: now })
     const temporaryPath = `/video-editor-assets/v1/temp/${jobId}/${crypto.randomUUID()}.partial`
+    const outputPath = getCacheObjectPath(cacheKey).replace(/\.bin$/, `-${jobId}.bin`)
+    let committed = false
     const lease = this.maintainWriterLease(claim)
     try {
       let size: number | undefined
@@ -471,7 +544,7 @@ export class AssetWorkerRuntime {
           size = await this.files.writeTemporary(temporaryPath, file.stream() as ReadableStream<BufferSource>, file.size)
           if (lease.lostOwnership() || !await this.ownsWriterClaim(claim))
             throw new Error('Local asset cache writer lost ownership before commit.')
-          await this.files.commitTemporary(temporaryPath, entry.opfsPath)
+          await this.files.commitTemporary(temporaryPath, outputPath)
           break
         }
         catch (error) {
@@ -483,10 +556,18 @@ export class AssetWorkerRuntime {
       }
       if (size === undefined)
         throw new Error('Local asset cache write did not complete.')
-      const readyEntry = await this.finalizeWriterClaim(claim, size)
+      const download = entry.download
+      const readyEntry = await this.finalizeWriterClaim(claim, size, outputPath)
       if (!readyEntry)
         throw new Error('Local asset cache writer lost ownership while finalizing.')
       Object.assign(entry, readyEntry)
+      committed = true
+      for (const chunk of download?.chunks ?? [])
+        await this.files.remove(chunk.path).catch(() => {})
+      if (download?.pendingPath)
+        await this.files.remove(download.pendingPath).catch(() => {})
+      if (previous?.status === 'ready' && previous.opfsPath !== outputPath)
+        await this.files.remove(previous.opfsPath).catch(() => {})
       const job: AssetJobSnapshot = { jobId, kind: 'cache', status: 'succeeded', progress: 1, updatedAt: entry.updatedAt }
       await database.put('jobs', { cacheNamespace: this.options.cacheNamespace, jobId, kind: 'cache', dedupeKey: cacheKey, status: 'succeeded', progress: 1, createdAt: now, updatedAt: entry.updatedAt, expiresAt: now + 7 * DAY })
       this.emit({ type: 'cache-updated', cache: this.toCacheSnapshot(entry) }); this.emit({ type: 'job-updated', job })
@@ -504,6 +585,8 @@ export class AssetWorkerRuntime {
     finally {
       await lease.stop()
       await this.files.remove(temporaryPath).catch(() => {})
+      if (!committed)
+        await this.files.remove(outputPath).catch(() => {})
     }
   }
 
@@ -540,6 +623,7 @@ export class AssetWorkerRuntime {
       writerTokenHash: tokenHash,
       writerLeaseUntil: now + this.writerLeaseMs,
       retryCount: previous?.retryCount ?? 0,
+      download: previous?.download,
       createdAt: previous?.createdAt ?? now,
       updatedAt: now,
       lastAccessAt: now,
@@ -553,7 +637,7 @@ export class AssetWorkerRuntime {
     }
   }
 
-  private async updateWriterClaim(claim: WriterClaim, changes: Partial<Pick<AssetCacheEntry, 'retryCount' | 'status' | 'updatedAt'>>): Promise<boolean> {
+  private async updateWriterClaim(claim: WriterClaim, changes: Partial<Pick<AssetCacheEntry, 'retryCount' | 'status' | 'updatedAt' | 'download'>>): Promise<boolean> {
     const database = this.requireDatabase()
     const transaction = database.transaction(['cacheEntries', 'settings'], 'readwrite')
     const [current, setting] = await Promise.all([
@@ -598,7 +682,7 @@ export class AssetWorkerRuntime {
     return writerMatches(current, claim, setting?.cacheGeneration, this.now())
   }
 
-  private async finalizeWriterClaim(claim: WriterClaim, sizeBytes: number): Promise<AssetCacheEntry | undefined> {
+  private async finalizeWriterClaim(claim: WriterClaim, sizeBytes: number, opfsPath = claim.entry.opfsPath): Promise<AssetCacheEntry | undefined> {
     const database = this.requireDatabase()
     const transaction = database.transaction(['cacheEntries', 'settings'], 'readwrite')
     const [current, setting] = await Promise.all([
@@ -613,6 +697,8 @@ export class AssetWorkerRuntime {
     const readyEntry: AssetCacheEntry = {
       ...current,
       status: 'ready',
+      opfsPath,
+      download: undefined,
       sizeBytes,
       updatedAt: now,
       writerLeaseUntil: undefined,
@@ -725,7 +811,7 @@ export class AssetWorkerRuntime {
 
   private async getVariant(ref: { assetId: string, sourceRevision: number, variantId: string }): Promise<StoredAssetVariantRecord | undefined> { return await this.requireDatabase().get('variantRecords', [this.options.cacheNamespace, ref.assetId, ref.sourceRevision, ref.variantId]) }
   private expiryFor(variant?: AssetVariantRecord) { return variant?.profileId ? 14 * DAY : 30 * DAY }
-  private toCacheSnapshot(entry: AssetCacheEntry): AssetCacheSnapshot { return { ref: { assetId: entry.assetId, sourceRevision: entry.sourceRevision, variantId: entry.variantId }, status: entry.status, sizeBytes: entry.sizeBytes, lastAccessAt: entry.lastAccessAt, evictAfter: entry.evictAfter, failureCode: entry.failureCode } }
+  private toCacheSnapshot(entry: AssetCacheEntry): AssetCacheSnapshot { return { ref: { assetId: entry.assetId, sourceRevision: entry.sourceRevision, variantId: entry.variantId }, status: entry.status, sizeBytes: entry.sizeBytes, downloadedBytes: entry.download?.downloadedBytes ?? entry.sizeBytes, totalBytes: entry.download?.totalBytes ?? entry.sizeBytes, lastAccessAt: entry.lastAccessAt, evictAfter: entry.evictAfter, failureCode: entry.failureCode } }
   private emit(event: AssetEvent) { for (const listener of this.listeners) listener(event) }
 }
 
@@ -736,7 +822,6 @@ function writerMatches(current: AssetCacheEntry | undefined, claim: WriterClaim,
     && current.writerTokenHash === claim.tokenHash
     && (!requireActiveLease || (current.writerLeaseUntil ?? 0) > now)
 }
-function numberHeader(value: string | null) { const parsed = value === null ? undefined : Number(value); return Number.isFinite(parsed) ? parsed : undefined }
 function positiveInteger(value: number, name: string) {
   if (!Number.isInteger(value) || value < 1)
     throw new TypeError(`${name} must be an integer greater than or equal to 1.`)

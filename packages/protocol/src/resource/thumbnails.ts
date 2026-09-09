@@ -1,11 +1,13 @@
+import type { CachedResourceFile } from './adapter'
 import { openMediaInput } from '@video-editor/media'
 import { dir as opfsDir, file as opfsFile, write as opfsWrite } from 'opfs-tools'
-import { ensureResourceCached, getCachedResourceFile } from './cache'
+import { getCachedResourceFile } from './cache'
 import { DEFAULT_RESOURCE_DIR } from './constants'
 import { getResourceKey, inferResourceTypeFromUrl } from './key'
 import { createMediaAnalysisAbortError, isMediaAnalysisAbortError, mediaAnalysisPool, throwIfMediaAnalysisAborted } from './media-analysis-pool'
 
 export interface GenerateThumbnailsOptions {
+  onThumbnail?: (thumbnail: Thumbnail) => void
   /** Thumbnail width in pixels (default 100). */
   imgWidth?: number
   /** Start time in microseconds. */
@@ -14,7 +16,7 @@ export interface GenerateThumbnailsOptions {
   end?: number
   /** Step duration in microseconds; fallback to keyframes when omitted. */
   step?: number
-  /** OPFS resource directory; defaults to `/video-editor-res`. */
+  /** OPFS resource directory; defaults to `/video-editor-assets/v1/resources`. */
   resourceDir?: string
   /** Stops waiting and removes queued work when no other caller needs it. */
   signal?: AbortSignal
@@ -26,6 +28,7 @@ export interface Thumbnail {
 }
 
 const thumbnailCache = new Map<string, Thumbnail[]>()
+const thumbnailListeners = new Map<string, Set<(thumbnail: Thumbnail) => void>>()
 const maxThumbnailCacheEntries = 24
 const thumbnailManifestName = 'manifest.json'
 const thumbnailIndexName = 'index.json'
@@ -67,26 +70,44 @@ export async function generateThumbnails(url: string, options?: GenerateThumbnai
 
   const cacheKey = buildThumbnailCacheKey(url, { imgWidth, start, end, step, resourceDir })
   const cached = getCachedThumbnails(cacheKey)
-  if (cached)
+  if (cached) {
+    cached.forEach(thumbnail => options?.onThumbnail?.(thumbnail))
     return cached
+  }
 
   if (shouldUseThumbnailOpfs(url)) {
     const opfsCached = await readThumbnailsFromOpfs(url, { imgWidth, start, end, step, resourceDir })
     throwIfMediaAnalysisAborted(options?.signal)
     if (opfsCached) {
       cacheThumbnails(cacheKey, opfsCached)
+      opfsCached.forEach(thumbnail => options?.onThumbnail?.(thumbnail))
       return opfsCached
     }
   }
 
-  return await mediaAnalysisPool.run(`thumbnail::${cacheKey}`, async (signal) => {
-    const result = await generateThumbnailsInner(url, { imgWidth, start, end, step, resourceDir }, signal)
-    throwIfMediaAnalysisAborted(signal)
-    cacheThumbnails(cacheKey, result)
-    if (shouldUseThumbnailOpfs(url))
-      void writeThumbnailsToOpfs(url, { imgWidth, start, end, step, resourceDir }, result)
-    return result
-  }, options?.signal)
+  const listener = (thumbnail: Thumbnail) => {
+    if (!options?.signal?.aborted)
+      options?.onThumbnail?.(thumbnail)
+  }
+  const listeners = thumbnailListeners.get(cacheKey) ?? new Set()
+  listeners.add(listener)
+  thumbnailListeners.set(cacheKey, listeners)
+  try {
+    return await mediaAnalysisPool.run(`thumbnail::${cacheKey}`, async (signal) => {
+      const onThumbnail = (thumbnail: Thumbnail) => thumbnailListeners.get(cacheKey)?.forEach(notify => notify(thumbnail))
+      const result = await generateThumbnailsInner(url, { imgWidth, start, end, step, resourceDir, onThumbnail }, signal)
+      throwIfMediaAnalysisAborted(signal)
+      cacheThumbnails(cacheKey, result)
+      if (shouldUseThumbnailOpfs(url))
+        void writeThumbnailsToOpfs(url, { imgWidth, start, end, step, resourceDir }, result)
+      return result
+    }, options?.signal)
+  }
+  finally {
+    listeners.delete(listener)
+    if (listeners.size === 0)
+      thumbnailListeners.delete(cacheKey)
+  }
 }
 
 /** Remove every cached thumbnail variant derived from one source URL. */
@@ -112,24 +133,28 @@ export async function clearThumbnailCache(
 
 async function generateThumbnailsInner(
   url: string,
-  opts: Required<Pick<GenerateThumbnailsOptions, 'imgWidth' | 'resourceDir'>> & Pick<GenerateThumbnailsOptions, 'start' | 'end' | 'step'>,
+  opts: Required<Pick<GenerateThumbnailsOptions, 'imgWidth' | 'resourceDir'>> & Pick<GenerateThumbnailsOptions, 'start' | 'end' | 'step' | 'onThumbnail'>,
   signal: AbortSignal,
 ): Promise<Thumbnail[]> {
   const { imgWidth, start, end, step, resourceDir } = opts
   throwIfMediaAnalysisAborted(signal)
-  const file = await getCachedResourceFile(url, resourceDir) ?? await ensureResourceCached(url, resourceDir)
+  const file = await getCachedResourceFile(url, resourceDir, { waitForWrite: false })
   throwIfMediaAnalysisAborted(signal)
   const originFile = file ? await file.getOriginFile() : undefined
   const handle = openMediaInput(originFile ?? url)
 
   try {
     if (!(await handle.canDecodeVideo()))
-      return await generateThumbnailsViaVideoElement(url, file, { imgWidth, start, end, step }, signal)
+      return await generateThumbnailsViaVideoElement(url, file, opts, signal)
 
     const thumbnails = await handle.thumbnails(imgWidth, {
       startMs: start !== undefined ? start / 1000 : undefined,
       endMs: end !== undefined ? end / 1000 : undefined,
       stepMs: step !== undefined ? step / 1000 : undefined,
+      onThumbnail: (thumbnail) => {
+        throwIfMediaAnalysisAborted(signal)
+        opts.onThumbnail?.({ ts: thumbnail.tsMs * 1000, img: thumbnail.img })
+      },
     })
     throwIfMediaAnalysisAborted(signal)
     // Public option/result timestamps stay in microseconds.
@@ -138,10 +163,11 @@ async function generateThumbnailsInner(
   catch (error) {
     if (isMediaAnalysisAbortError(error))
       throw error
-    return await generateThumbnailsViaVideoElement(url, file, { imgWidth, start, end, step }, signal)
+    return await generateThumbnailsViaVideoElement(url, file, opts, signal)
   }
   finally {
     handle.dispose()
+    file?.release?.()
   }
 }
 
@@ -363,8 +389,8 @@ function cacheThumbnails(key: string, value: Thumbnail[]) {
 
 async function generateThumbnailsViaVideoElement(
   url: string,
-  file: ReturnType<typeof opfsFile> | undefined,
-  opts: { imgWidth: number, start?: number, end?: number, step?: number },
+  file: CachedResourceFile | undefined,
+  opts: { imgWidth: number, start?: number, end?: number, step?: number, onThumbnail?: (thumbnail: Thumbnail) => void },
   signal: AbortSignal,
 ): Promise<Thumbnail[]> {
   if (typeof document === 'undefined')
@@ -375,7 +401,7 @@ async function generateThumbnailsViaVideoElement(
   video.crossOrigin = 'anonymous'
   video.muted = true
   video.playsInline = true
-  video.preload = 'auto'
+  video.preload = 'metadata'
 
   let objectUrl: string | undefined
   try {
@@ -445,8 +471,11 @@ async function generateThumbnailsViaVideoElement(
 
       ctx.drawImage(video, 0, 0, targetW, targetH)
       const blob = await canvasToBlob(canvas)
-      if (blob)
-        results.push({ ts, img: blob })
+      if (blob) {
+        const thumbnail = { ts, img: blob }
+        results.push(thumbnail)
+        opts.onThumbnail?.(thumbnail)
+      }
     }
 
     return results

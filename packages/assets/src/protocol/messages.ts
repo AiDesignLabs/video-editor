@@ -29,6 +29,7 @@ export type AssetWorkerOperation
     | { type: 'release', leaseId: string }
     | { type: 'sweep' }
     | { type: 'clear-cache' }
+    | { type: 'evict', ref: ResolveAssetRequest['ref'] }
     | { type: 'stage-upload', job: UploadJobRecord, file: File }
     | { type: 'list-upload-jobs' }
     | { type: 'get-upload-job', jobId: string }
