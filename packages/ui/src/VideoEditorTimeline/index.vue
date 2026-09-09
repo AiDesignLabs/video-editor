@@ -33,6 +33,8 @@ const props = withDefaults(defineProps<{
   trackTypes?: ITrackType[]
   disableInteraction?: boolean
   showTrackRail?: boolean
+  /** Show add controls on main-track boundaries without a transition. */
+  showTransitionAddButtons?: boolean
   /**
    * Per-track-type row height overrides, e.g. `{ audio: 48 }`. Empty by
    * default — every row is `trackHeight` (56px) unless a consumer opts in.
@@ -47,6 +49,7 @@ const props = withDefaults(defineProps<{
   trackTypes: undefined,
   disableInteraction: false,
   showTrackRail: false,
+  showTransitionAddButtons: true,
   trackHeightByType: undefined,
   toolbarActions: undefined,
 })
@@ -243,6 +246,7 @@ function handleAddSegment({ track, startTime, endTime, event }: { track: Timelin
 }
 
 const transitionEdges = computed<ITransitionEdge[]>(() => props.protocol?.transitions ?? [])
+const TRANSITION_DURATION_LABEL_MIN_WIDTH_PX = 40
 
 function findTransitionEdge(fromSegmentId: string, toSegmentId: string) {
   return transitionEdges.value.find(edge =>
@@ -281,14 +285,19 @@ function buildTransitionSeams(overlay: TimelineOverlaySlotProps): TransitionSeam
     const left = boundaryTime * overlay.pixelsPerMs
     if (left < overlay.visibleStartPx || left > overlay.visibleEndPx)
       continue
+    const existing = findTransitionEdge(from.segment.id, to.segment.id)
+    if (!existing && !props.showTransitionAddButtons)
+      continue
     seams.push({
       key: `${from.segment.id}->${to.segment.id}`,
       fromSegmentId: from.segment.id,
       toSegmentId: to.segment.id,
       boundaryTime,
-      existing: findTransitionEdge(from.segment.id, to.segment.id),
+      existing,
       left,
       top,
+      showDurationLabel: !!existing
+        && existing.duration * overlay.pixelsPerMs >= TRANSITION_DURATION_LABEL_MIN_WIDTH_PX,
     })
   }
   return seams
@@ -475,14 +484,17 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
         :key="seam.key"
         type="button"
         class="ve-transition-seam"
-        :class="{ 've-transition-seam--active': !!seam.existing }"
+        :class="{
+          've-transition-seam--active': !!seam.existing,
+          've-transition-seam--compact': !!seam.existing && !seam.showDurationLabel,
+        }"
         :style="{ left: `${seam.left}px`, top: `${seam.top}px` }"
         :title="seam.existing ? `${seam.existing.name} · ${formatSeamDuration(seam.existing.duration)}` : '添加转场'"
         @click.stop="handleTransitionSeamClick(seam)"
         @mousedown.stop
       >
-        <span v-if="seam.existing" class="ve-transition-seam__label">{{ formatSeamDuration(seam.existing.duration) }}</span>
-        <span v-else class="ve-transition-seam__icon i-creatly-add" aria-hidden="true" />
+        <span v-if="seam.existing && seam.showDurationLabel" class="ve-transition-seam__label">{{ formatSeamDuration(seam.existing.duration) }}</span>
+        <span v-else-if="!seam.existing" class="ve-transition-seam__icon i-creatly-add" aria-hidden="true" />
       </button>
     </template>
 
@@ -623,6 +635,13 @@ function handleVideoSegmentMuteToggle(segment: IVideoFramesSegment, track: Track
 
 .ve-transition-seam--active:hover {
   background: #4f46e5;
+}
+
+.ve-transition-seam--compact {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0;
 }
 
 /* Rail cell: type icon at rest, controls on row hover. */

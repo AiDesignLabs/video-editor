@@ -120,6 +120,8 @@ export interface TranscodeOptions {
   decoder?: DecoderOptions
   onProgress?: (progress: TranscodeProgress) => void
   signal?: AbortSignal
+  /** Override canvas creation. Workers use OffscreenCanvas by default when no DOM is available. */
+  createCanvas?: (width: number, height: number) => HTMLCanvasElement | OffscreenCanvas
 }
 
 /**
@@ -255,7 +257,7 @@ export async function probeVideoStats(source: Blob | string): Promise<VideoStats
     }
 
     return {
-      codec: track.codec,
+      codec: await track.getCodec(),
       frameCount: stats.packetCount,
       fps: durationSec > 0 ? stats.packetCount / durationSec : 0,
       keyFrameCount,
@@ -272,8 +274,8 @@ interface TargetBase {
   rendition: Rendition
   width: number
   height: number
-  ctx: CanvasRenderingContext2D
-  canvas: HTMLCanvasElement
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
+  canvas: HTMLCanvasElement | OffscreenCanvas
   passthrough: boolean
   drained: Promise<void>
   getEncoderConfig: () => VideoEncoderConfig | undefined
@@ -342,8 +344,11 @@ export async function transcode(options: TranscodeOptions): Promise<TranscodeRes
       throw new Error('transcode: this browser cannot decode the source audio track')
 
     const framesTotal = (await track.computePacketStats()).packetCount
-    const sourceWidth = track.displayWidth
-    const sourceHeight = track.displayHeight
+    const [sourceWidth, sourceHeight, sourceRotation] = await Promise.all([
+      track.getDisplayWidth(),
+      track.getDisplayHeight(),
+      track.getRotation(),
+    ])
     // Handed to the encoder as its rate-control hint — see `frameRate` on
     // `createEncoder`; without it the bitrate target is missed on non-30 fps sources.
     const sourceDurationSec = await input.computeDuration()
@@ -358,7 +363,6 @@ export async function transcode(options: TranscodeOptions): Promise<TranscodeRes
      *   P010/P012, which the canvas path silently converts.
      * An unknown format is allowed: browsers only report `null` on closed frames.
      */
-    const sourceRotation = track.rotation ?? 0
     const canPassthrough = (width: number, height: number) =>
       passthroughSameSize && width === sourceWidth && height === sourceHeight && sourceRotation === 0
     // WebCodecs spells every high-bit-depth format with a P10/P12 suffix
@@ -366,9 +370,7 @@ export async function transcode(options: TranscodeOptions): Promise<TranscodeRes
     const isEightBit = (format: string | null | undefined) => !format || !/P1[02]$/.test(format)
 
     const prepareCanvas = (width: number, height: number) => {
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
+      const canvas = options.createCanvas?.(width, height) ?? createDefaultTranscodeCanvas(width, height)
       const ctx = canvas.getContext('2d', { alpha: false })
       if (!ctx)
         throw new Error('transcode: could not create a 2D canvas context')
@@ -390,6 +392,7 @@ export async function transcode(options: TranscodeOptions): Promise<TranscodeRes
         hardwareAcceleration: rendition.hardwareAcceleration,
         frameRate: sourceFrameRate,
         withAudio: !!audioTrack,
+        audioInput: 'sample',
         audioBitrate: options.audioBitrate,
         onEncoderConfig: (config) => {
           encoderConfig = config
@@ -447,9 +450,12 @@ export async function transcode(options: TranscodeOptions): Promise<TranscodeRes
             throw new DOMException('transcode aborted', 'AbortError')
           }
 
-          const buffer = sample.toAudioBuffer()
-          sample.close()
-          await Promise.all(targets.map(target => target.encoder.setAudio(buffer)))
+          try {
+            await Promise.all(targets.map(target => target.encoder.addAudioSample(sample)))
+          }
+          finally {
+            sample.close()
+          }
         }
         lastFrameEndedAt = performance.now()
       }
@@ -563,6 +569,18 @@ export async function transcode(options: TranscodeOptions): Promise<TranscodeRes
     // which compounds when several files are transcoded in a row.
     await input.dispose()
   }
+}
+
+function createDefaultTranscodeCanvas(width: number, height: number): HTMLCanvasElement | OffscreenCanvas {
+  if (typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    return canvas
+  }
+  if (typeof OffscreenCanvas !== 'undefined')
+    return new OffscreenCanvas(width, height)
+  throw new Error('transcode: this runtime requires OffscreenCanvas or an injected createCanvas factory')
 }
 
 export interface DecodeThroughputOptions {
@@ -738,8 +756,10 @@ export async function measureEncoderThroughput(
       throw new Error('measureEncoderThroughput: this browser cannot decode the source video track')
 
     const framesTotal = (await track.computePacketStats()).packetCount
-    const sourceWidth = track.displayWidth
-    const sourceHeight = track.displayHeight
+    const [sourceWidth, sourceHeight] = await Promise.all([
+      track.getDisplayWidth(),
+      track.getDisplayHeight(),
+    ])
     const height = toEvenPx(requestedHeight)
     const width = toEvenPx(sourceWidth * (height / sourceHeight))
     const passthrough = width === sourceWidth && height === sourceHeight

@@ -76,6 +76,15 @@ vi.mock('mediabunny', () => {
     add = vi.fn(async () => {})
   }
 
+  class AudioSampleSource {
+    constructor(public options: Record<string, unknown>) {}
+    add = vi.fn(async () => {})
+  }
+
+  class Quality {
+    constructor(public value: string | Record<string, unknown>) {}
+  }
+
   class StreamTarget {
     constructor(public writable: unknown) {}
   }
@@ -83,7 +92,7 @@ vi.mock('mediabunny', () => {
   class Output {
     format: { kind: string }
     videoSource?: CanvasSource | VideoSampleSource
-    audioSource?: AudioBufferSource
+    audioSource?: AudioBufferSource | AudioSampleSource
 
     constructor(options: { format: { kind: string }, target: unknown }) {
       this.format = options.format
@@ -94,7 +103,7 @@ vi.mock('mediabunny', () => {
       state.outputs.push({ format: this.format, videoOptions: source.options, trackMetadata: metadata })
     }
 
-    addAudioTrack(source: AudioBufferSource) {
+    addAudioTrack(source: AudioBufferSource | AudioSampleSource) {
       this.audioSource = source
       const entry = state.outputs.at(-1)
       if (entry)
@@ -113,14 +122,14 @@ vi.mock('mediabunny', () => {
       return state.canEncodeVideo
     },
     AudioBufferSource,
+    AudioSampleSource,
     CanvasSource,
     VideoSample,
     VideoSampleSource,
     MkvOutputFormat,
     Mp4OutputFormat,
     Output,
-    QUALITY_HIGH: 'high',
-    QUALITY_MEDIUM: 'medium',
+    Quality,
     StreamTarget,
     WebMOutputFormat,
   }
@@ -185,14 +194,20 @@ describe('createEncoder', () => {
   it('passes bitrates through instead of the quality presets', () => {
     createEncoder({ canvas: fakeCanvas(), withAudio: true, videoBitrate: 1234, audioBitrate: 567 })
 
-    expect(state.outputs[0]?.videoOptions).toMatchObject({ bitrate: 1234 })
-    expect(state.outputs[0]?.videoOptions?.quality).toBeUndefined()
-    expect(state.outputs[0]?.audioOptions).toMatchObject({ bitrate: 567 })
+    expect(state.outputs[0]?.videoOptions?.quality).toMatchObject({ value: { bitrate: 1234 } })
+    expect(state.outputs[0]?.audioOptions?.quality).toMatchObject({ value: { bitrate: 567 } })
   })
 
   it('rejects setAudio when the encoder has no audio track', async () => {
     const handle = createEncoder({ canvas: fakeCanvas() })
-    await expect(handle.setAudio({} as AudioBuffer)).rejects.toThrow(/withAudio/)
+    await expect(handle.setAudio({} as AudioBuffer)).rejects.toThrow(/audioInput: 'buffer'/)
+  })
+
+  it('accepts decoded audio samples without requiring AudioBuffer', async () => {
+    const handle = createEncoder({ canvas: fakeCanvas(), withAudio: true, audioInput: 'sample' })
+
+    await expect(handle.addAudioSample({} as never)).resolves.toBeUndefined()
+    await expect(handle.setAudio({} as AudioBuffer)).rejects.toThrow(/audioInput: 'buffer'/)
   })
 })
 

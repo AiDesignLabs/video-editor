@@ -2,8 +2,9 @@ import type { MediaInputHandle } from '@video-editor/media'
 import type { IAudioSegment, IKeyframeProperty, ITextSegment, IVideoFramesSegment, IVideoProtocol, SegmentUnion } from '@video-editor/shared'
 import type { ComputedRef, Ref, ShallowRef } from '@vue/reactivity'
 import type { Application, ApplicationOptions, Filter as PixiFilter } from 'pixi.js'
-import type { AssetUrlResolver } from './asset-resolution'
+import type { AssetUrlHandle, AssetUrlResolver } from './asset-resolution'
 import type { VisualBox } from './gizmo-math'
+import type { PlaybackStatistics } from './playback-statistics'
 import type { TextRun } from './text'
 import type { ShaderEffectContext, TimelinePlan, VisualRenderItem } from './timeline'
 import type { MaybeRef, PixiDisplayObject } from './types'
@@ -34,6 +35,7 @@ import {
   placeholder,
   reverseAudioBufferInPlace,
 } from './helpers'
+import { createPlaybackStatistics } from './playback-statistics'
 import { buildTextRuns, renderTextBitmap } from './text'
 import { measureTextRuns } from './text-bitmap'
 import {
@@ -82,6 +84,11 @@ export interface RendererOptions {
   manualRender?: boolean
   videoSourceMode?: 'auto' | 'element'
   warmUpResources?: boolean
+  /** Read remote media through HTTP ranges; the host owns background caching. */
+  streamRemoteMedia?: boolean
+  /** Called after a streaming video frame has been drawn, without waiting for the full file. */
+  onVideoFrameRendered?: (url: string) => void
+  onMediaError?: (error: Error) => void
   /** Ordered source timestamps used by offline export to keep video decoding sequential. */
   videoFrameSchedule?: ReadonlyMap<string, readonly number[]>
   /** Resolve a stable asset id to its current URL before media is loaded. */
@@ -89,6 +96,7 @@ export interface RendererOptions {
 }
 
 export interface Renderer {
+  playbackStats: ComputedRef<PlaybackStatistics>
   app: Application
   layer: Container
   currentTime: Ref<number>
@@ -96,6 +104,7 @@ export interface Renderer {
   isPlaying: Ref<boolean>
   play: () => void
   pause: () => void
+  setPlaybackRate: (rate: number) => void
   tick: (deltaMs?: number) => void
   seek: (time: number) => void
   renderAt: (time: number) => Promise<void>
@@ -115,6 +124,7 @@ function hasTransformKeyframes(segment: SegmentUnion) {
 }
 
 interface AudioManagerApi {
+  prepareStreamingAudio: (atTimelineMs: number) => Promise<void>
   setProtocol: (protocol: IVideoProtocol) => void
   applyTimelinePlan: (plan: TimelinePlan, isPlaying: boolean) => void
   resetTimelineState: (options?: { stop?: boolean }) => void
@@ -131,10 +141,21 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const validator = createValidator()
   const protocolInput: Ref<IVideoProtocol> | ShallowRef<IVideoProtocol>
     = isRef(opts.protocol) ? opts.protocol : shallowRef(opts.protocol)
-  const [initialVisualProtocol, initialAudioProtocol] = await Promise.all([
-    resolveProtocolAssetUrls(unref(protocolInput), opts.resolveAssetUrl, { media: 'visual' }),
-    resolveProtocolAssetUrls(unref(protocolInput), opts.resolveAssetUrl, { media: 'audio' }),
-  ])
+  let activeAssetHandles: AssetUrlHandle[] = []
+  const initialHandles: AssetUrlHandle[] = []
+  let initialVisualProtocol: IVideoProtocol
+  let initialAudioProtocol: IVideoProtocol
+  try {
+    [initialVisualProtocol, initialAudioProtocol] = await Promise.all([
+      resolveProtocolAssetUrls(unref(protocolInput), opts.resolveAssetUrl, { media: 'visual' }, handle => initialHandles.push(handle)),
+      resolveProtocolAssetUrls(unref(protocolInput), opts.resolveAssetUrl, { media: 'audio' }, handle => initialHandles.push(handle)),
+    ])
+  }
+  catch (error) {
+    initialHandles.forEach(handle => handle.release())
+    throw error
+  }
+  activeAssetHandles = initialHandles
   const validatedProtocol: ShallowRef<IVideoProtocol> = shallowRef(validator.verify(initialVisualProtocol))
   const validatedAudioProtocol: ShallowRef<IVideoProtocol> = shallowRef(validator.verify(initialAudioProtocol))
 
@@ -154,6 +175,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const decoderUnsupportedKeys = new Set<string>()
   const decoderErrorLoggedKeys = new Set<string>()
   const videoSourceMode = opts.videoSourceMode ?? 'auto'
+  let playbackRate = 1
+  const statistics = createPlaybackStatistics()
+  const playbackStats = shallowRef<PlaybackStatistics>({ fps: 0, presentedFrames: 0, droppedFrames: 0 })
+  let lastStatisticsAt = 0
+  let lastRequestedFrame = -1
+  let videoFrameRevision = 0
   const offlineComposition = opts.videoFrameSchedule !== undefined
   type VideoEntry = (
     | {
@@ -189,7 +216,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   const duration = computed(() => computeDuration(validatedProtocol.value))
   const mediaElementObjectUrls = new Map<string, string>()
   const mediaElementObjectUrlLoading = new Map<string, Promise<string | undefined>>()
+  const streamingMediaInputs = new Map<string, MediaInputHandle>()
+  let streamingAudioPrepared = !opts.streamRemoteMedia
   const audioManager: AudioManagerApi = new AudioManager(validatedAudioProtocol.value, {
+    streamRemoteMedia: opts.streamRemoteMedia,
     resolveMediaElementUrl,
     loadAudioBuffer,
   }) as unknown as AudioManagerApi
@@ -234,7 +264,12 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   function applyAudioPlan(plan: TimelinePlan) {
-    audioManager.applyTimelinePlan(plan, isPlaying.value)
+    audioManager.applyTimelinePlan(playbackRate === 1
+      ? plan
+      : {
+          ...plan,
+          audioEvents: plan.audioEvents.map(event => ({ ...event, rate: event.rate === undefined ? undefined : event.rate * playbackRate })),
+        }, isPlaying.value)
   }
 
   function syncAudioWithScheduler(protocol: IVideoProtocol, at: number) {
@@ -246,6 +281,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   async function renderScene(task: RenderTask) {
+    const previousVideoFrameRevision = videoFrameRevision
     const generation = renderGeneration
     const { protocol, at, layer } = task
     const renderTimelineMs = normalizeRenderTime(protocol, at)
@@ -335,6 +371,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       return
     lastVisualBoxes = boxes
     task.app.render()
+    if (isPlaying.value && (!visualItems.some(item => isVideoSegment(item.segment)) || videoFrameRevision !== previousVideoFrameRevision))
+      statistics.record(Math.floor(renderTimelineMs * Math.max(protocol.fps || 30, 1) / 1000), performance.now())
   }
 
   // Filters are reused across frames per segment: only a structural change
@@ -378,9 +416,13 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   let assetResolutionRevision = 0
   let rendererDestroyed = false
-  const applyProtocol = (nextProtocol: IVideoProtocol, nextAudioProtocol: IVideoProtocol, revision: number) => {
-    if (rendererDestroyed || revision !== assetResolutionRevision)
+  const applyProtocol = (nextProtocol: IVideoProtocol, nextAudioProtocol: IVideoProtocol, revision: number, nextHandles: AssetUrlHandle[]) => {
+    if (rendererDestroyed || revision !== assetResolutionRevision) {
+      nextHandles.forEach(handle => handle.release())
       return
+    }
+    activeAssetHandles.forEach(handle => handle.release())
+    activeAssetHandles = nextHandles
     validatedProtocol.value = nextProtocol
     validatedAudioProtocol.value = nextAudioProtocol
     audioManager.setProtocol(validatedAudioProtocol.value)
@@ -408,17 +450,23 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         validator.verify(cloneProtocol(protocol)),
         validator.verify(cloneProtocol(protocol)),
         revision,
+        [],
       )
       return
     }
+    const nextHandles: AssetUrlHandle[] = []
     return Promise.all([
-      resolveProtocolAssetUrls(protocol, opts.resolveAssetUrl, { media: 'visual' }),
-      resolveProtocolAssetUrls(protocol, opts.resolveAssetUrl, { media: 'audio' }),
+      resolveProtocolAssetUrls(protocol, opts.resolveAssetUrl, { media: 'visual' }, handle => nextHandles.push(handle)),
+      resolveProtocolAssetUrls(protocol, opts.resolveAssetUrl, { media: 'audio' }, handle => nextHandles.push(handle)),
     ]).then(([visual, audio]) => applyProtocol(
       validator.verify(visual),
       validator.verify(audio),
       revision,
-    ))
+      nextHandles,
+    )).catch((error) => {
+      nextHandles.forEach(handle => handle.release())
+      throw error
+    })
   }
 
   const refreshAssets = async () => {
@@ -448,6 +496,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       // React to time changes.
       watch(currentTime, () => {
         clampCurrentTime()
+        const frame = Math.floor(currentTime.value * Math.max(validatedProtocol.value.fps || 30, 1) / 1000)
+        if (isPlaying.value && frame === lastRequestedFrame)
+          return
+        lastRequestedFrame = frame
         queueRender()
       })
     }
@@ -498,6 +550,13 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   function cleanupCache(protocol: IVideoProtocol) {
+    const activeUrls = new Set([...collectResourceUrls(protocol), ...collectResourceUrls(validatedAudioProtocol.value)])
+    for (const [url, handle] of streamingMediaInputs) {
+      if (!activeUrls.has(url)) {
+        handle.dispose()
+        streamingMediaInputs.delete(url)
+      }
+    }
     const ids = new Set<string>()
     for (const track of protocol.tracks) {
       for (const child of track.children)
@@ -555,6 +614,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       return
     isPlaying.value = true
     const now = performance.now()
+    statistics.reset(now)
+    playbackStats.value = statistics.sample(now)
+    lastStatisticsAt = now
+    lastRequestedFrame = -1
     transport.seek(currentTime.value, now)
     transport.play(now)
     previewAudioTicker.start()
@@ -564,6 +627,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
   function pause() {
     isPlaying.value = false
+    playbackStats.value = { ...statistics.sample(performance.now()), fps: 0 }
     const now = performance.now()
     transport.pause(now)
     previewAudioTicker.stop()
@@ -581,12 +645,28 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       rafId = requestAnimationFrame(loop)
   }
 
+  function setPlaybackRate(rate: number) {
+    if (!Number.isFinite(rate) || rate <= 0)
+      throw new Error('Playback rate must be a positive number.')
+    playbackRate = rate
+    const now = performance.now()
+    transport.seek(currentTime.value, now)
+    transport.setRate(rate, now)
+    lastTickAt = now
+    if (isPlaying.value)
+      previewAudioTicker.tick()
+  }
+
   function tick(deltaMs?: number) {
     if (!isPlaying.value && deltaMs === undefined)
       return
 
     const now = performance.now()
-    const delta = deltaMs ?? (lastTickAt ? now - lastTickAt : 0)
+    if (now - lastStatisticsAt >= 250) {
+      playbackStats.value = statistics.sample(now)
+      lastStatisticsAt = now
+    }
+    const delta = deltaMs ?? (lastTickAt ? (now - lastTickAt) * playbackRate : 0)
     lastTickAt = now
 
     if (delta === 0)
@@ -605,6 +685,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   function seek(time: number) {
+    statistics.seek()
+    lastRequestedFrame = -1
     currentTime.value = clamp(time, 0, duration.value || Number.POSITIVE_INFINITY)
     transport.seek(currentTime.value, performance.now())
     resetSchedulerState()
@@ -789,7 +871,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       return existing.sprite
 
     const urlKey = getResourceKey(segment.url)
-    const allowDecoder = videoSourceMode !== 'element'
+    const allowDecoder = videoSourceMode !== 'element' || segment.reversed === true
     // Reversed playback needs random frame access, which the <video> element
     // cannot provide. Such segments are decoder-only; without a decoder they
     // stay unrendered rather than playing forwards by accident.
@@ -842,6 +924,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       }
       if (isMediaResourceHttpError(decoderLoadError))
         return undefined
+      if (opts.streamRemoteMedia) {
+        opts.onMediaError?.(decoderLoadError instanceof Error ? decoderLoadError : new Error('Streaming video decoding is unavailable.'))
+        return undefined
+      }
     }
 
     const spriteFromElement = await loadVideoSpriteViaElement(segment.url).catch((err) => {
@@ -880,9 +966,13 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         try {
           const ctx = entry.canvas.getContext('2d')
           if (ctx) {
-            const drawn = await entry.handle.drawFrame(ctx, relativeMs)
-            if (drawn)
+            const drawn = await entry.handle.drawFrame(ctx, relativeMs, { sequential: isPlaying.value && segment.reversed !== true && !offlineComposition })
+            if (drawn) {
+              videoFrameRevision++
               refreshCanvasTexture(entry.texture)
+              if (streamingAudioPrepared)
+                opts.onVideoFrameRendered?.(segment.url)
+            }
           }
           return
         }
@@ -898,6 +988,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
               sprite: entry.sprite,
               meta: entry.meta,
             })
+            return
+          }
+          if (opts.streamRemoteMedia) {
+            opts.onMediaError?.(err instanceof Error ? err : new Error('Streaming video decoding failed.'))
             return
           }
           const urlKey = getResourceKey(segment.url)
@@ -932,7 +1026,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         return
       await updateVideoElementFrame(entry, {
         targetSec: relativeSec,
-        playbackRate: segment.playRate ?? 1,
+        playbackRate: (segment.playRate ?? 1) * playbackRate,
       })
     }
     catch (err) {
@@ -946,7 +1040,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     reuse: { sprite: Sprite, oldTexture?: Texture },
     decoderOnly = false,
   ) {
-    const allowDecoder = videoSourceMode !== 'element'
+    const allowDecoder = videoSourceMode !== 'element' || decoderOnly
     if (decoderUnsupportedKeys.has(urlKey))
       return decoderOnly ? undefined : await loadVideoSpriteViaElement(url, reuse).catch(() => undefined)
 
@@ -1005,16 +1099,19 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (!segment.url)
       return undefined
     let file: ReturnType<typeof opfsFile> | undefined
-    if (shouldUseResourceManager(segment.url)) {
+    if (!opts.streamRemoteMedia && shouldUseResourceManager(segment.url)) {
       await resourceManager.add(segment.url).catch(() => {})
       file = await getOpfsFile(segment.url)
     }
     const originFile = file ? await file.getOriginFile() : undefined
-    const source = originFile ?? await fetchMediaBlob(segment.url)
-    const handle = openMediaInput(source)
+    const source = originFile ?? (opts.streamRemoteMedia ? segment.url : await fetchMediaBlob(segment.url))
+    const handle = opts.streamRemoteMedia ? openStreamingMediaInput(source) : openMediaInput(source)
     try {
-      if (!(await handle.canDecodeAudio()))
+      if (!(await handle.canDecodeAudio())) {
+        if (opts.streamRemoteMedia && (await handle.meta({ includeFrameRate: false, includeDuration: false })).hasAudio)
+          throw new Error('Streaming preview requires a supported WebCodecs audio decoder.')
         return undefined
+      }
       const fromTimeMs = Math.max(0, segment.fromTime ?? 0)
       const spanMs = sourceSpanMs(segment)
       if (spanMs <= 0)
@@ -1024,7 +1121,11 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         reverseAudioBufferInPlace(buffer)
       return buffer
     }
-    catch {
+    catch (error) {
+      if (opts.streamRemoteMedia) {
+        console.error('[renderer] streaming audio failed', error)
+        opts.onMediaError?.(error instanceof Error ? error : new Error('Streaming audio failed.'))
+      }
       return undefined
     }
     finally {
@@ -1042,6 +1143,9 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   async function ensureMediaElementObjectUrl(url: string): Promise<string | undefined> {
+    // Hosts using Asset Service own remote caching. Keep local protocol resources resolvable.
+    if (opts.streamRemoteMedia && !url.startsWith('local-asset://'))
+      return undefined
     if (!shouldUseResourceManager(url))
       return undefined
 
@@ -1167,17 +1271,19 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     frameSequence?: readonly number[],
   ): Promise<VideoEntry | undefined> {
     let file: ReturnType<typeof opfsFile> | undefined
-    if (shouldUseResourceManager(url)) {
+    if (!opts.streamRemoteMedia && shouldUseResourceManager(url)) {
       await resourceManager.add(url).catch(() => {})
       file = await getOpfsFile(url)
     }
 
     const originFile = file ? await file.getOriginFile() : undefined
-    const source = originFile ?? await fetchMediaBlob(url)
-    const handle = openMediaInput(source)
+    const source = originFile ?? (opts.streamRemoteMedia ? url : await fetchMediaBlob(url))
+    const handle = opts.streamRemoteMedia ? openStreamingMediaInput(source) : openMediaInput(source)
     try {
       if (!(await handle.canDecodeVideo())) {
         handle.dispose()
+        if (opts.streamRemoteMedia)
+          throw new Error('Streaming preview requires a supported WebCodecs video decoder.')
         const urlKey = getResourceKey(url)
         if (urlKey)
           decoderUnsupportedKeys.add(urlKey)
@@ -1186,7 +1292,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       if (frameSequence?.length)
         handle.prepareVideoFrameSequence(frameSequence)
 
-      const { width, height } = await handle.meta({ includeFrameRate: false })
+      const { width, height } = await handle.meta({ includeFrameRate: false, includeDuration: false })
       const canvas = document.createElement('canvas')
       canvas.width = width || 1
       canvas.height = height || 1
@@ -1203,6 +1309,18 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       handle.dispose()
       throw err
     }
+  }
+
+  function openStreamingMediaInput(source: string | Blob): MediaInputHandle {
+    if (typeof source !== 'string')
+      return openMediaInput(source)
+    let handle = streamingMediaInputs.get(source)
+    if (!handle) {
+      handle = openMediaInput(source)
+      streamingMediaInputs.set(source, handle)
+    }
+    // Audio windows and video frames share the same range cache. The renderer owns disposal.
+    return { ...handle, dispose() {} }
   }
 
   function inferUrlMediaType(url: string): 'video' | 'image' | 'audio' | 'unknown' {
@@ -1265,10 +1383,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     return { kind: 'element', video, canvas, texture, sprite, meta: { width, height } }
   }
 
-  async function updateVideoElementFrame(entry: Extract<VideoEntry, { kind: 'element' }>, opts: { targetSec: number, playbackRate: number }) {
+  async function updateVideoElementFrame(entry: Extract<VideoEntry, { kind: 'element' }>, frameOptions: { targetSec: number, playbackRate: number }) {
     const { video, canvas, texture } = entry
 
-    video.playbackRate = Number.isFinite(opts.playbackRate) && opts.playbackRate > 0 ? opts.playbackRate : 1
+    video.playbackRate = Number.isFinite(frameOptions.playbackRate) && frameOptions.playbackRate > 0 ? frameOptions.playbackRate : 1
     video.muted = true
     video.volume = 0
 
@@ -1278,7 +1396,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       video.pause()
 
     const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null
-    const targetSec = duration ? Math.min(opts.targetSec, Math.max(duration - 0.03, 0)) : opts.targetSec
+    const targetSec = duration ? Math.min(frameOptions.targetSec, Math.max(duration - 0.03, 0)) : frameOptions.targetSec
 
     const current = video.currentTime
     const drift = Math.abs(current - targetSec)
@@ -1304,7 +1422,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (!ctx)
       return
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    videoFrameRevision++
     refreshCanvasTexture(texture)
+    if (streamingAudioPrepared)
+      opts.onVideoFrameRendered?.(video.currentSrc || video.src)
   }
 
   function loadImageTexture(url: string): Promise<Texture | undefined> {
@@ -1337,6 +1458,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     pause()
     renderGeneration += 1
     scope.stop()
+    activeAssetHandles.forEach(handle => handle.release())
+    activeAssetHandles = []
     lastVisualBoxes = []
     clearDisplays()
     layer.destroy({ children: true })
@@ -1351,17 +1474,24 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
       app.destroy()
 
     audioManager.destroy()
+    streamingMediaInputs.forEach(handle => handle.dispose())
+    streamingMediaInputs.clear()
   }
 
   // A local asset cannot be passed directly to HTMLAudioElement. Resolve its
   // OPFS-backed blob URL before createRenderer returns, so the first play call
   // stays inside the user's click and is not rejected as delayed autoplay.
   await prepareMediaElementSources(validatedAudioProtocol.value)
+  if (opts.streamRemoteMedia) {
+    await audioManager.prepareStreamingAudio(currentTime.value)
+    streamingAudioPrepared = true
+  }
 
   if (opts.autoPlay)
     play()
 
   return {
+    playbackStats: computed(() => playbackStats.value),
     app,
     layer,
     currentTime,
@@ -1369,6 +1499,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     isPlaying,
     play,
     pause,
+    setPlaybackRate,
     tick,
     seek,
     renderAt,

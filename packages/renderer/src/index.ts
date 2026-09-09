@@ -1,5 +1,6 @@
 export { resolveProtocolAssetUrls } from './asset-resolution'
-export type { AssetResolutionContext, AssetUrlResolver } from './asset-resolution'
+export const RENDERER_API_VERSION = 2
+export type { AssetResolutionContext, AssetUrlHandle, AssetUrlResolver } from './asset-resolution'
 export { composeProtocol } from './compose'
 export type {
   ComposeClipOptions,
@@ -7,8 +8,8 @@ export type {
   ComposeProtocolOptions,
   ComposeProtocolResult,
 } from './compose'
-
 export { createExportTask } from './export-task'
+
 export type {
   ExportTask,
   ExportTaskOptions,
@@ -16,7 +17,6 @@ export type {
   ExportTaskState,
   ExportTaskStatus,
 } from './export-task'
-
 export {
   GIZMO_POSITION_MAX,
   GIZMO_POSITION_MIN,
@@ -30,7 +30,9 @@ export {
   snapRotationDeg,
   toBoxLocalPoint,
 } from './gizmo-math'
+
 export type { GizmoBox, VisualBox } from './gizmo-math'
+export type { PlaybackStatistics } from './playback-statistics'
 
 export { createRenderer } from './renderer-core'
 export type { Renderer, RendererOptions } from './renderer-core'

@@ -31,6 +31,8 @@ interface PlannedVoiceRuntime {
 type AudioElementSegment = IAudioSegment | IVideoFramesSegment
 
 interface AudioManagerOptions {
+  /** Decode bounded forward windows instead of loading a complete fragmented file in an audio element. */
+  streamRemoteMedia?: boolean
   resolveMediaElementUrl?: (segment: AudioElementSegment) => string | undefined
   /**
    * Decode a reversed segment's source window into an AudioBuffer. Forward
@@ -46,6 +48,7 @@ interface DecodedBufferVoice {
   cacheKey: string
   /** Source time (ms) represented by buffer position 0. */
   bufferStartMs: number
+  loadSegment?: AudioElementSegment
   gainNode: GainNode
   buffer?: AudioBuffer
   loading?: Promise<AudioBuffer | undefined>
@@ -69,8 +72,11 @@ export class AudioManager {
   private audioElements = new Map<string, AudioElementState>()
   private decodedBufferVoices = new Map<string, DecodedBufferVoice>()
   private ctx: AudioContext
+  private streamingBuffers = new Map<string, Promise<AudioBuffer | undefined>>()
 
   constructor(protocol: IVideoProtocol, options: AudioManagerOptions = {}) {
+    if (options.streamRemoteMedia && !options.loadAudioBuffer)
+      throw new Error('Streaming audio requires a range-based audio buffer loader.')
     this.protocol = protocol
     this.options = options
     this.ctx = createAudioContext()
@@ -78,6 +84,32 @@ export class AudioManager {
 
   public setProtocol(protocol: IVideoProtocol) {
     this.protocol = protocol
+  }
+
+  public async prepareStreamingAudio(atTimelineMs: number) {
+    if (!this.options.streamRemoteMedia)
+      return
+    const tasks: Promise<AudioBuffer | undefined>[] = []
+    for (const track of this.protocol.tracks) {
+      for (const segment of track.children) {
+        if ((segment.segmentType !== 'audio' && !(segment.segmentType === 'frames' && segment.type === 'video'))
+          || segment.reversed || atTimelineMs < segment.startTime || atTimelineMs >= segment.endTime
+          || (segment.volume ?? 1) <= 0) {
+          continue
+        }
+        const start = Math.max(0, segment.fromTime ?? 0)
+        const offset = mapSourceTimeMs(segment, atTimelineMs)
+        const windowStart = start + Math.floor(Math.max(0, offset - start) / 2000) * 2000
+        const windowEnd = Math.min(start + sourceSpanMs(segment), windowStart + 2000)
+        tasks.push(this.loadStreamingBuffer({
+          ...segment,
+          fromTime: windowStart,
+          startTime: 0,
+          endTime: (windowEnd - windowStart) / this.normalizePlayRate(segment.playRate),
+        }))
+      }
+    }
+    await Promise.all(tasks)
   }
 
   public applyTimelinePlan(
@@ -189,6 +221,7 @@ export class AudioManager {
     for (const state of this.audioElements.values())
       this.destroyAudioElement(state.el)
     this.audioElements.clear()
+    this.streamingBuffers.clear()
   }
 
   private stopAll() {
@@ -228,6 +261,10 @@ export class AudioManager {
   }
 
   private applyAudioPlanEvent(event: AudioPlanEvent) {
+    if (this.options.streamRemoteMedia) {
+      this.applyDecodedBufferAudioEvent(event)
+      return
+    }
     if (event.segmentKind === 'audio') {
       const key = this.audioKey(event.segmentId)
       const segment = this.findAudioSegment(event.segmentId)
@@ -270,9 +307,11 @@ export class AudioManager {
       : this.findVideoSegment(event.segmentId)
     if (!segment)
       return
-    const state = this.getOrCreateDecodedBufferVoice(key, event.segmentKind, segment)
+    const sourceOffsetMs = this.computeSegmentSourceOffsetMs(segment, event.atTimelineMs, event.sourceTimeMs)
+    const streamForward = this.options.streamRemoteMedia && segment.reversed !== true
+    const state = this.getOrCreateDecodedBufferVoice(key, event.segmentKind, segment, streamForward ? sourceOffsetMs : undefined)
     if (state.failed) {
-      if (segment.reversed === true) {
+      if (segment.reversed === true || streamForward) {
         voice.phase = 'ended'
         return
       }
@@ -295,7 +334,7 @@ export class AudioManager {
       }
     }
 
-    if (event.action === 'start' || event.action === 'seek') {
+    if (event.action === 'start' || event.action === 'seek' || streamForward) {
       const sourceOffsetMs = this.computeSegmentSourceOffsetMs(
         segment,
         event.atTimelineMs,
@@ -331,13 +370,30 @@ export class AudioManager {
     key: string,
     segmentKind: 'audio' | 'video',
     segment: AudioElementSegment,
+    streamTimeMs?: number,
   ): DecodedBufferVoice {
+    const windowMs = 2000
+    const sourceStartMs = Math.max(0, segment.fromTime ?? 0)
+    const windowStartMs = streamTimeMs === undefined
+      ? sourceStartMs
+      : sourceStartMs + Math.floor(Math.max(0, streamTimeMs - sourceStartMs) / windowMs) * windowMs
+    const sourceEndMs = sourceStartMs + sourceSpanMs(segment)
+    const windowEndMs = streamTimeMs === undefined ? sourceEndMs : Math.min(sourceEndMs, windowStartMs + windowMs)
+    const loadSegment = streamTimeMs === undefined
+      ? segment
+      : {
+          ...segment,
+          fromTime: windowStartMs,
+          startTime: 0,
+          endTime: (windowEndMs - windowStartMs) / this.normalizePlayRate(segment.playRate),
+        }
     const cacheKey = [
       segment.url,
       segment.fromTime ?? 0,
       segment.endTime - segment.startTime,
       segment.playRate ?? 1,
       segment.reversed === true ? 'reversed' : 'forward',
+      windowStartMs,
     ].join('::')
     const existing = this.decodedBufferVoices.get(key)
     if (existing && existing.cacheKey === cacheKey)
@@ -352,26 +408,57 @@ export class AudioManager {
       segmentId: segment.id,
       segmentKind,
       cacheKey,
-      bufferStartMs: Math.max(0, segment.fromTime ?? 0),
+      bufferStartMs: windowStartMs,
+      loadSegment,
       gainNode,
       startCtxTime: 0,
       startOffsetSec: 0,
       rate: this.normalizePlayRate(segment.playRate),
     }
     this.decodedBufferVoices.set(key, state)
+    if (streamTimeMs !== undefined && windowEndMs < sourceEndMs) {
+      const nextEndMs = Math.min(sourceEndMs, windowEndMs + windowMs)
+      void this.loadStreamingBuffer({
+        ...segment,
+        fromTime: windowEndMs,
+        startTime: 0,
+        endTime: (nextEndMs - windowEndMs) / this.normalizePlayRate(segment.playRate),
+      })
+    }
     return state
+  }
+
+  private loadStreamingBuffer(segment: AudioElementSegment) {
+    const key = `${segment.url}:${segment.fromTime}:${sourceSpanMs(segment)}`
+    const existing = this.streamingBuffers.get(key)
+    if (existing)
+      return existing
+    const task = this.options.loadAudioBuffer!(segment).catch((error) => {
+      console.error('[renderer] streaming audio decode failed', error)
+      return undefined
+    })
+    this.streamingBuffers.set(key, task)
+    // Retain only nearby windows; long reviews must not accumulate decoded PCM.
+    while (this.streamingBuffers.size > 4) {
+      const oldest = this.streamingBuffers.keys().next().value
+      if (oldest !== undefined)
+        this.streamingBuffers.delete(oldest)
+    }
+    return task
   }
 
   private startDecodedBufferVoice(state: DecodedBufferVoice, offsetSec: number, forceSeek: boolean) {
     if (!state.buffer) {
       state.pendingStart = { offsetSec, requestedAtCtxTime: this.ctx.currentTime }
       if (!state.loading) {
-        const segment = state.segmentKind === 'audio'
+        const segment = state.loadSegment ?? (state.segmentKind === 'audio'
           ? this.findAudioSegment(state.segmentId)
-          : this.findVideoSegment(state.segmentId)
+          : this.findVideoSegment(state.segmentId))
         if (!segment || !this.options.loadAudioBuffer)
           return
-        state.loading = this.options.loadAudioBuffer(segment)
+        state.loading = (this.options.streamRemoteMedia && segment.reversed !== true
+          ? this.loadStreamingBuffer(segment)
+          : this.options.loadAudioBuffer(segment))
           .catch(() => undefined)
           .then((buffer) => {
             state.loading = undefined

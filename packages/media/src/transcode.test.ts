@@ -11,7 +11,8 @@ const { state } = vi.hoisted(() => ({
     hasAudioTrack: false,
     audioCanDecode: true,
     audioSampleCount: 0,
-    encodedAudioBuffers: 0,
+    encodedAudioSamples: 0,
+    closedAudioSamples: 0,
     /** Source frames the fake decoder hands out. */
     sampleCount: 5,
     closedSamples: 0,
@@ -101,10 +102,10 @@ vi.mock('mediabunny', () => {
     async getPrimaryVideoTrack() {
       return state.hasVideoTrack
         ? {
-            displayWidth: 1920,
-            displayHeight: 1080,
-            rotation: state.trackRotation,
-            codec: 'avc',
+            getDisplayWidth: async () => 1920,
+            getDisplayHeight: async () => 1080,
+            getRotation: async () => state.trackRotation,
+            getCodec: async () => 'avc',
             canDecode: async () => state.canDecode,
             computePacketStats: async () => ({ packetCount: state.sampleCount }),
           }
@@ -161,8 +162,13 @@ vi.mock('mediabunny', () => {
     async* samples() {
       for (let i = 0; i < state.audioSampleCount; i++) {
         yield {
-          toAudioBuffer: () => ({ index: i }),
-          close() {},
+          index: i,
+          toAudioBuffer: () => {
+            throw new ReferenceError('AudioBuffer is not defined')
+          },
+          close: () => {
+            state.closedAudioSamples += 1
+          },
         }
       }
     }
@@ -212,15 +218,21 @@ vi.mock('mediabunny', () => {
     },
     AudioBufferSource: class {
       async add() {
-        state.encodedAudioBuffers += 1
+        throw new Error('AudioBufferSource must not be used by transcode')
+      }
+    },
+    AudioSampleSource: class {
+      async add() {
+        state.encodedAudioSamples += 1
       }
     },
     Output,
+    Quality: class {
+      constructor(public value: string | Record<string, unknown>) {}
+    },
     StreamTarget,
     VideoSampleSink,
     AudioSampleSink,
-    QUALITY_HIGH: 'high',
-    QUALITY_MEDIUM: 'medium',
   }
 })
 
@@ -262,7 +274,8 @@ beforeEach(() => {
   state.hasAudioTrack = false
   state.audioCanDecode = true
   state.audioSampleCount = 0
-  state.encodedAudioBuffers = 0
+  state.encodedAudioSamples = 0
+  state.closedAudioSamples = 0
   state.sampleCount = 5
   state.closedSamples = 0
   state.draws = 0
@@ -343,7 +356,8 @@ describe('transcode', () => {
       openSink: () => createSink().stream,
     })
 
-    expect(state.encodedAudioBuffers).toBe(6)
+    expect(state.encodedAudioSamples).toBe(6)
+    expect(state.closedAudioSamples).toBe(3)
   })
 
   it('fails instead of silently dropping an undecodable audio track', async () => {
@@ -406,7 +420,10 @@ describe('transcode', () => {
       openSink: () => createSink().stream,
     })
 
-    expect(state.encoders[0]!.options).toMatchObject({ keyFrameInterval: 1.5, bitrate: 600_000 })
+    expect(state.encoders[0]!.options).toMatchObject({
+      keyFrameInterval: 1.5,
+      quality: { value: { bitrate: 600_000 } },
+    })
   })
 
   it('passes encoder latency and acceleration hints through per rendition', async () => {

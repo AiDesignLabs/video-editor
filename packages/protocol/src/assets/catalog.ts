@@ -1,3 +1,4 @@
+import type { AssetService, AssetUrlHandle } from '@video-editor/assets'
 import type { IVideoProtocol } from '@video-editor/shared'
 import type { GenerateThumbnailsOptions, Thumbnail } from '../resource/thumbnails'
 import type { WaveformData, WaveformOptions } from '../resource/waveform'
@@ -43,6 +44,8 @@ export interface MediaAssetCatalogOptions {
   manifestDir?: string
   /** Required by remove() so referenced media cannot be deleted. */
   getProtectedProtocols?: () => readonly IVideoProtocol[] | Promise<readonly IVideoProtocol[]>
+  /** Optional shared asset runtime. Existing OPFS catalog storage remains available during migration. */
+  assetService?: Pick<AssetService, 'upsertAsset' | 'resolveUrl'>
 }
 
 export interface MediaAssetPreviewProgress {
@@ -82,6 +85,8 @@ export interface MediaAssetCatalog {
   generatePreviewVersion: (id: string, options?: GenerateMediaAssetPreviewOptions) => Promise<MediaAsset>
   resolveForPreview: (id: string, fallbackUrl?: string, context?: MediaAssetPreviewResolveContext) => Promise<string | undefined>
   resolveForExport: (id: string) => Promise<string | undefined>
+  resolveHandleForPreview: (id: string, fallbackUrl?: string) => Promise<AssetUrlHandle | undefined>
+  resolveHandleForExport: (id: string) => Promise<AssetUrlHandle | undefined>
   remove: (id: string) => Promise<void>
 }
 
@@ -126,7 +131,7 @@ interface MediaAssetCatalogDependencies {
 /** Internal dependency-injection entry used by focused tests. */
 export function createMediaAssetCatalogFromLibrary(
   library: AssetLibrary,
-  options: Pick<MediaAssetCatalogOptions, 'getProtectedProtocols'> = {},
+  options: Pick<MediaAssetCatalogOptions, 'getProtectedProtocols' | 'assetService'> = {},
   dependencies: MediaAssetCatalogDependencies = { generatePreviewFile: generateVideoPreviewFile },
 ): MediaAssetCatalog {
   const activePreviewGenerations = new Set<string>()
@@ -156,7 +161,52 @@ export function createMediaAssetCatalogFromLibrary(
 
   async function importAsset(file: File): Promise<MediaAsset> {
     const asset = await library.importAsset(file)
+    await registerWithAssetService(asset)
     return toMediaAsset(asset, [asset])
+  }
+
+  async function registerWithAssetService(asset: AssetMeta) {
+    if (!options.assetService)
+      return
+    const now = Date.now()
+    await options.assetService.upsertAsset({
+      assetId: asset.id,
+      sourceRevision: asset.revision ?? 1,
+      kind: asset.kind,
+      name: asset.name,
+      createdAt: asset.createdAt,
+      updatedAt: now,
+    }, [{
+      assetId: asset.id,
+      sourceRevision: asset.revision ?? 1,
+      variantId: asset.derivation ? asset.id : 'source',
+      profileId: asset.derivation?.profile,
+      remoteRecovery: asset.url.startsWith('local-asset://') ? 'none' : 'host-refreshable',
+      contentType: fileTypeFromName(asset.name),
+      sizeBytes: asset.sizeBytes,
+      width: asset.width,
+      height: asset.height,
+      durationMs: asset.durationMs,
+      createdAt: asset.createdAt,
+      updatedAt: now,
+    }])
+  }
+
+  async function resolveHandle(id: string, preferProxy: boolean, fallbackUrl?: string): Promise<AssetUrlHandle | undefined> {
+    const assets = await library.listAssets()
+    const target = resolveCatalogAsset(assets, id, preferProxy)
+    if (!target)
+      return undefined
+    if (!options.assetService)
+      return { url: target.url, source: 'url', release() {} }
+    return await options.assetService.resolveUrl({
+      ref: {
+        assetId: target.derivation?.sourceAssetId ?? target.id,
+        sourceRevision: target.derivation?.sourceRevision ?? target.revision ?? 1,
+        variantId: target.derivation ? target.id : 'source',
+      },
+      fallbackUrl: fallbackUrl ?? target.url,
+    })
   }
 
   async function bindForSegment(id: string): Promise<SegmentAssetBinding> {
@@ -283,6 +333,31 @@ export function createMediaAssetCatalogFromLibrary(
       preferProxy: true,
       proxyProfile: EDITING_PROXY_PROFILE,
     }),
+    resolveHandleForPreview: (id, fallbackUrl) => resolveHandle(id, true, fallbackUrl),
+    resolveHandleForExport: id => resolveHandle(id, false),
     remove,
   }
+}
+
+function resolveCatalogAsset(assets: readonly AssetMeta[], id: string, preferProxy: boolean) {
+  const source = assets.find(asset => asset.id === id)
+  if (!source || !preferProxy)
+    return source
+  return assets.filter(asset => asset.derivation?.sourceAssetId === source.id
+    && asset.derivation.sourceRevision === (source.revision ?? 1)
+    && asset.derivation.profile === EDITING_PROXY_PROFILE)
+    .sort((a, b) => b.createdAt - a.createdAt)[0] ?? source
+}
+
+function fileTypeFromName(name: string) {
+  const extension = name.split('.').pop()?.toLowerCase()
+  if (extension === 'mp4')
+    return 'video/mp4'
+  if (extension === 'mp3')
+    return 'audio/mpeg'
+  if (extension === 'png')
+    return 'image/png'
+  if (extension === 'jpg' || extension === 'jpeg')
+    return 'image/jpeg'
+  return undefined
 }

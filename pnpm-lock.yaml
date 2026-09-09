@@ -173,6 +173,9 @@ catalogs:
     eslint-plugin-format:
       specifier: ^2.0.1
       version: 2.0.1
+    idb:
+      specifier: ^8.0.3
+      version: 8.0.3
     immer:
       specifier: ^11.1.18
       version: 11.1.18
@@ -308,6 +311,18 @@ importers:
         specifier: 'catalog:'
         version: 3.3.11(@typescript/typescript6@6.0.2)
 
+  packages/assets:
+    dependencies:
+      '@video-editor/media':
+        specifier: workspace:*
+        version: link:../media
+      idb:
+        specifier: 'catalog:'
+        version: 8.0.3
+      opfs-tools:
+        specifier: 'catalog:'
+        version: 0.7.4
+
   packages/devtools: {}
 
   packages/editor:
@@ -343,6 +358,9 @@ importers:
 
   packages/protocol:
     dependencies:
+      '@video-editor/assets':
+        specifier: workspace:*
+        version: link:../assets
       '@video-editor/media':
         specifier: workspace:*
         version: link:../media
@@ -2575,6 +2593,10 @@ packages:
     resolution: {integrity: sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g==}
     engines: {node: '>=0.12'}
 
+  entities@7.0.0:
+    resolution: {integrity: sha512-FDWG5cmEYf2Z00IkYRhbFrwIwvdFKH07uV8dvNy0omp/Qb1xcyCWp2UDtcwJF4QZZvk0sLudP6/hAu42TaqVhQ==}
+    engines: {node: '>=0.12'}
+
   entities@7.0.1:
     resolution: {integrity: sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA==}
     engines: {node: '>=0.12'}
@@ -3021,6 +3043,9 @@ packages:
   iconv-lite@0.6.3:
     resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
     engines: {node: '>=0.10.0'}
+
+  idb@8.0.3:
+    resolution: {integrity: sha512-LtwtVyVYO5BqRvcsKuB2iUMnHwPVByPCXFXOpuU96IZPPoPN6xjOGxZQ74pgSVVLQWtUOYgyeL4GE98BY5D3wg==}
 
   identifier-regex@1.1.0:
     resolution: {integrity: sha512-SLX4H/vtcYlYnL7XqnuJKHU7Z8517TgsW9nmQiGOgMCjQ8V/deLYu6bEmbGoXe7WMMhc9+EUGyFFneHja8KabA==}
@@ -5957,7 +5982,7 @@ snapshots:
     dependencies:
       '@babel/parser': 7.28.5
       '@vue/shared': 3.5.26
-      entities: 7.0.1
+      entities: 7.0.0
       estree-walker: 2.0.2
       source-map-js: 1.2.1
 
@@ -6428,6 +6453,8 @@ snapshots:
   entities@4.5.0: {}
 
   entities@6.0.1: {}
+
+  entities@7.0.0: {}
 
   entities@7.0.1: {}
 
@@ -6996,6 +7023,8 @@ snapshots:
   iconv-lite@0.6.3:
     dependencies:
       safer-buffer: 2.1.2
+
+  idb@8.0.3: {}
 
   identifier-regex@1.1.0:
     dependencies:
@@ -8176,7 +8205,7 @@ snapshots:
 
   ts-declaration-location@1.0.7(@typescript/typescript6@6.0.2):
     dependencies:
-      picomatch: 4.0.3
+      picomatch: 4.0.7
       typescript: '@typescript/typescript6@6.0.2'
     optional: true
 

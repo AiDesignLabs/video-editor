@@ -15,4 +15,5 @@ export interface TransitionSeam extends TransitionEditPayload {
   key: string
   left: number
   top: number
+  showDurationLabel: boolean
 }

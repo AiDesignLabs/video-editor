@@ -38,6 +38,7 @@ const emit = defineEmits<{
 const draftWidth = ref(String(props.width))
 const draftHeight = ref(String(props.height))
 const draftFps = ref(String(props.fps ?? ''))
+const customWidthInput = ref<HTMLInputElement | null>(null)
 
 watch(() => [props.width, props.height], ([width, height]) => {
   draftWidth.value = String(width)
@@ -58,6 +59,13 @@ function applyPreset(preset: CanvasSizePreset) {
   if (props.disabled)
     return
   emit('change', { width: preset.width, height: preset.height })
+}
+
+function activateCustomSize() {
+  if (props.disabled)
+    return
+  customWidthInput.value?.focus()
+  customWidthInput.value?.select()
 }
 
 function commitDraft() {
@@ -96,7 +104,21 @@ function swapOrientation() {
         :title="`${preset.width} × ${preset.height}`"
         @click="applyPreset(preset)"
       >
-        {{ preset.label }}
+        <span v-if="preset.icon" class="canvas-size__preset-icon" :class="preset.icon" aria-hidden="true" />
+        <span class="canvas-size__preset-label">{{ preset.label }}</span>
+      </button>
+      <button
+        class="canvas-size__preset"
+        :class="{ 'canvas-size__preset--selected': activePresetId === null }"
+        type="button"
+        role="radio"
+        :aria-checked="activePresetId === null"
+        :disabled="disabled"
+        title="自由尺寸"
+        @click="activateCustomSize"
+      >
+        <span class="canvas-size__preset-icon i-creatly-auto-bili" aria-hidden="true" />
+        <span class="canvas-size__preset-label">自由</span>
       </button>
     </div>
 
@@ -104,6 +126,7 @@ function swapOrientation() {
       <label class="canvas-size__field">
         <span class="canvas-size__field-label">宽</span>
         <input
+          ref="customWidthInput"
           v-model="draftWidth"
           class="canvas-size__input"
           type="number"
@@ -176,11 +199,11 @@ function swapOrientation() {
 
 .canvas-size .canvas-size__presets {
   --at-apply: grid gap-0.5;
-  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  grid-template-columns: repeat(3, minmax(64px, 1fr));
 }
 
 .canvas-size .canvas-size__preset {
-  --at-apply: cursor-pointer border-none truncate text-center;
+  --at-apply: flex cursor-pointer items-center justify-center gap-1 border-none text-center;
   height: var(--ve-option-height, 32px);
   padding: 0 var(--ve-option-padding-x, 8px);
   border-radius: var(--ve-option-radius, 8px);
@@ -189,6 +212,14 @@ function swapOrientation() {
   color: var(--ve-content-primary, #222226);
   background: var(--ve-option-background, transparent);
   transition: background-color 150ms;
+}
+
+.canvas-size .canvas-size__preset-icon {
+  --at-apply: h-4 w-4 shrink-0;
+}
+
+.canvas-size .canvas-size__preset-label {
+  --at-apply: min-w-0 truncate;
 }
 
 .canvas-size .canvas-size__preset:hover:not(:disabled) {

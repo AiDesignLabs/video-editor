@@ -26,6 +26,21 @@ const protocol: IVideoProtocol = {
 }
 
 describe('resolveProtocolAssetUrls', () => {
+  it('accepts releasable URL handles and reports them to the owner', async () => {
+    const release = vi.fn()
+    const handles: import('./asset-resolution').AssetUrlHandle[] = []
+    const resolved = await resolveProtocolAssetUrls(
+      protocol,
+      async () => ({ url: 'blob:cached-image', source: 'opfs', release }),
+      { media: 'visual' },
+      handle => handles.push(handle),
+    )
+    expect(resolved.tracks[0].children[0].url).toBe('blob:cached-image')
+    expect(handles).toHaveLength(1)
+    handles[0]?.release()
+    expect(release).toHaveBeenCalledOnce()
+  })
+
   it('uses the current URL without changing the source protocol', async () => {
     const resolved = await resolveProtocolAssetUrls(protocol, async (assetId, fallbackUrl) => {
       expect(assetId).toBe('asset-1')

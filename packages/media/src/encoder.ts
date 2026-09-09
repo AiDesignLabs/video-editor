@@ -1,12 +1,12 @@
-import type { AudioCodec, OutputFormat, VideoCodec } from 'mediabunny'
+import type { AudioCodec, AudioSample, OutputFormat, VideoCodec } from 'mediabunny'
 import {
   AudioBufferSource,
+  AudioSampleSource,
   canEncodeAudio,
   canEncodeVideo,
   Mp4OutputFormat,
   Output,
-  QUALITY_HIGH,
-  QUALITY_MEDIUM,
+  Quality,
   StreamTarget,
   VideoSample,
   VideoSampleSource,
@@ -45,6 +45,9 @@ const AUDIO_CODEC: Record<EncoderFormat, AudioCodec> = {
   mp4: 'aac',
   webm: 'opus',
 }
+
+const DEFAULT_VIDEO_QUALITY = new Quality('high')
+const DEFAULT_AUDIO_QUALITY = new Quality('medium')
 
 export interface Mp4EncoderOptions {
   /** Canvas whose current state is captured on every `addFrame` call. */
@@ -92,6 +95,8 @@ export interface Mp4EncoderOptions {
   onEncoderConfig?: (config: VideoEncoderConfig) => void
   /** Add an AAC audio track fed via `setAudio`. */
   withAudio?: boolean
+  /** Use decoded media samples directly when encoding outside the main thread. */
+  audioInput?: 'buffer' | 'sample'
   /** Target audio bitrate in bits per second; defaults to a medium-quality preset. */
   audioBitrate?: number
 }
@@ -126,6 +131,8 @@ export interface Mp4EncoderHandle {
   addVideoFrame: (frame: VideoFrame, timestampMs: number, durationMs: number) => Promise<FrameTiming>
   /** Encode the mixed-down audio. Requires `withAudio`. */
   setAudio: (buffer: AudioBuffer) => Promise<void>
+  /** Encode one decoded audio sample. Requires `withAudio` and `audioInput: 'sample'`. */
+  addAudioSample: (sample: AudioSample) => Promise<void>
   finalize: () => Promise<void>
   cancel: () => Promise<void>
   /**
@@ -258,7 +265,9 @@ export function createEncoder(options: EncoderOptions): EncoderHandle {
    */
   const videoSource = new VideoSampleSource({
     codec: videoCodec,
-    ...(options.videoBitrate ? { bitrate: options.videoBitrate } : { quality: QUALITY_HIGH }),
+    quality: options.videoBitrate
+      ? new Quality({ bitrate: options.videoBitrate })
+      : DEFAULT_VIDEO_QUALITY,
     ...(options.keyFrameIntervalMs === undefined
       ? {}
       : { keyFrameInterval: options.keyFrameIntervalMs / 1000 }),
@@ -268,13 +277,23 @@ export function createEncoder(options: EncoderOptions): EncoderHandle {
   })
   output.addVideoTrack(videoSource, options.frameRate ? { frameRate: options.frameRate } : undefined)
 
-  let audioSource: AudioBufferSource | undefined
+  let audioBufferSource: AudioBufferSource | undefined
+  let audioSampleSource: AudioSampleSource | undefined
   if (options.withAudio) {
-    audioSource = new AudioBufferSource({
+    const audioOptions = {
       codec: AUDIO_CODEC[format],
-      ...(options.audioBitrate ? { bitrate: options.audioBitrate } : { quality: QUALITY_MEDIUM }),
-    })
-    output.addAudioTrack(audioSource)
+      quality: options.audioBitrate
+        ? new Quality({ bitrate: options.audioBitrate })
+        : DEFAULT_AUDIO_QUALITY,
+    }
+    if (options.audioInput === 'sample') {
+      audioSampleSource = new AudioSampleSource(audioOptions)
+      output.addAudioTrack(audioSampleSource)
+    }
+    else {
+      audioBufferSource = new AudioBufferSource(audioOptions)
+      output.addAudioTrack(audioBufferSource)
+    }
   }
 
   const started = output.start()
@@ -342,10 +361,17 @@ export function createEncoder(options: EncoderOptions): EncoderHandle {
     },
 
     async setAudio(buffer) {
-      if (!audioSource)
-        throw new Error('encoder was created without audio; pass withAudio: true')
+      if (!audioBufferSource)
+        throw new Error('encoder requires withAudio: true and audioInput: \'buffer\' to accept AudioBuffer input')
       await started
-      await audioSource.add(buffer)
+      await audioBufferSource.add(buffer)
+    },
+
+    async addAudioSample(sample) {
+      if (!audioSampleSource)
+        throw new Error('encoder requires withAudio: true and audioInput: \'sample\' to accept AudioSample input')
+      await started
+      await audioSampleSource.add(sample)
     },
 
     async finalize() {

@@ -4,12 +4,13 @@ import ajvErrors from 'ajv-errors'
 import ajvFormats from 'ajv-formats'
 import ajvKeywords from 'ajv-keywords'
 import { audioSegmentRule, effectSegmentRule, filterSegmentRule, framesSegmentRule, stickerSegmentRule, textSegmentRule, trackRule, videoProtocolBasicRule } from './rules'
+import { schemaUriResolver } from './schema-uri-resolver'
 
 export const DUPLICATE_SEGMENT_ID = 'duplicate segment id'
 export const DUPLICATE_TRACK_ID = 'duplicate track id'
 
 export function createValidator() {
-  const ajv = new Ajv({ allErrors: true, strict: 'log' })
+  const ajv = new Ajv({ allErrors: true, strict: 'log', uriResolver: schemaUriResolver })
   // install ajv-errors plugin
   ajvErrors(ajv)
   // install ajv-keywords plugin

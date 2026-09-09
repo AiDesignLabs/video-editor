@@ -61,6 +61,19 @@ describe('canvas size presets', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it('uses the matching Creatly icon for every fixed ratio', () => {
+    expect(Object.fromEntries(CANVAS_SIZE_PRESETS.map(preset => [preset.label, preset.icon]))).toEqual({
+      '16:9': 'i-creatly-169',
+      '9:16': 'i-creatly-916',
+      '1:1': 'i-creatly-11',
+      '4:3': 'i-creatly-43',
+      '3:4': 'i-creatly-34',
+      '3:2': 'i-creatly-32',
+      '2:3': 'i-creatly-23',
+      '21:9': 'i-creatly-219',
+    })
+  })
+
   it('labels agree with the dimensions they carry', () => {
     for (const preset of CANVAS_SIZE_PRESETS) {
       // 21:9 is the marketing name for 64:27; everything else should be exact.

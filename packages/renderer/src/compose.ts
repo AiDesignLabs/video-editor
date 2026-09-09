@@ -355,10 +355,20 @@ export async function composeProtocol(
 
   throwIfAborted(opts.signal, 'starting up')
 
-  const renderProtocol = await resolveProtocolAssetUrls(
-    protocol,
-    clipOptions?.rendererOptions?.resolveAssetUrl,
-  )
+  const assetHandles: import('./asset-resolution').AssetUrlHandle[] = []
+  let renderProtocol: IVideoProtocol
+  try {
+    renderProtocol = await resolveProtocolAssetUrls(
+      protocol,
+      clipOptions?.rendererOptions?.resolveAssetUrl,
+      undefined,
+      handle => assetHandles.push(handle),
+    )
+  }
+  catch (error) {
+    assetHandles.forEach(handle => handle.release())
+    throw error
+  }
   throwIfAborted(opts.signal, 'resolving assets')
   const videoFrameSchedule = new Map<string, number[]>()
 
@@ -377,6 +387,8 @@ export async function composeProtocol(
     if (rendererDestroyed)
       return
     rendererDestroyed = true
+    assetHandles.forEach(handle => handle.release())
+    assetHandles.length = 0
     renderer?.destroy()
     app.destroy(true)
   }

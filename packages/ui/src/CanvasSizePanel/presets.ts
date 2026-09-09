@@ -8,19 +8,22 @@
 export interface CanvasSizePreset {
   id: string
   label: string
+  icon?: string
   width: number
   height: number
 }
 
 /** Landscape, portrait and square presets at the resolutions people actually ship. */
 export const CANVAS_SIZE_PRESETS: CanvasSizePreset[] = [
-  { id: '16-9', label: '16:9', width: 1920, height: 1080 },
-  { id: '9-16', label: '9:16', width: 1080, height: 1920 },
-  { id: '1-1', label: '1:1', width: 1080, height: 1080 },
-  { id: '4-3', label: '4:3', width: 1440, height: 1080 },
-  { id: '3-4', label: '3:4', width: 1080, height: 1440 },
+  { id: '16-9', label: '16:9', icon: 'i-creatly-169', width: 1920, height: 1080 },
+  { id: '9-16', label: '9:16', icon: 'i-creatly-916', width: 1080, height: 1920 },
+  { id: '1-1', label: '1:1', icon: 'i-creatly-11', width: 1080, height: 1080 },
+  { id: '4-3', label: '4:3', icon: 'i-creatly-43', width: 1440, height: 1080 },
+  { id: '3-4', label: '3:4', icon: 'i-creatly-34', width: 1080, height: 1440 },
+  { id: '3-2', label: '3:2', icon: 'i-creatly-32', width: 1620, height: 1080 },
+  { id: '2-3', label: '2:3', icon: 'i-creatly-23', width: 1080, height: 1620 },
   // Labelled by its marketing name; the true reduced ratio is 64:27.
-  { id: '21-9', label: '21:9', width: 2560, height: 1080 },
+  { id: '21-9', label: '21:9', icon: 'i-creatly-219', width: 2560, height: 1080 },
 ]
 
 /** Above this, a reduced ratio stops being something a person can read. */

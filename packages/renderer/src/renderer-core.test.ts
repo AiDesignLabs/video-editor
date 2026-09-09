@@ -15,7 +15,8 @@ import { ref } from '@vue/reactivity'
 import { describe, expect, it, vi } from 'vitest'
 import { createRenderer } from './renderer-core'
 
-const { audioManagerInstances, mediaInputHandles, mediaMockState, opfsState } = vi.hoisted(() => ({
+const { audioManagerInstances, mediaInputHandles, mediaMockState, opfsState, resourceAdd } = vi.hoisted(() => ({
+  resourceAdd: vi.fn(async () => {}),
   mediaMockState: {
     openError: false,
     drawFrameErrorName: undefined as string | undefined,
@@ -52,7 +53,7 @@ vi.mock('@video-editor/protocol', () => ({
     verify: (protocol: IVideoProtocol) => protocol,
   }),
   createResourceManager: () => ({
-    add: vi.fn(async () => {}),
+    add: resourceAdd,
     get: vi.fn(async () => undefined),
   }),
   getResourceKey: (url: string) => url,
@@ -179,6 +180,7 @@ vi.mock('pixi.js', async () => {
 
 vi.mock('./audio-manager', () => {
   class AudioManager {
+    public prepareStreamingAudio = vi.fn(async () => {})
     public protocol: IVideoProtocol
     public options?: {
       resolveMediaElementUrl?: (segment: IAudioSegment | IVideoFramesSegment) => string | undefined
@@ -409,6 +411,33 @@ async function flushReactivity() {
 }
 
 describe('createRenderer render ownership', () => {
+  it('uses one playback rate for the picture clock and audio scheduler', async () => {
+    audioManagerInstances.length = 0
+    const restoreRaf = stubAnimationFrame()
+    let now = 1000
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const renderer = await createRenderer({
+      protocol: createProtocol([createAudioSegment('audio-1', 0, 10000)]),
+      app: createMockApp() as unknown as NonNullable<Parameters<typeof createRenderer>[0]['app']>,
+      manualRender: true,
+      warmUpResources: false,
+    })
+    try {
+      renderer.setPlaybackRate(2)
+      renderer.play()
+      now = 1500
+      renderer.tick()
+      expect(renderer.currentTime.value).toBe(1000)
+      const plan = getAudioManagerInstance().applyTimelinePlan.mock.calls[0]?.[0]
+      expect(plan.audioEvents).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'rate', rate: 2 })]))
+    }
+    finally {
+      renderer.destroy()
+      nowSpy.mockRestore()
+      restoreRaf()
+    }
+  })
+
   it('stops the Pixi application ticker before managing the stage', async () => {
     audioManagerInstances.length = 0
     const app = createMockApp()
@@ -601,6 +630,59 @@ describe('createRenderer video segment preloading', () => {
     }
   })
 
+  it('draws streaming frames without a decoder download or a second resource cache task', async () => {
+    vi.stubGlobal('window', { setTimeout, clearTimeout })
+    mediaInputHandles.length = 0
+    resourceAdd.mockClear()
+    const { createElement, fetchMock, restore } = stubVideoRenderGlobals()
+    const drawImage = vi.fn()
+    class StreamingVideo extends EventTarget {
+      src = ''
+      currentSrc = ''
+      readyState = 2
+      videoWidth = 1280
+      videoHeight = 720
+      currentTime = 0
+      duration = 10
+      preload = ''
+      pause() {}
+      play() { return Promise.resolve() }
+      removeAttribute() {}
+      load() { queueMicrotask(() => this.dispatchEvent(new Event('loadedmetadata'))) }
+    }
+    const video = new StreamingVideo()
+    createElement.mockImplementation((tag) => {
+      if (tag === 'video')
+        return video as unknown as ReturnType<typeof createElement>
+      return { width: 0, height: 0, getContext: vi.fn(() => ({ drawImage })) }
+    })
+    const onVideoFrameRendered = vi.fn(() => expect(drawImage).toHaveBeenCalled())
+    const segment = createVideoSegment('streamed', 0, 1000)
+    const renderer = await createRenderer({
+      protocol: { id: 'streamed', version: '1.0.0', width: 1280, height: 720, fps: 30, tracks: [{ trackId: 'main', trackType: 'frames', isMain: true, children: [segment] }] },
+      app: createMockApp() as unknown as NonNullable<Parameters<typeof createRenderer>[0]['app']>,
+      manualRender: true,
+      videoSourceMode: 'element',
+      warmUpResources: false,
+      streamRemoteMedia: true,
+      onVideoFrameRendered,
+    })
+    try {
+      expect(onVideoFrameRendered).not.toHaveBeenCalled()
+      await renderer.renderAt(0)
+      expect(video.preload).toBe('metadata')
+      expect(onVideoFrameRendered).toHaveBeenCalledWith(segment.url)
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(resourceAdd).not.toHaveBeenCalled()
+      expect(mediaInputHandles).toHaveLength(0)
+    }
+    finally {
+      renderer.destroy()
+      restore()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('prepares the decoder with the export frame schedule', async () => {
     audioManagerInstances.length = 0
     mediaInputHandles.length = 0
@@ -631,12 +713,40 @@ describe('createRenderer video segment preloading', () => {
     try {
       await renderer.renderAt(0)
       expect(mediaInputHandles[0]?.prepareVideoFrameSequence).toHaveBeenCalledWith(frameSequence)
-      expect(mediaInputHandles[0]?.meta).toHaveBeenCalledWith({ includeFrameRate: false })
+      expect(mediaInputHandles[0]?.meta).toHaveBeenCalledWith({ includeFrameRate: false, includeDuration: false })
       expect(audioManagerInstances[0]?.applyTimelinePlan).not.toHaveBeenCalled()
     }
     finally {
       restore()
       renderer.destroy()
+    }
+  })
+
+  it('opens a remote range source and reports the first decoded frame without fetching a blob', async () => {
+    mediaInputHandles.length = 0
+    resourceAdd.mockClear()
+    const { fetchMock, restore } = stubVideoRenderGlobals()
+    const segment = createVideoSegment('range-video', 0, 1000)
+    const onVideoFrameRendered = vi.fn()
+    const renderer = await createRenderer({
+      protocol: { id: 'range', version: '1.0.0', width: 1280, height: 720, fps: 30, tracks: [{ trackId: 'main', trackType: 'frames', isMain: true, children: [segment] }] },
+      app: createMockApp() as unknown as NonNullable<Parameters<typeof createRenderer>[0]['app']>,
+      manualRender: true,
+      streamRemoteMedia: true,
+      warmUpResources: false,
+      onVideoFrameRendered,
+    })
+    try {
+      await renderer.renderAt(0)
+      expect(mediaInputHandles[0]?.source).toBe(segment.url)
+      expect(mediaInputHandles[0]?.meta).toHaveBeenCalledWith({ includeFrameRate: false, includeDuration: false })
+      expect(onVideoFrameRendered).toHaveBeenCalledWith(segment.url)
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(resourceAdd).not.toHaveBeenCalled()
+    }
+    finally {
+      renderer.destroy()
+      restore()
     }
   })
 

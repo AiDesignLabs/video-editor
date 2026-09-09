@@ -1,3 +1,4 @@
+import type { VideoSample } from 'mediabunny'
 import {
   ALL_FORMATS,
   AudioSampleSink,
@@ -23,6 +24,11 @@ export interface MediaMeta {
   audioChanCount: number
   hasVideo: boolean
   hasAudio: boolean
+  /** Container MIME reported by the parser, independent of the File.type hint. */
+  containerMimeType: string
+  /** Primary track codec names such as `avc`, `hevc`, or `aac`. */
+  videoCodec: string | null
+  audioCodec: string | null
 }
 
 export interface MediaThumbnail {
@@ -40,6 +46,8 @@ export interface MediaThumbnailOptions {
 export interface MediaMetaOptions {
   /** Set false when the caller only needs dimensions and duration. */
   includeFrameRate?: boolean
+  /** Skip scanning fragmented media for duration when the timeline already provides it. */
+  includeDuration?: boolean
 }
 
 /**
@@ -54,7 +62,7 @@ export interface MediaInputHandle {
    * Decode the frame at `timeMs` and draw it covering the full canvas of `ctx`.
    * Returns false when no frame exists at that timestamp.
    */
-  drawFrame: (ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, timeMs: number) => Promise<boolean>
+  drawFrame: (ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, timeMs: number, options?: { sequential?: boolean }) => Promise<boolean>
   /** Prepare an ordered frame sequence so export can reuse one decoder pipeline. */
   prepareVideoFrameSequence: (timestampsMs: readonly number[]) => void
   /** Decode thumbnails of the video track resized to `width` pixels. */
@@ -78,6 +86,21 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
   let scheduledVideoSamples: ReturnType<VideoSampleSink['samplesAtTimestamps']> | undefined
   let scheduledVideoTimestamps: readonly number[] = []
   let scheduledVideoIndex = 0
+  let playbackSamples: ReturnType<VideoSampleSink['samples']> | undefined
+  let playbackSample: VideoSample | undefined
+  let nextPlaybackSample: VideoSample | undefined
+  let playbackTimeMs = -1
+
+  function clearPlaybackSamples() {
+    if (playbackSamples)
+      void playbackSamples.return(undefined)
+    playbackSamples = undefined
+    playbackSample?.close()
+    nextPlaybackSample?.close()
+    playbackSample = undefined
+    nextPlaybackSample = undefined
+    playbackTimeMs = -1
+  }
 
   function clearVideoFrameSequence() {
     if (scheduledVideoSamples)
@@ -97,8 +120,9 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
 
   return {
     async meta(options = {}) {
-      const [durationSec, videoTrack, audioTrack] = await Promise.all([
-        input.computeDuration(),
+      const [durationSec, format, videoTrack, audioTrack] = await Promise.all([
+        options.includeDuration === false ? 0 : input.computeDuration(),
+        input.getFormat(),
         getVideoTrack(),
         getAudioTrack(),
       ])
@@ -107,6 +131,10 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
             .then(metrics => metrics.bestGuessFrameRate)
             .catch(() => 0)
         : 0
+      const [videoCodec, audioCodec] = await Promise.all([
+        videoTrack?.getCodec() ?? null,
+        audioTrack?.getCodec() ?? null,
+      ])
       return {
         durationMs: Math.max(0, Math.round(durationSec * 1000)),
         width: videoTrack ? await videoTrack.getDisplayWidth() : 0,
@@ -118,6 +146,9 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
         audioChanCount: audioTrack ? await audioTrack.getNumberOfChannels() : 0,
         hasVideo: !!videoTrack,
         hasAudio: !!audioTrack,
+        containerMimeType: format.mimeType,
+        videoCodec,
+        audioCodec,
       }
     },
 
@@ -131,7 +162,7 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
       return !!track && await track.canDecode()
     },
 
-    async drawFrame(ctx, timeMs) {
+    async drawFrame(ctx, timeMs, options) {
       if (!videoSink) {
         const track = await getVideoTrack()
         if (!track)
@@ -143,6 +174,26 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
           )
         }
       }
+      if (options?.sequential) {
+        if (timeMs < playbackTimeMs || timeMs - playbackTimeMs > 1000)
+          clearPlaybackSamples()
+        playbackTimeMs = timeMs
+        if (!playbackSamples) {
+          playbackSamples = videoSink.samples(timeMs / 1000)
+          playbackSample = (await playbackSamples.next()).value ?? undefined
+          nextPlaybackSample = (await playbackSamples.next()).value ?? undefined
+        }
+        while (nextPlaybackSample && nextPlaybackSample.timestamp * 1000 <= timeMs + 0.01) {
+          playbackSample?.close()
+          playbackSample = nextPlaybackSample
+          nextPlaybackSample = (await playbackSamples.next()).value ?? undefined
+        }
+        if (!playbackSample)
+          return false
+        playbackSample.draw(ctx, 0, 0, ctx.canvas.width, ctx.canvas.height)
+        return true
+      }
+      clearPlaybackSamples()
       let sample
       const scheduledTimestamp = scheduledVideoTimestamps[scheduledVideoIndex]
       if (
@@ -237,6 +288,7 @@ export function openMediaInput(source: Blob | string): MediaInputHandle {
     },
 
     dispose() {
+      clearPlaybackSamples()
       clearVideoFrameSequence()
       void input.dispose()
     },

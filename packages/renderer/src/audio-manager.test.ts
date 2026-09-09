@@ -401,6 +401,47 @@ describe('audioManager decoded buffer audio', () => {
     manager.destroy()
   })
 
+  it('decodes bounded audio windows and preloads the following window for streaming reviews', async () => {
+    const startSpy = vi.spyOn(MockBufferSource.prototype, 'start')
+    const buffer = new MockAudioBuffer(2, 48000 * 2, 48000) as unknown as AudioBuffer
+    const loadAudioBuffer = vi.fn(async () => buffer)
+    const manager = new AudioManager(createVideoAudioProtocol(), { loadAudioBuffer, streamRemoteMedia: true })
+    manager.applyTimelinePlan(createVideoPlan('start', 2000), true)
+    await vi.waitFor(() => expect(startSpy).toHaveBeenCalled())
+    expect(loadAudioBuffer).toHaveBeenCalledTimes(2)
+    expect(loadAudioBuffer).toHaveBeenCalledWith(expect.objectContaining({ fromTime: 500, startTime: 0, endTime: 1600 }))
+    expect(loadAudioBuffer).toHaveBeenCalledWith(expect.objectContaining({ fromTime: 2500, startTime: 0, endTime: 1600 }))
+    expect(MockAudioElement.instances).toHaveLength(0)
+    manager.applyTimelinePlan(createVideoPlan('gain', 4000), true)
+    await vi.waitFor(() => expect(startSpy).toHaveBeenCalledTimes(2))
+    expect(loadAudioBuffer).toHaveBeenCalledTimes(3)
+    manager.destroy()
+  })
+
+  it('does not start a pending streamed audio section after pause', async () => {
+    let resolveBuffer!: (buffer: AudioBuffer) => void
+    const pending = new Promise<AudioBuffer>((resolve) => {
+      resolveBuffer = resolve
+    })
+    const startSpy = vi.spyOn(MockBufferSource.prototype, 'start')
+    const manager = new AudioManager(createVideoAudioProtocol(), {
+      streamRemoteMedia: true,
+      loadAudioBuffer: () => pending,
+    })
+    manager.applyTimelinePlan(createVideoPlan('start', 2000), true)
+    manager.applyTimelinePlan(createVideoPlan('stop', 2000), false)
+    resolveBuffer(new MockAudioBuffer(2, 48000 * 2, 48000) as unknown as AudioBuffer)
+    await pending
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(startSpy).not.toHaveBeenCalled()
+    manager.destroy()
+  })
+
+  it('requires the range loader for streamed audio', () => {
+    expect(() => new AudioManager(createVideoAudioProtocol(), { streamRemoteMedia: true }))
+      .toThrow('Streaming audio requires a range-based audio buffer loader.')
+  })
+
   it('uses the decoded buffer path for reversed video audio', async () => {
     const protocol = createVideoAudioProtocol()
     const segment = protocol.tracks[0]?.children[0]

@@ -98,6 +98,18 @@ describe('media asset catalog', () => {
     })
   })
 
+  it('registers imported assets and resolves releasable handles through AssetService', async () => {
+    const upsertAsset = vi.fn(async () => {})
+    const release = vi.fn()
+    const resolveUrl = vi.fn(async () => ({ url: 'blob:shared-cache', source: 'opfs' as const, release }))
+    const catalog = createMediaAssetCatalogFromLibrary(createLibrary(), { assetService: { upsertAsset, resolveUrl } })
+
+    await catalog.import(new File(['source'], source.name, { type: 'video/mp4' }))
+    expect(upsertAsset).toHaveBeenCalledWith(expect.objectContaining({ assetId: source.id, sourceRevision: 2 }), [expect.objectContaining({ variantId: 'source', remoteRecovery: 'none' })])
+    await expect(catalog.resolveHandleForPreview(source.id)).resolves.toMatchObject({ url: 'blob:shared-cache', source: 'opfs' })
+    expect(resolveUrl).toHaveBeenCalledWith(expect.objectContaining({ ref: { assetId: source.id, sourceRevision: 2, variantId: proxy.id }, fallbackUrl: proxy.url }))
+  })
+
   it('generates and registers a preview version without exposing its file', async () => {
     const assets = [source]
     const library = createLibrary(assets)

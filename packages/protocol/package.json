@@ -25,6 +25,7 @@
     "@vue/reactivity": "catalog:"
   },
   "dependencies": {
+    "@video-editor/assets": "workspace:*",
     "@video-editor/media": "workspace:*",
     "@video-editor/shared": "workspace:*",
     "ajv": "catalog:",

@@ -72,6 +72,7 @@ OPFS 直接保存文件内容。IndexedDB 不重复保存视频 `Blob`，只保�
 packages/assets/
 ├── src/client/                 # AssetService 与 SharedWorker RPC 客户端
 ├── src/worker/                 # AssetWorkerRuntime 与消息处理
+├── src/media-worker/           # MediaProcessor Dedicated Worker RPC
 ├── src/storage/
 │   ├── asset-record-store.ts   # IndexedDB 素材和派生版本记录
 │   ├── cache-entry-store.ts    # IndexedDB 缓存状态与索引
@@ -97,8 +98,9 @@ packages/assets/
 `@video-editor/media` 是无状态媒体计算层，只负责读取媒体、分析、解码、编码和向调用方提供的 sink
 写出结果；它不知道 `assetId`、缓存键、OPFS 目录、IndexedDB、上传会话或项目协议。
 `@video-editor/assets` 是素材生命周期层，负责决定何时处理、产物身份、存储位置、任务状态、缓存和
-上传。只有 `src/renditions` 的 `MediaProcessor` adapter 依赖 `@video-editor/media`，并通过延迟加载的
-独立 Worker 启动；只使用解析、缓存或普通文件上传的调用方不会初始化编解码运行时。依赖始终单向，
+上传。只有 `src/renditions` 的 `MediaProcessor` adapter 依赖 `@video-editor/media`；宿主通过
+`src/media-worker` 提供的 RPC helper 将其放入独立 Dedicated Worker。只使用解析、缓存或普通文件
+上传的调用方不会初始化编解码运行时。依赖始终单向，
 `@video-editor/media` 不得反向依赖 `@video-editor/assets`。
 
 `@video-editor/assets` 不依赖 Vue、PixiJS、工程协议或宿主 API。`@video-editor/protocol` 中的
@@ -113,14 +115,18 @@ packages/assets/
 | `AssetWorkerClient`  | RPC、握手、超时、取消、断线恢复                                       | 业务上传策略           |
 | `AssetWorkerRuntime` | IndexedDB、OPFS、持久写入租约、同键任务去重、缓存租约、清理和状态广播 | DOM、Vue、OSS SDK      |
 | `MediaProcessor`     | 延迟调用 `@video-editor/media`，把 profile 转为媒体输入、输出和进度   | 素材身份、缓存和上传   |
+| `MediaProcessorWorker` | 在 Dedicated Worker 执行 `MediaProcessor`，转发进度、取消和多档结果 | 缓存 RPC、业务上传     |
 | `UploadPort`         | 定义直传及可选断点续传契约；由宿主 adapter 实现                       | 本地缓存和业务写回     |
 | `MediaAssetCatalog`  | 协议引用、片段绑定、逻辑素材删除保护                                  | 全局缓存容量管理       |
 
-媒体转码不应长期占用负责缓存 RPC 的 `SharedWorker`。目标实现使用独立的
-`MediaProcessingWorker` 执行转码，由 `AssetWorkerRuntime` 认领任务并提交产物。当前
-`transcode()` 仍创建 `HTMLCanvasElement`；迁入 Worker 前，必须改为使用 `OffscreenCanvas`，并通过
-真实 Chromium 测试。完成该改造前，转码继续在发起任务的标签页执行，任务状态仍由 SharedWorker
-登记和广播。
+媒体转码不应占用页面主线程，也不应长期占用负责缓存 RPC 的 `SharedWorker`。宿主使用
+`createWorkerMediaProcessor()` 注入 Dedicated Worker 工厂，Worker 入口使用
+`attachMediaProcessorWorker()` 执行转码。页面内的 `AssetService` 仍负责任务编排和上传；Dedicated
+Worker 只接收 `File + profile`，返回进度和多档 `File` 结果。取消时页面立即结束等待，但 Worker 在
+发出终态消息前继续执行 `finally` 清理；超过固定宽限时间仍无响应才强制终止。可选优化使用按
+`cacheNamespace` 命名的 Web Lock，将同一 origin 的媒体处理并发限制为 `1`，任务状态只在当前 client
+session 中维护。浏览器缺少 Web Locks 时跳过可选优化，不得退化为多个标签页各自转码；兼容版本和
+required profile 仍按主任务要求明确成功或失败。
 
 ## 5. 能力模式与失败语义
 
@@ -792,6 +798,8 @@ profile ID 必须包含配方版本。修改编码器、码率、关键帧间隔
 export interface AssetIngestPolicy {
   /** Generated only when the source cannot satisfy the required playback contract. */
   compatibilityProfileId?: string
+  /** Exact profiles that must be available before the business-ready result. */
+  requiredProfileIds?: readonly string[]
   /** Finite best-effort profiles generated after the business-ready result. */
   optimizationProfileIds?: readonly string[]
   /** Includes the first attempt; must be a finite integer greater than or equal to 1. */
@@ -823,11 +831,15 @@ export type UploadAssetRequest<TContext = unknown> = UploadAssetRequestBase<TCon
 核心包不提供 `canvas`、`review` 或 `export` 场景枚举。宿主业务模块可以为不同入口组合 policy，
 但缓存仍按实际文件身份共享。视频预检后，如果 source 可直接在目标浏览器播放，`playback` 就是 source，
 `compatibilityProfileId` 不执行；如果 source 不可播放，该 profile 是唯一阻塞业务绑定的派生版本。
-`optimizationProfileIds` 只表示期望的额外清晰度，不改变主任务成功条件。
+`requiredProfileIds` 表示宿主业务在写入前必须具备的精确清晰度，任一档生成或上传失败都会使主任务失败；
+审片可以用它定义发布门禁。`optimizationProfileIds` 只表示期望的额外清晰度，不改变主任务成功条件。
+同一 profile 同时出现在 required 和 optimization 集合时按 required 处理，不重复生成。
 
-优化任务必须受控：每个素材只排一个多输出处理任务，每个 profile 的自动尝试上限由
-`maxOptimizationAttemptsPerProfile` 明确给出，建议默认值为 `2`，即首次执行加一次自动重试；上传采用
-有限并发，交互上传或播放准备任务优先。最后一个页面关闭时任务暂停，下次页面连接后
+优化任务必须受控：每个素材只排一个多输出处理任务，一次解码生成本轮缺少的全部 profile，再逐档
+串行上传；只有失败档进入下一次处理。每个 profile 的自动尝试上限由
+`maxOptimizationAttemptsPerProfile` 明确给出，建议默认值为 `2`，即首次执行加一次自动重试。可选优化
+通过 origin 级 Web Lock 保证同一时间只有一个媒体处理任务；交互上传或播放准备任务不进入该后台队列。
+最后一个页面关闭时任务暂停，下次页面连接后
 可以从未到期的 source staging 或缓存继续。达到固定 `retainUntil`、空间不足或用户取消时停止，不无限
 重试。没有可持久化 source 的优化任务只在当前 client session 执行；页面关闭后标记 `interrupted`，
 不能伪装成可恢复。宿主可以按文件大小决定是否设置 `resumeAcrossReloads`；显式设为 `true` 时，缺少
@@ -1035,22 +1047,25 @@ OPFS staging、取消和失败语义。adapter 是浏览器端代码，不表示
 8. 读取 adapter 返回的已有派生文件，只复用 `profileId` 精确匹配的版本。source 不可播放时，只生成并
    上传 `compatibilityProfileId`；失败时主任务失败，不提交业务绑定。每个待上传 rendition 先写入可重读
    的 `sessions/<uploadId>/payload.bin`，不能把转码流作为唯一上传来源。
-9. source 和 `playback` 就绪后，对仍缺少的 `optimizationProfileIds` 创建独立 `optimizationJobId`，以
-   `background` 优先级入队但不等待执行；已有精确 profile 的版本直接登记为可用，不重复处理。
-10. 形成 `status = ready` 的结果。持久任务保存包含 `optimizationJobId` 的无 URL 结果并进入
+9. source 和 `playback` 就绪后，先一次解码生成并逐档上传仍缺少的 `requiredProfileIds`。已有精确
+   profile 的版本直接登记为可用，不重复处理；任一 required profile 失败时主任务失败，不提交业务绑定。
+10. 对仍缺少且不属于 required 集合的 `optimizationProfileIds` 创建独立 `optimizationJobId`，以
+    `background` 优先级入队但不等待执行。
+11. 形成 `status = ready` 的结果。持久任务保存包含 `optimizationJobId` 的无 URL 结果并进入
     `awaiting-business-commit`；非持久任务只在当前 `AssetTask` 内存中保留结果。主任务此时 resolve，
-    不等待任何优化清晰度。
-11. 业务调用方立即使用 `playback` 通过 editor command 或审片 API 保存绑定；成功后调用
+    已保证 required profile 可用，但不等待任何可选优化清晰度。
+12. 普通编辑入口可以只使用 `playback` 立即通过 editor command 保存绑定；审片入口必须在同一个主任务
+    返回后才调用审片 API，因此会被 required profile 门禁阻断。业务写入成功后调用
     `acknowledgeUpload()`。该调用把 `businessStatus` 改为 `committed` 并记录 `businessCommittedAt`，但
     优化任务未结束时不删除父 checkpoint 或 source staging。保存失败时不确认，允许再次提交。
-12. 优化任务在独立 `MediaProcessingWorker` 中一次解码、多路输出，并逐档上传和登记。单档完成后立即
+13. 优化任务在独立 `MediaProcessingWorker` 中一次解码、多路输出，并逐档上传和登记。单档完成后立即
     更新 `variantRecords` 并发送 `job-updated`；播放器可以切换到新版本，但从不等待它。
-13. 优化档位处理或上传失败只写入 profile 状态和错误码。自动尝试达到上限后状态为
+14. 优化档位处理或上传失败只写入 profile 状态和错误码。自动尝试达到上限后状态为
     `succeeded-with-errors`；用户可以显式重试失败 profile 或取消剩余优化，主上传结果仍为 `ready`。
-14. 业务已确认且优化状态为 `succeeded` 或 `cancelled` 后，删除不再需要的 child session、父 checkpoint
+15. 业务已确认且优化状态为 `succeeded` 或 `cancelled` 后，删除不再需要的 child session、父 checkpoint
     和 staging；`succeeded-with-errors` 保留到显式重试、取消或到期。需要缓存 source 时原子移动到
     `objects`。固定期限到达也停止优化并清理本地 checkpoint，但不删除远端文件。
-15. `discardUpload()` 只用于业务绑定前明确放弃主任务。业务已确认后，取消的是优化任务，不得撤销节点、
+16. `discardUpload()` 只用于业务绑定前明确放弃主任务。业务已确认后，取消的是优化任务，不得撤销节点、
     审片记录或已经上传的 source。
 
 全部标签页关闭后不承诺继续传输，但再次打开页面可以恢复。`resumeUpload(jobId, context)` 必须重新注入
@@ -1238,6 +1253,8 @@ export type ResolvedAsset
 
 `resolve()` 默认不等待网络下载。缓存未命中时立即返回当前 URL，并按请求优先级启动后台缓存。
 需要离线文件的调用方可以显式调用 `ensureCached()` 并等待完成。
+Worker 对不同缓存键执行统一调度：默认最多同时下载两个文件，其中后台任务最多一个，为交互请求保留
+至少一个槽位。同一缓存键只下载一次；已经排队的后台任务收到交互请求时提升优先级，不新增下载。
 签名 URL 需要刷新时，标签页内的 `AssetService` 调用 `refreshRemoteVariant()`，把结果只随当前缓存
 请求传给 Worker 后重试；Worker 不持久化宿主函数、远端 URL 或鉴权凭证。宿主没有提供刷新回调且
 本地、请求 URL 均不可用时，解析明确失败。
@@ -1358,14 +1375,16 @@ schema 的新旧构建可以并存，但都必须遵守持久租约和 fencing�
   handle 方法。
 - 保留 `@video-editor/protocol` 旧 resource 导出，内部逐步委托给新包。
 - renderer resolver 兼容字符串并新增 handle 返回值；renderer 和 compose 必须在生命周期结束时
-  释放 handle。增加画布打开后的批量 warm-up，但缓存未命中不得阻塞 URL 播放。
+  释放 handle。对已上传存量和服务端生成素材，在进入可视区域并挂载详细节点后逐步登记和 warm-up；
+  不扫描整份图数据，不在 snapshot merge 中发起下载。缓存未命中不得阻塞 URL 播放。
 - 将缩略图、波形和媒体元数据迁入同一缓存索引。
 
 ### M4：Worker 媒体处理
 
 - 把 `@video-editor/media` 的内部 Canvas 创建抽象为可注入工厂。
-- 在 Worker 使用 `OffscreenCanvas`，并保留主线程兼容路径。
-- 新增 `MediaProcessingWorker`，避免编码占用 SharedWorker 的缓存消息循环。
+- 在 Worker 使用 `OffscreenCanvas`；通用包保留可直接调用的底层 adapter，但 Creatly 宿主不注册
+  主线程转码回退。
+- 新增 `MediaProcessingWorker` RPC，避免编码占用页面主线程或 SharedWorker 的缓存消息循环。
 - 扩展 `transcode()` 隔离单个输出 encoder 或 muxer 的失败：兼容版本失败终止主任务，优化版本失败只
   删除自己的临时文件并允许其他输出完成。
 - 验证一遍解码、多档编码、单档失败、取消、进度和资源释放。
@@ -1428,6 +1447,10 @@ schema 的新旧构建可以并存，但都必须遵守持久租约和 fencing�
   处理中或失败时继续使用 source。
 - source 不可播放时，主任务只等待一个兼容 profile；该 profile 失败时不提交业务绑定，完成后立即返回
   `ready`，其余清晰度继续在后台处理。
+- 普通编辑 policy 不配置 required profile，用户可以在母版上传后立即使用素材；审片 policy 把客户播放
+  所需的精确清晰度放入 `requiredProfileIds`，全部就绪后才能创建审片版本，任一档失败时不得发布。
+- 存量和服务端生成素材在挂载到可视区域附近时才登记并以后台优先级缓存；当前 URL 始终立即可用，后台
+  下载并发默认为一，不因打开大型画布批量占用网络连接。
 - 同一视频的优化任务一次解码生成多个 rendition，输出均可重新读取音视频轨和尺寸。
 - 优化 profile 失败只更新受控后台任务，不把主结果改为 `partial`；达到重试上限后仍使用 `playback`。
 - 宿主秒传命中时复用已有原文件和派生文件，不重复转码。

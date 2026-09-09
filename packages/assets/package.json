@@ -1,0 +1,35 @@
+{
+  "name": "@video-editor/assets",
+  "type": "module",
+  "version": "1.0.0-beta.2",
+  "description": "Browser asset runtime with shared OPFS caching",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker/index.d.ts",
+      "import": "./dist/worker/index.js"
+    },
+    "./media-worker": {
+      "types": "./dist/media-worker/index.d.ts",
+      "import": "./dist/media-worker/index.js"
+    }
+  },
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@video-editor/media": "workspace:*",
+    "idb": "catalog:",
+    "opfs-tools": "catalog:"
+  }
+}

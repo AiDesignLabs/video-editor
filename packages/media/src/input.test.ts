@@ -9,7 +9,9 @@ const { state } = vi.hoisted(() => ({
     videoSamples: [] as Array<{ timestamp: number, draw: ReturnType<typeof vi.fn>, close: ReturnType<typeof vi.fn> }>,
     videoSampleRequests: [] as number[],
     videoSequenceRequests: [] as number[][],
+    videoPlaybackStarts: [] as number[],
     audioSamples: [] as Array<{ timestamp: number, buffer: MockAudioBuffer }>,
+    durationReads: 0,
   },
 }))
 
@@ -57,12 +59,25 @@ vi.mock('mediabunny', () => ({
     }
 
     async computeDuration() {
+      state.durationReads++
       return 1.5
+    }
+
+    async getFormat() {
+      return { mimeType: 'video/mp4' }
     }
 
     dispose() {}
   },
   VideoSampleSink: class {
+    async* samples(start: number) {
+      state.videoPlaybackStarts.push(start)
+      for (const sample of state.videoSamples) {
+        if (sample.timestamp >= start)
+          yield sample
+      }
+    }
+
     async getSample(timestamp: number) {
       state.videoSampleRequests.push(timestamp)
       return state.videoSamples.find(s => s.timestamp === timestamp) ?? null
@@ -105,6 +120,7 @@ describe('openMediaInput', () => {
     const computeFrameRateMetrics = vi.fn(async () => ({ bestGuessFrameRate: 24000 / 1001 }))
     state.videoTrack = {
       computeFrameRateMetrics,
+      getCodec: async () => null,
       getDisplayWidth: async () => 1920,
       getDisplayHeight: async () => 1080,
     }
@@ -112,6 +128,7 @@ describe('openMediaInput', () => {
     const meta = await openMediaInput(new Blob()).meta()
 
     expect(meta.fps).toBe(23.976)
+    expect(meta.containerMimeType).toBe('video/mp4')
     expect(computeFrameRateMetrics).toHaveBeenCalledWith({ targetPacketCount: 256 })
   })
 
@@ -119,6 +136,7 @@ describe('openMediaInput', () => {
     const computeFrameRateMetrics = vi.fn(async () => ({ bestGuessFrameRate: 24 }))
     state.videoTrack = {
       computeFrameRateMetrics,
+      getCodec: async () => null,
       getDisplayWidth: async () => 1920,
       getDisplayHeight: async () => 1080,
     }
@@ -127,6 +145,34 @@ describe('openMediaInput', () => {
 
     expect(meta.fps).toBe(0)
     expect(computeFrameRateMetrics).not.toHaveBeenCalled()
+  })
+
+  it('does not scan duration when the preview already knows its timeline length', async () => {
+    state.durationReads = 0
+    const meta = await openMediaInput('https://cdn.test/fragmented.mp4').meta({ includeFrameRate: false, includeDuration: false })
+    expect(state.durationReads).toBe(0)
+    expect(meta.durationMs).toBe(0)
+  })
+
+  it('reports the primary video and audio codecs', async () => {
+    state.videoTrack = {
+      getCodec: async () => 'avc',
+      getDisplayWidth: async () => 1920,
+      getDisplayHeight: async () => 1080,
+    }
+    state.audioTrack = {
+      getCodec: async () => 'aac',
+      getSampleRate: async () => 48_000,
+      getNumberOfChannels: async () => 2,
+    }
+
+    await expect(openMediaInput(new Blob()).meta({ includeFrameRate: false })).resolves.toMatchObject({
+      containerMimeType: 'video/mp4',
+      videoCodec: 'avc',
+      audioCodec: 'aac',
+      hasVideo: true,
+      hasAudio: true,
+    })
   })
 
   it('converts drawFrame milliseconds to seconds and closes the sample', async () => {
@@ -178,6 +224,27 @@ describe('openMediaInput', () => {
     expect(state.videoSampleRequests).toEqual([])
     expect(first.close).toHaveBeenCalledTimes(1)
     expect(second.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('reuses a playback decoder across forward frames and releases it on a seek', async () => {
+    state.videoTrack = { canDecode: async () => true }
+    state.videoPlaybackStarts = []
+    const samples = [0, 0.04, 0.08, 0.12].map(timestamp => ({ timestamp, draw: vi.fn(), close: vi.fn() }))
+    state.videoSamples.push(...samples)
+    const handle = openMediaInput(new Blob())
+    const ctx = { canvas: { width: 320, height: 180 } } as unknown as CanvasRenderingContext2D
+    await handle.drawFrame(ctx, 0, { sequential: true })
+    await handle.drawFrame(ctx, 20, { sequential: true })
+    await handle.drawFrame(ctx, 40, { sequential: true })
+    expect(state.videoPlaybackStarts).toEqual([0])
+    expect(state.videoSampleRequests).toEqual([])
+    expect(samples[0]?.close).toHaveBeenCalledOnce()
+    expect(samples[1]?.draw).toHaveBeenCalledOnce()
+    await handle.drawFrame(ctx, 0)
+    expect(samples[1]?.close).toHaveBeenCalledOnce()
+    expect(samples[2]?.close).toHaveBeenCalledOnce()
+    expect(state.videoSampleRequests).toEqual([0])
+    handle.dispose()
   })
 
   it('falls back to random access when rendering leaves the prepared sequence', async () => {
