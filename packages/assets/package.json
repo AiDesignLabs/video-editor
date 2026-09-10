@@ -1,7 +1,7 @@
 {
   "name": "@video-editor/assets",
   "type": "module",
-  "version": "1.0.0-beta.5",
+  "version": "1.0.0-beta.6",
   "description": "Browser asset runtime with shared OPFS caching",
   "exports": {
     ".": {
