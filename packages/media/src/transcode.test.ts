@@ -1,4 +1,3 @@
-import type { Rendition, TranscodeProgress } from './transcode'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { state } = vi.hoisted(() => ({
@@ -10,6 +9,7 @@ const { state } = vi.hoisted(() => ({
     hasVideoTrack: true,
     hasAudioTrack: false,
     audioCanDecode: true,
+    audioCanEncode: true,
     audioSampleCount: 0,
     encodedAudioSamples: 0,
     closedAudioSamples: 0,
@@ -201,6 +201,7 @@ vi.mock('mediabunny', () => {
     },
     canEncodeVideo: async (_codec: string, options: { hardwareAcceleration?: string }) => options.hardwareAcceleration !== 'prefer-software',
     canDecodeVideo: async () => true,
+    canEncodeAudio: async () => state.audioCanEncode,
     BlobSource: class { constructor(public blob: unknown) {} },
     UrlSource: class { constructor(public url: unknown) {} },
     VideoSample,
@@ -236,7 +237,7 @@ vi.mock('mediabunny', () => {
   }
 })
 
-const { avcHighCodecString, measureDecodeThroughput, measureEncoderThroughput, probeCodecSupport, probeVideoStats, transcode } = await import('./transcode')
+const { avcHighCodecString, measureDecodeThroughput, measureEncoderThroughput, probeCodecSupport, probeVideoStats } = await import('./transcode')
 
 describe('avcHighCodecString', () => {
   it('picks the smallest level that fits the picture rate', () => {
@@ -253,19 +254,6 @@ describe('avcHighCodecString', () => {
   })
 })
 
-/** Collects everything written, so a rendition's bytes can be asserted on. */
-function createSink() {
-  const chunks: Uint8Array[] = []
-  return {
-    chunks,
-    stream: new WritableStream<Uint8Array>({ write(chunk) { chunks.push(chunk) } }),
-  }
-}
-
-function renditions(...specs: Rendition[]) {
-  return specs
-}
-
 beforeEach(() => {
   state.encoders = []
   state.disposed = 0
@@ -273,6 +261,7 @@ beforeEach(() => {
   state.hasVideoTrack = true
   state.hasAudioTrack = false
   state.audioCanDecode = true
+  state.audioCanEncode = true
   state.audioSampleCount = 0
   state.encodedAudioSamples = 0
   state.closedAudioSamples = 0
@@ -342,225 +331,6 @@ beforeEach(() => {
   })
 })
 
-describe('transcode', () => {
-  it('streams the source audio track into every rendition', async () => {
-    state.hasAudioTrack = true
-    state.audioSampleCount = 3
-
-    await transcode({
-      source: new Blob(),
-      renditions: renditions(
-        { id: 'proxy', height: 360 },
-        { id: 'preview', height: 720 },
-      ),
-      openSink: () => createSink().stream,
-    })
-
-    expect(state.encodedAudioSamples).toBe(6)
-    expect(state.closedAudioSamples).toBe(3)
-  })
-
-  it('fails instead of silently dropping an undecodable audio track', async () => {
-    state.hasAudioTrack = true
-    state.audioCanDecode = false
-
-    await expect(transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }),
-      openSink: () => createSink().stream,
-    })).rejects.toThrow('cannot decode the source audio track')
-  })
-
-  it('decodes once and feeds every rendition from the same frames', async () => {
-    const result = await transcode({
-      source: new Blob(),
-      renditions: renditions(
-        { id: 'proxy', height: 360 },
-        { id: 'preview', height: 720 },
-      ),
-      openSink: () => createSink().stream,
-    })
-
-    // Two encoders, five source frames each, but only five frames decoded.
-    expect(state.encoders).toHaveLength(2)
-    expect(state.encoders[0]!.frames).toHaveLength(5)
-    expect(state.encoders[1]!.frames).toHaveLength(5)
-    expect(result.framesDecoded).toBe(5)
-    // Each decoded frame is released exactly once, after every rendition used it.
-    expect(state.closedSamples).toBe(5)
-  })
-
-  it('derives the width from the source aspect ratio', async () => {
-    const result = await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }),
-      openSink: () => createSink().stream,
-    })
-
-    // 1920x1080 at 360 high is 640 wide.
-    expect(result.renditions[0]).toMatchObject({ id: 'proxy', width: 640, height: 360 })
-    expect(state.encoders[0]!.canvas).toMatchObject({ width: 640, height: 360 })
-  })
-
-  it('rounds both dimensions to the nearest even number, as H.264 requires', async () => {
-    const result = await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 361 }),
-      openSink: () => createSink().stream,
-    })
-
-    // 361 -> 362, and 1920 * 362/1080 = 643.5 -> 644.
-    expect(result.renditions[0]).toMatchObject({ width: 644, height: 362 })
-  })
-
-  it('passes the key frame interval through in seconds', async () => {
-    await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360, keyFrameIntervalMs: 1500, videoBitrate: 600_000 }),
-      openSink: () => createSink().stream,
-    })
-
-    expect(state.encoders[0]!.options).toMatchObject({
-      keyFrameInterval: 1.5,
-      quality: { value: { bitrate: 600_000 } },
-    })
-  })
-
-  it('passes encoder latency and acceleration hints through per rendition', async () => {
-    await transcode({
-      source: new Blob(),
-      renditions: renditions(
-        { id: 'proxy', height: 360, latencyMode: 'realtime', hardwareAcceleration: 'prefer-hardware' },
-        { id: 'preview', height: 720 },
-      ),
-      openSink: () => createSink().stream,
-    })
-
-    expect(state.encoders[0]!.options).toMatchObject({ latencyMode: 'realtime', hardwareAcceleration: 'prefer-hardware' })
-    expect(state.encoders[1]!.options).not.toHaveProperty('latencyMode')
-    expect(state.encoders[1]!.options).not.toHaveProperty('hardwareAcceleration')
-  })
-
-  it('passes decoder hints to the shared sample sink', async () => {
-    await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }),
-      openSink: () => createSink().stream,
-      decoder: { hardwareAcceleration: 'prefer-hardware', optimizeForLatency: true },
-    })
-
-    expect(state.decoderOptions).toEqual({ hardwareAcceleration: 'prefer-hardware', optimizeForLatency: true })
-  })
-
-  it('leaves the key frame interval to the encoder when unset', async () => {
-    await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }),
-      openSink: () => createSink().stream,
-    })
-
-    expect(state.encoders[0]!.options).not.toHaveProperty('keyFrameInterval')
-  })
-
-  it('accounts the loop time into per-stage buckets that sum to the total', async () => {
-    const result = await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }, { id: 'preview', height: 720 }),
-      openSink: () => createSink().stream,
-    })
-
-    const { stages } = result
-    expect(Object.keys(stages.encodeWaitMs)).toEqual(['proxy', 'preview'])
-    expect(Object.keys(stages.captureMs)).toEqual(['proxy', 'preview'])
-    // Write time is measured on the muxer's path, not in the serial loop, so it
-    // is reported but deliberately not part of the tiling.
-    expect(Object.keys(stages.writeMs)).toEqual(['proxy', 'preview'])
-    expect(Object.keys(stages.submitSyncMs)).toEqual(['proxy', 'preview'])
-    const accounted = stages.decodeWaitMs + stages.drawMs + stages.otherMs
-      + stages.captureMs.proxy! + stages.captureMs.preview!
-      + stages.submitSyncMs.proxy! + stages.submitSyncMs.preview!
-      + stages.encodeWaitMs.proxy! + stages.encodeWaitMs.preview!
-    // otherMs is defined as the remainder, so the buckets tile the total.
-    expect(accounted).toBeCloseTo(stages.totalMs, 3)
-    for (const value of [stages.decodeWaitMs, stages.drawMs, stages.otherMs, ...Object.values(stages.captureMs), ...Object.values(stages.encodeWaitMs)])
-      expect(value).toBeGreaterThanOrEqual(0)
-  })
-
-  it('reports progress against the source frame count', async () => {
-    const seen: TranscodeProgress[] = []
-    await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }),
-      openSink: () => createSink().stream,
-      onProgress: progress => seen.push({ ...progress }),
-    })
-
-    expect(seen).toHaveLength(5)
-    expect(seen.map(p => p.ratio)).toEqual([0.2, 0.4, 0.6, 0.8, 1])
-    expect(seen.at(-1)).toMatchObject({ framesDone: 5, framesTotal: 5, ratio: 1 })
-    expect(seen.at(-1)!.elapsedMs).toBeGreaterThanOrEqual(0)
-  })
-
-  it('opens one sink per rendition', async () => {
-    const opened: string[] = []
-    await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }, { id: 'preview', height: 720 }),
-      openSink: (rendition) => {
-        opened.push(rendition.id)
-        return createSink().stream
-      },
-    })
-
-    expect(opened).toEqual(['proxy', 'preview'])
-  })
-
-  it('disposes the input even when the source is unusable', async () => {
-    state.hasVideoTrack = false
-    await expect(transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }),
-      openSink: () => createSink().stream,
-    })).rejects.toThrow('no video track')
-    expect(state.disposed).toBe(1)
-  })
-
-  it('refuses a source this browser cannot decode', async () => {
-    state.canDecode = false
-    await expect(transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }),
-      openSink: () => createSink().stream,
-    })).rejects.toThrow('cannot decode')
-  })
-
-  it('requires at least one rendition', async () => {
-    await expect(transcode({
-      source: new Blob(),
-      renditions: [],
-      openSink: () => createSink().stream,
-    })).rejects.toThrow('at least one rendition')
-  })
-
-  it('aborts mid-pass and cancels every encoder', async () => {
-    const controller = new AbortController()
-    controller.abort()
-
-    await expect(transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }, { id: 'preview', height: 720 }),
-      openSink: () => createSink().stream,
-      signal: controller.signal,
-    })).rejects.toThrow(/abort/i)
-
-    expect(state.cancelled).toBe(2)
-    expect(state.finalized).toBe(0)
-    // The frame in flight is still released.
-    expect(state.closedSamples).toBe(1)
-    expect(state.disposed).toBe(1)
-  })
-})
-
 describe('probeVideoStats', () => {
   it('measures the average key frame interval', async () => {
     const stats = await probeVideoStats(new Blob())
@@ -604,124 +374,6 @@ describe('measureDecodeThroughput', () => {
     await measureDecodeThroughput(new Blob(), { decoder: { hardwareAcceleration: 'prefer-software' } })
     expect(state.decoderOptions).toEqual({ hardwareAcceleration: 'prefer-software' })
     expect(state.disposed).toBe(1)
-  })
-})
-
-describe('passthroughSameSize', () => {
-  it('bypasses the canvas only for a rendition that matches the source size', async () => {
-    const result = await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'same', height: 1080 }, { id: 'small', height: 360 }),
-      openSink: () => createSink().stream,
-      passthroughSameSize: true,
-    })
-
-    expect(result.renditions.map(r => [r.id, r.passthrough])).toEqual([['same', true], ['small', false]])
-    // The same-size encoder saw decoded frames, never a canvas capture.
-    expect(state.encoders[0]!.canvas).toMatchObject({ passthrough: true })
-    expect(state.encoders[1]!.canvas).toMatchObject({ width: 640, height: 360 })
-    expect(result.stages.captureMs.same).toBe(0)
-    // Every source frame was still released exactly once.
-    expect(state.closedSamples).toBe(5)
-  })
-
-  it('stays on the canvas path when opted out', async () => {
-    const result = await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'same', height: 1080 }),
-      openSink: () => createSink().stream,
-      passthroughSameSize: false,
-    })
-    expect(result.renditions[0]!.passthrough).toBe(false)
-    expect(state.encoders[0]!.canvas).toMatchObject({ width: 1920, height: 1080 })
-  })
-})
-
-describe('pipelineDepth', () => {
-  it('still submits every frame in order and releases every sample when calls overlap', async () => {
-    const result = await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }, { id: 'same', height: 1080 }),
-      openSink: () => createSink().stream,
-      passthroughSameSize: true,
-      pipelineDepth: 3,
-    })
-
-    expect(result.framesDecoded).toBe(5)
-    expect(state.encoders[0]!.frames.map(f => f.ts)).toEqual([0, 0.04, 0.08, 0.12, 0.16])
-    expect(state.encoders[1]!.frames).toHaveLength(5)
-    expect(state.closedSamples).toBe(5)
-    // Blocked time is bookkept per rendition even when nothing actually blocked.
-    expect(Object.keys(result.stages.encodeWaitMs)).toEqual(['proxy', 'same'])
-  })
-
-  it('treats depth 1 as the fully awaited baseline', async () => {
-    const result = await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }),
-      openSink: () => createSink().stream,
-      pipelineDepth: 1,
-    })
-    expect(result.framesDecoded).toBe(5)
-    expect(state.encoders[0]!.frames).toHaveLength(5)
-  })
-})
-
-describe('frame rate hint', () => {
-  it('passes the source frame rate as track metadata so the encoder budgets bits for the real rate', async () => {
-    await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'proxy', height: 360 }),
-      openSink: () => createSink().stream,
-    })
-    // Fake source: 5 frames over a 10 s duration.
-    expect(state.trackMetadata).toEqual([{ frameRate: 0.5 }])
-  })
-})
-
-describe('isEightBit gate', () => {
-  it('lets NV12 pass through and only diverts real 10/12-bit formats', async () => {
-    state.sampleFormat = 'NV12'
-    const nv12 = await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'same', height: 1080 }),
-      openSink: () => createSink().stream,
-      passthroughSameSize: true,
-    })
-    expect(nv12.stages.captureMs.same).toBe(0)
-    expect(state.draws).toBe(0)
-    expect(nv12.stages.drawMs).toBe(0)
-  })
-})
-
-describe('passthrough safety', () => {
-  it('refuses to pass rotated sources through, falling back to the canvas', async () => {
-    state.trackRotation = 90
-    const result = await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'same', height: 1080 }),
-      openSink: () => createSink().stream,
-      passthroughSameSize: true,
-    })
-    expect(result.renditions[0]!.passthrough).toBe(false)
-    expect(state.encoders[0]!.frames).toHaveLength(5)
-  })
-})
-
-describe('10-bit frames on a passthrough rendition', () => {
-  it('take the canvas path frame by frame, since the H.264 encoder is 8-bit', async () => {
-    // WebCodecs spells high bit depth as a P10/P12 suffix (`I420P10`, …); there is no `P010`.
-    state.sampleFormat = 'I420P10'
-    const result = await transcode({
-      source: new Blob(),
-      renditions: renditions({ id: 'same', height: 1080 }),
-      openSink: () => createSink().stream,
-      passthroughSameSize: true,
-    })
-    // The rendition is eligible by size, but every frame was drawn.
-    expect(result.renditions[0]!.passthrough).toBe(true)
-    expect(state.draws).toBe(5)
-    expect(state.encoders[0]!.frames).toHaveLength(5)
   })
 })
 

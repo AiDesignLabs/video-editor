@@ -43,7 +43,7 @@ describe('createWorkerMediaProcessor', () => {
     worker.emitMessage({
       type: 'progress',
       requestId: processRequest.requestId,
-      progress: { framesDone: 4, framesTotal: 10, ratio: 0.4, elapsedMs: 20 },
+      progress: { renditionId: 'video-h720-v1', renditionRatio: 0.4, completedRenditions: 0, totalRenditions: 1, ratio: 0.4, elapsedMs: 20 },
     })
     const renditions = [
       { profileId: TEST_PROFILES[0]!.id, file: new File(['720'], '720.mp4', { type: 'video/mp4' }), width: 1280, height: 720 },
@@ -52,7 +52,7 @@ describe('createWorkerMediaProcessor', () => {
     worker.emitMessage({ type: 'result', requestId: processRequest.requestId, renditions })
 
     await expect(resultPromise).resolves.toEqual(renditions)
-    expect(progress).toHaveBeenCalledWith({ framesDone: 4, framesTotal: 10, ratio: 0.4, elapsedMs: 20 })
+    expect(progress).toHaveBeenCalledWith({ renditionId: 'video-h720-v1', renditionRatio: 0.4, completedRenditions: 0, totalRenditions: 1, ratio: 0.4, elapsedMs: 20 })
     expect(worker.terminate).toHaveBeenCalledOnce()
   })
 
@@ -141,12 +141,15 @@ describe('createWorkerMediaProcessor', () => {
     worker.emitMessage({
       type: 'error',
       requestId: processRequest.requestId,
-      error: { name: 'NotSupportedError', message: 'AVC encoding is unavailable.' },
+      error: { name: 'MediaConversionError', message: 'AVC encoding is unavailable.', code: 'MEDIA_CONVERSION_FAILED', stage: 'initialization', renditionId: 'video-h720-v1' },
     })
 
     await expect(resultPromise).rejects.toMatchObject({
-      name: 'NotSupportedError',
+      name: 'MediaConversionError',
       message: 'AVC encoding is unavailable.',
+      code: 'MEDIA_CONVERSION_FAILED',
+      stage: 'initialization',
+      renditionId: 'video-h720-v1',
     })
     expect(worker.terminate).toHaveBeenCalledOnce()
   })

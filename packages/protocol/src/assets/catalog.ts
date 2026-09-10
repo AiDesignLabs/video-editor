@@ -49,8 +49,10 @@ export interface MediaAssetCatalogOptions {
 }
 
 export interface MediaAssetPreviewProgress {
-  framesDone: number
-  framesTotal: number
+  renditionId: string
+  renditionRatio: number
+  completedRenditions: number
+  totalRenditions: number
   ratio: number
   elapsedMs: number
 }

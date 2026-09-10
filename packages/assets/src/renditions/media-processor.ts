@@ -1,4 +1,4 @@
-import type { TranscodeProgress } from '@video-editor/media'
+import type { MediaFileWrite, TranscodeProgress } from '@video-editor/media'
 import type { VideoRenditionProfile } from '../types'
 import { file as opfsFile, write as opfsWrite } from 'opfs-tools'
 
@@ -54,8 +54,7 @@ export function createMediaProcessor(): MediaProcessor {
         return []
       const media = await import('@video-editor/media')
       const input = media.openMediaInput(request.source)
-      const metadata = await input.meta({ includeFrameRate: false })
-      input.dispose()
+      const metadata = await input.meta({ includeFrameRate: false }).finally(() => input.dispose())
       if (!metadata.hasVideo || metadata.width <= 0 || metadata.height <= 0)
         throw new Error('Media processing requires a video source with valid dimensions.')
       const outputByProfile = new Map<string, { path: string, write: Promise<void> }>()
@@ -67,17 +66,85 @@ export function createMediaProcessor(): MediaProcessor {
             id: profile.id,
             height: outputHeight(metadata.width, metadata.height, profile.maxShortSide),
             videoBitrate: profile.videoBitrate,
+            audioBitrate: profile.audioBitrate,
             keyFrameIntervalMs: profile.keyFrameIntervalMs,
           })),
-          audioBitrate: Math.max(...request.profiles.map(profile => profile.audioBitrate)),
           signal: request.signal,
           onProgress: request.onProgress,
-          createCanvas: typeof OffscreenCanvas === 'undefined' ? undefined : (width: number, height: number) => new OffscreenCanvas(width, height),
+          async validateOutput(rendition) {
+            const output = outputByProfile.get(rendition.id)
+            if (!output)
+              throw new Error(`Media processing did not create output ${rendition.id}.`)
+            await output.write
+            const file = await opfsFile(output.path, 'r').getOriginFile()
+            if (!file)
+              throw new Error(`Media processing output ${rendition.id} is unavailable.`)
+            const meta = await media.validateTranscodedMedia(file, rendition)
+            rendition.width = meta.width
+            rendition.height = meta.height
+            rendition.durationMs = meta.durationMs
+          },
           openSink(rendition) {
             const stream = new TransformStream<Uint8Array, Uint8Array>()
             const path = `/video-editor-assets/v1/temp/${jobId}/${rendition.id}.partial`
-            outputByProfile.set(rendition.id, { path, write: opfsWrite(path, stream.readable as ReadableStream<BufferSource>, { overwrite: true }) })
+            const write = opfsWrite(path, stream.readable as ReadableStream<BufferSource>, { overwrite: true })
+            // Observe early OPFS errors while the converter owns stream backpressure.
+            void write.catch(() => {})
+            outputByProfile.set(rendition.id, { path, write })
             return stream.writable
+          },
+          async openFileSink(rendition) {
+            const root = await navigator.storage.getDirectory()
+            let parent = root
+            for (const name of ['video-editor-assets', 'v1', 'temp', jobId])
+              parent = await parent.getDirectoryHandle(name, { create: true })
+            const handle = await parent.getFileHandle(`${rendition.id}.partial`, { create: true })
+            let file: FileSystemWritableFileStream
+            try {
+              file = await handle.createWritable()
+            }
+            catch (error) {
+              await parent.removeEntry(`${rendition.id}.partial`).catch(() => {})
+              throw error
+            }
+            const path = `/video-editor-assets/v1/temp/${jobId}/${rendition.id}.partial`
+            let resolveWrite!: () => void
+            let rejectWrite!: (reason: unknown) => void
+            const write = new Promise<void>((resolve, reject) => {
+              resolveWrite = resolve
+              rejectWrite = reject
+            })
+            void write.catch(() => {})
+            outputByProfile.set(rendition.id, { path, write })
+            return new WritableStream<MediaFileWrite>({
+              async write(chunk) {
+                try {
+                  await file.write(chunk)
+                }
+                catch (error) {
+                  await file.abort(error).catch(() => {})
+                  rejectWrite(error)
+                  throw error
+                }
+              },
+              async close() {
+                try {
+                  await file.close()
+                  resolveWrite()
+                }
+                catch (error) {
+                  await file.abort(error).catch(() => {})
+                  rejectWrite(error)
+                  throw error
+                }
+              },
+              async abort(reason) {
+                try {
+                  await file.abort(reason)
+                }
+                finally { rejectWrite(reason) }
+              },
+            })
           },
         })
         await Promise.all([...outputByProfile.values()].map(output => output.write))
@@ -98,7 +165,8 @@ export function createMediaProcessor(): MediaProcessor {
         }))
       }
       finally {
-        await Promise.all([...outputByProfile.values()].map(async ({ path }) => {
+        await Promise.all([...outputByProfile.values()].map(async ({ path, write }) => {
+          await write.catch(() => {})
           const handle = opfsFile(path)
           if (await handle.exists())
             await handle.remove()

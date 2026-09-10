@@ -106,6 +106,8 @@ describe('media browser workflows', () => {
       height: 64,
       hasVideo: true,
       hasAudio: true,
+      audioSampleRate: 48_000,
+      audioChanCount: 1,
     })
     expect(sourceMeta.durationMs).toBeGreaterThanOrEqual(900)
 

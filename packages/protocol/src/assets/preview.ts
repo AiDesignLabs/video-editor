@@ -1,5 +1,5 @@
 import type { TranscodeProgress } from '@video-editor/media'
-import { transcode } from '@video-editor/media'
+import { transcode, validateTranscodedMedia } from '@video-editor/media'
 
 export interface GenerateVideoPreviewFileOptions {
   height: number
@@ -52,7 +52,8 @@ export async function generateVideoPreviewFile(
         keyFrameIntervalMs: options.keyFrameIntervalMs,
       }],
       openSink: async () => await handle.createWritable(),
-      pipelineDepth: 4,
+      openFileSink: async () => await handle.createWritable(),
+      validateOutput: async (result) => { await validateTranscodedMedia(await handle.getFile(), result) },
       audioBitrate: options.audioBitrate,
       onProgress: options.onProgress,
       signal: options.signal,

@@ -63,10 +63,12 @@ export function attachMediaProcessorWorker(
 
 function createProgressReporter(scope: DedicatedWorkerGlobalScope, requestId: string) {
   let lastPostedElapsedMs: number | undefined
+  let lastRenditionId: string | undefined
   let pendingProgress: TranscodeProgress | undefined
 
   const post = (progress: TranscodeProgress) => {
     lastPostedElapsedMs = progress.elapsedMs
+    lastRenditionId = progress.renditionId
     pendingProgress = undefined
     scope.postMessage({
       type: 'progress',
@@ -78,9 +80,9 @@ function createProgressReporter(scope: DedicatedWorkerGlobalScope, requestId: st
   return {
     report(progress: TranscodeProgress) {
       const isComplete = progress.ratio >= 1
-        || (progress.framesTotal > 0 && progress.framesDone >= progress.framesTotal)
       if (lastPostedElapsedMs === undefined
         || isComplete
+        || progress.renditionId !== lastRenditionId
         || progress.elapsedMs - lastPostedElapsedMs >= PROGRESS_THROTTLE_MS) {
         post(progress)
         return
@@ -106,7 +108,14 @@ function serializeError(error: unknown) {
   if (typeof error === 'object' && error !== null) {
     const name = 'name' in error && typeof error.name === 'string' ? error.name : 'Error'
     const message = 'message' in error && typeof error.message === 'string' ? error.message : String(error)
-    return { name, message }
+    return {
+      name,
+      message,
+      ...('code' in error && typeof error.code === 'string' ? { code: error.code } : {}),
+      ...('stage' in error && typeof error.stage === 'string' ? { stage: error.stage } : {}),
+      ...('renditionId' in error && typeof error.renditionId === 'string' ? { renditionId: error.renditionId } : {}),
+      ...('sdkVersion' in error && typeof error.sdkVersion === 'string' ? { sdkVersion: error.sdkVersion } : {}),
+    }
   }
   return { name: 'Error', message: String(error) }
 }

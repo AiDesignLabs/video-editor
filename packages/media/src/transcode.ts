@@ -1,8 +1,5 @@
-import type { FrameTiming } from './encoder'
-import type { MediaWriteSink } from './types'
 import {
   ALL_FORMATS,
-  AudioSampleSink,
   BlobSource,
   canDecodeVideo,
   canEncodeVideo,
@@ -11,171 +8,24 @@ import {
   UrlSource,
   VideoSampleSink,
 } from 'mediabunny'
-import { createEncoder } from './encoder'
 
-/**
- * Re-encoding one source into one or more smaller renditions.
- *
- * Every rendition is produced in a *single* decode pass: decoding dominates the
- * cost by a wide margin (measured on a 12.5-minute 720p H.264 source, adding a
- * second encoder to the same pass cost no measurable extra time), so decoding
- * once and fanning the frames out to several encoders is close to free compared
- * with running the whole job per rendition.
- */
+export { MediaConversionError, transcode } from './conversion'
+export type { Rendition, RenditionResult, TranscodeOptions, TranscodeProgress, TranscodeResult } from './conversion'
 
-/** One output to produce. */
-export interface Rendition {
-  /** Caller-chosen identity, echoed back on the result. */
-  id: string
-  /** Output height in pixels; width follows the source's aspect ratio. */
-  height: number
-  /** Video bitrate in bits per second. Defaults to the encoder's quality preset. */
-  videoBitrate?: number
-  /** Milliseconds between forced key frames — see `Mp4EncoderOptions`. */
-  keyFrameIntervalMs?: number
-  /** See `Mp4EncoderOptions.latencyMode`: `'realtime'` is faster but may drop frames. */
-  latencyMode?: 'quality' | 'realtime'
-  /** See `Mp4EncoderOptions.hardwareAcceleration`. */
-  hardwareAcceleration?: 'no-preference' | 'prefer-hardware' | 'prefer-software'
-}
-
-/** Hints for the shared decoder. Hints only — browsers usually choose well. */
 export interface DecoderOptions {
   hardwareAcceleration?: 'no-preference' | 'prefer-hardware' | 'prefer-software'
-  /** Ask the decoder to emit frames with as little internal buffering as it can. */
   optimizeForLatency?: boolean
 }
 
-export interface RenditionResult {
-  id: string
-  width: number
-  height: number
-  /** Frames handed to this rendition's encoder. */
-  frameCount: number
-  /** The WebCodecs config the encoder was actually created with, when reported. */
-  encoderConfig?: VideoEncoderConfig
-  /** True when frames bypassed the canvas (see `passthroughSameSize`). */
-  passthrough: boolean
-}
-
-export interface TranscodeProgress {
-  /** Source frames processed so far. */
+export interface FrameProcessingProgress {
   framesDone: number
-  /** Total source frames, from the container's packet count. */
   framesTotal: number
-  /** `framesDone / framesTotal`, clamped to 0–1; 0 while the total is unknown. */
   ratio: number
-  /** Wall time since the frame loop started — with `ratio`, enough for an ETA. */
   elapsedMs: number
 }
 
-function progressOf(framesDone: number, framesTotal: number, startedAt: number): TranscodeProgress {
-  return {
-    framesDone,
-    framesTotal,
-    ratio: framesTotal > 0 ? Math.min(1, framesDone / framesTotal) : 0,
-    elapsedMs: performance.now() - startedAt,
-  }
-}
-
-export interface TranscodeOptions {
-  /** The media to read: a `Blob`/`File`, or a URL read through range requests. */
-  source: Blob | string
-  renditions: Rendition[]
-  /**
-   * Where a rendition's bytes go. Called once per rendition before decoding
-   * starts; the returned stream receives the container bytes in order and is
-   * closed when that rendition finishes.
-   *
-   * Taking a sink rather than returning bytes keeps the whole output off the
-   * heap — write it to OPFS or straight into an upload.
-   */
-  openSink: (rendition: Rendition) => MediaWriteSink | Promise<MediaWriteSink>
-  /** Preserve the primary audio track as AAC when present. Defaults to true. */
-  audio?: boolean
-  /** Target AAC bitrate in bits per second. */
-  audioBitrate?: number
-  /**
-   * For a rendition whose output size equals the source, feed the decoded frame
-   * straight to the encoder instead of drawing it into a canvas and capturing
-   * that. Skips the RGBA canvas → VideoFrame conversion the encoder would
-   * otherwise have to undo; decoded frames are already in an encoder-native
-   * format.
-   *
-   * On by default. Measured, it does not change the wall time — the hardware
-   * encoder is the floor either way — but it spares the same-size rendition an
-   * RGBA round trip (chroma re-subsampled, colour matrix applied twice), so the
-   * master-size copy stays closer to the source. Rotated and non-8-bit frames
-   * fall back to the canvas automatically.
-   */
-  passthroughSameSize?: boolean
-  /**
-   * How many `addFrame()` calls may be outstanding per rendition before the
-   * loop waits for one to settle. `1` (default) awaits every call, which puts
-   * mediabunny's per-packet muxing promise on the frame loop's critical path;
-   * a higher value lets that overlap with the next frame's decode and draw.
-   * Frame order is unaffected — frames reach the encoder in call order.
-   */
-  pipelineDepth?: number
-  decoder?: DecoderOptions
-  onProgress?: (progress: TranscodeProgress) => void
-  signal?: AbortSignal
-  /** Override canvas creation. Workers use OffscreenCanvas by default when no DOM is available. */
-  createCanvas?: (width: number, height: number) => HTMLCanvasElement | OffscreenCanvas
-}
-
-/**
- * Where the wall-clock time of the pass went, measured from inside the loop
- * rather than inferred from totals.
- *
- * The loop is strictly sequential per frame — wait for the decoder, draw into
- * each rendition's canvas, hand each canvas to its encoder — so these buckets
- * add up to the loop's total and the largest one *is* the bottleneck.
- */
-export interface TranscodeStages {
-  /**
-   * Gap between finishing one frame and receiving the next. That is decoder
-   * wait when the loop is otherwise idle — but any microtasks queued by the
-   * previous frame (mediabunny's deferred `add()` body and muxing chain) run
-   * inside this gap too, so with `pipelineDepth > 1` it also carries that CPU.
-   */
-  decodeWaitMs: number
-  /** Synchronous `draw()` into every rendition's canvas. */
-  drawMs: number
-  /** Per rendition: copying its canvas into a `VideoFrame` for the encoder. */
-  captureMs: Record<string, number>
-  /**
-   * Per rendition: the *synchronous* part of handing the frame over — the
-   * time `addFrame()` runs on the main thread before it yields its promise.
-   * This is CPU, not waiting; pipelining cannot hide it.
-   */
-  submitSyncMs: Record<string, number>
-  /**
-   * Per rendition: time the loop was blocked on that rendition's `addFrame()`
-   * — the encoder's queue plus, on mediabunny's path, its per-packet muxing
-   * promise. With several renditions the encoders run concurrently, so the one
-   * awaited later sees the wait the earlier ones already overlapped; and with
-   * `pipelineDepth > 1` this is genuine blocked time, not the sum of each
-   * call's own duration. Read these together, not in isolation.
-   */
-  encodeWaitMs: Record<string, number>
-  /**
-   * Per rendition: time inside the container writer handing bytes out. This
-   * runs on the muxer's promise that `add()` awaits, so if it were large it
-   * would show up as encoder wait — measured separately to rule it in or out.
-   * Not part of the loop's serial time, so excluded from `otherMs`.
-   */
-  writeMs: Record<string, number>
-  /** Everything else in the loop body (bookkeeping, progress callbacks). */
-  otherMs: number
-  totalMs: number
-}
-
-export interface TranscodeResult {
-  renditions: RenditionResult[]
-  /** Source frames decoded — the same for every rendition. */
-  framesDecoded: number
-  stages: TranscodeStages
+function progressOf(framesDone: number, framesTotal: number, startedAt: number): FrameProcessingProgress {
+  return { framesDone, framesTotal, ratio: framesTotal > 0 ? Math.min(1, framesDone / framesTotal) : 0, elapsedMs: performance.now() - startedAt }
 }
 
 /** H.264 requires even dimensions. */
@@ -270,26 +120,6 @@ export async function probeVideoStats(source: Blob | string): Promise<VideoStats
   }
 }
 
-interface TargetBase {
-  rendition: Rendition
-  width: number
-  height: number
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
-  canvas: HTMLCanvasElement | OffscreenCanvas
-  passthrough: boolean
-  drained: Promise<void>
-  getEncoderConfig: () => VideoEncoderConfig | undefined
-  getWriteStats: () => { chunks: number, ms: number }
-  cancel: () => Promise<void>
-}
-
-interface MediabunnyTarget extends TargetBase {
-  encoder: ReturnType<typeof createEncoder>
-  pending: Set<Promise<FrameTiming>>
-}
-
-type Target = MediabunnyTarget
-
 /**
  * Resolves once the encoder's queue has room again.
  *
@@ -318,276 +148,11 @@ function waitForDequeue(encoder: VideoEncoder, inFlight: number): Promise<void> 
   })
 }
 
-export async function transcode(options: TranscodeOptions): Promise<TranscodeResult> {
-  // Frames go through mediabunny's `VideoSampleSource`; it owns the encoder.
-  // A raw-`VideoEncoder` engine was built and measured against it: in the
-  // shipping shape (two renditions at once) both landed on 39.5 s, because two
-  // hardware sessions contending for the media engine is the slower party, so
-  // the custom engine was removed rather than kept as maintenance surface.
-  const { source, renditions, openSink, onProgress, signal, passthroughSameSize = true } = options
-  const pipelineDepth = Math.max(1, Math.floor(options.pipelineDepth ?? 1))
-  if (renditions.length === 0)
-    throw new Error('transcode: at least one rendition is required')
-
-  const input = new Input({ formats: ALL_FORMATS, source: createSource(source) })
-
-  try {
-    const [track, audioTrack] = await Promise.all([
-      input.getPrimaryVideoTrack(),
-      options.audio === false ? Promise.resolve(null) : input.getPrimaryAudioTrack(),
-    ])
-    if (!track)
-      throw new Error('transcode: the source has no video track')
-    if (!(await track.canDecode()))
-      throw new Error('transcode: this browser cannot decode the source video track')
-    if (audioTrack && !(await audioTrack.canDecode()))
-      throw new Error('transcode: this browser cannot decode the source audio track')
-
-    const framesTotal = (await track.computePacketStats()).packetCount
-    const [sourceWidth, sourceHeight, sourceRotation] = await Promise.all([
-      track.getDisplayWidth(),
-      track.getDisplayHeight(),
-      track.getRotation(),
-    ])
-    // Handed to the encoder as its rate-control hint — see `frameRate` on
-    // `createEncoder`; without it the bitrate target is missed on non-30 fps sources.
-    const sourceDurationSec = await input.computeDuration()
-    const sourceFrameRate = framesTotal > 0 && sourceDurationSec > 0 ? framesTotal / sourceDurationSec : 25
-
-    /**
-     * A rendition may take decoded frames untouched only when nothing about
-     * them has to change on the way to the encoder. Beyond matching size:
-     * - rotation must be 0 — `draw()` applies the container's rotation, a raw
-     *   frame does not, and its coded size would not even match the config;
-     * - the pixel format must be 8-bit — an H.264 High-profile encoder rejects
-     *   P010/P012, which the canvas path silently converts.
-     * An unknown format is allowed: browsers only report `null` on closed frames.
-     */
-    const canPassthrough = (width: number, height: number) =>
-      passthroughSameSize && width === sourceWidth && height === sourceHeight && sourceRotation === 0
-    // WebCodecs spells every high-bit-depth format with a P10/P12 suffix
-    // (I420P10, I444AP12, …); matching on bare digits would misread NV12.
-    const isEightBit = (format: string | null | undefined) => !format || !/P1[02]$/.test(format)
-
-    const prepareCanvas = (width: number, height: number) => {
-      const canvas = options.createCanvas?.(width, height) ?? createDefaultTranscodeCanvas(width, height)
-      const ctx = canvas.getContext('2d', { alpha: false })
-      if (!ctx)
-        throw new Error('transcode: could not create a 2D canvas context')
-      return { canvas, ctx }
-    }
-
-    const targets: Target[] = await Promise.all(renditions.map(async (rendition): Promise<MediabunnyTarget> => {
-      const height = toEvenPx(rendition.height)
-      const width = toEvenPx(sourceWidth * (height / sourceHeight))
-
-      const { canvas, ctx } = prepareCanvas(width, height)
-
-      let encoderConfig: VideoEncoderConfig | undefined
-      const encoder = createEncoder({
-        canvas,
-        videoBitrate: rendition.videoBitrate,
-        keyFrameIntervalMs: rendition.keyFrameIntervalMs,
-        latencyMode: rendition.latencyMode,
-        hardwareAcceleration: rendition.hardwareAcceleration,
-        frameRate: sourceFrameRate,
-        withAudio: !!audioTrack,
-        audioInput: 'sample',
-        audioBitrate: options.audioBitrate,
-        onEncoderConfig: (config) => {
-          encoderConfig = config
-        },
-      })
-      // Drain concurrently: the encoder applies backpressure through `addFrame`,
-      // so leaving the stream unread would stall the whole pass.
-      const drained = encoder.stream.pipeTo(await openSink(rendition))
-
-      const passthrough = canPassthrough(width, height)
-      const pending = new Set<Promise<FrameTiming>>()
-      return {
-        rendition,
-        width,
-        height,
-        ctx,
-        canvas,
-        encoder,
-        drained,
-        passthrough,
-        pending,
-        getEncoderConfig: () => encoderConfig,
-        getWriteStats: () => encoder.getWriteStats(),
-        cancel: () => encoder.cancel(),
-      }
-    }))
-
-    const sampleSink = new VideoSampleSink(track, options.decoder)
-    let framesDone = 0
-
-    const stages: TranscodeStages = {
-      decodeWaitMs: 0,
-      drawMs: 0,
-      captureMs: Object.fromEntries(targets.map(target => [target.rendition.id, 0])),
-      submitSyncMs: Object.fromEntries(targets.map(target => [target.rendition.id, 0])),
-      encodeWaitMs: Object.fromEntries(targets.map(target => [target.rendition.id, 0])),
-      writeMs: Object.fromEntries(targets.map(target => [target.rendition.id, 0])),
-      otherMs: 0,
-      totalMs: 0,
-    }
-    const loopStartedAt = performance.now()
-    // The gap between finishing one frame and receiving the next is time spent
-    // waiting on the decoder (plus generator overhead, which is negligible).
-    let lastFrameEndedAt = loopStartedAt
-
-    try {
-      // Feed audio before video. The output container fixes its track layout
-      // when media starts arriving, so an audio track first used after every
-      // video frame may be omitted even though it was registered up front.
-      if (audioTrack) {
-        const audioSink = new AudioSampleSink(audioTrack)
-        for await (const sample of audioSink.samples()) {
-          if (signal?.aborted) {
-            sample.close()
-            throw new DOMException('transcode aborted', 'AbortError')
-          }
-
-          try {
-            await Promise.all(targets.map(target => target.encoder.addAudioSample(sample)))
-          }
-          finally {
-            sample.close()
-          }
-        }
-        lastFrameEndedAt = performance.now()
-      }
-
-      for await (const sample of sampleSink.samples()) {
-        const receivedAt = performance.now()
-        stages.decodeWaitMs += receivedAt - lastFrameEndedAt
-
-        if (signal?.aborted) {
-          sample.close()
-          throw new DOMException('transcode aborted', 'AbortError')
-        }
-
-        const timestampMs = sample.timestamp * 1000
-        const durationMs = (sample.duration ?? 0) * 1000
-        for (const target of targets) {
-          const id = target.rendition.id
-
-          let submission: Promise<FrameTiming>
-          // Per-frame check on top of the per-rendition gate: a stream can switch
-          // pixel format mid-file, and a 10-bit frame must take the canvas path
-          // even when the size matches — the H.264 encoder is configured 8-bit.
-          if (target.passthrough && isEightBit(sample.format)) {
-            // A second reference to the decoded frame's backing store; closing
-            // it does not affect `sample`, which the loop closes below. It is
-            // released once the encoder has taken it, i.e. when add() settles.
-            const frame = sample.toVideoFrame()
-            const submitStartedAt = performance.now()
-            submission = target.encoder.addVideoFrame(frame, timestampMs, durationMs).finally(() => frame.close())
-            stages.submitSyncMs[id]! += performance.now() - submitStartedAt
-          }
-          else {
-            const drawStartedAt = performance.now()
-            sample.draw(target.ctx, 0, 0, target.width, target.height)
-            stages.drawMs += performance.now() - drawStartedAt
-            // addFrame() captures the canvas synchronously before returning,
-            // so the next iteration may redraw immediately. The capture is
-            // reported through the resolved timing and moved to its own bucket.
-            const submitStartedAt = performance.now()
-            submission = target.encoder.addFrame(timestampMs, durationMs)
-            stages.submitSyncMs[id]! += performance.now() - submitStartedAt
-          }
-
-          const tracked = submission.then((timing) => {
-            stages.captureMs[id]! += timing.captureMs
-            stages.submitSyncMs[id]! -= timing.captureMs
-            return timing
-          })
-          tracked.finally(() => target.pending.delete(tracked)).catch(() => {})
-          target.pending.add(tracked)
-
-          // Block only when this rendition has `pipelineDepth` calls in flight.
-          if (target.pending.size >= pipelineDepth) {
-            const waitStartedAt = performance.now()
-            await Promise.race(target.pending)
-            stages.encodeWaitMs[id]! += performance.now() - waitStartedAt
-          }
-        }
-        // One decoded frame serves every rendition, then it is released.
-        sample.close()
-
-        framesDone += 1
-        onProgress?.(progressOf(framesDone, framesTotal, loopStartedAt))
-        lastFrameEndedAt = performance.now()
-      }
-
-      // Drain whatever is still in flight; with depth 1 this is a no-op.
-      for (const target of targets) {
-        const waitStartedAt = performance.now()
-        await Promise.all(target.pending)
-        stages.encodeWaitMs[target.rendition.id]! += performance.now() - waitStartedAt
-      }
-
-      for (const target of targets) {
-        await target.encoder.finalize()
-      }
-      // Only now are the sinks guaranteed to have every byte.
-      await Promise.all(targets.map(target => target.drained))
-    }
-    catch (error) {
-      await Promise.all(targets.map(target => target.cancel().catch(() => {})))
-      // Cancelling errors the sinks, so these settle as rejections; awaiting
-      // them keeps those from surfacing as unhandled rejections after the
-      // original error has already been thrown.
-      await Promise.allSettled(targets.map(target => target.drained))
-      throw error
-    }
-
-    stages.totalMs = performance.now() - loopStartedAt
-    for (const target of targets)
-      stages.writeMs[target.rendition.id] = target.getWriteStats().ms
-    const sum = (record: Record<string, number>) => Object.values(record).reduce((total, ms) => total + ms, 0)
-    const accounted = stages.decodeWaitMs + stages.drawMs + sum(stages.captureMs) + sum(stages.submitSyncMs) + sum(stages.encodeWaitMs)
-    stages.otherMs = Math.max(0, stages.totalMs - accounted)
-
-    return {
-      stages,
-      framesDecoded: framesDone,
-      renditions: targets.map(target => ({
-        id: target.rendition.id,
-        width: target.width,
-        height: target.height,
-        frameCount: framesDone,
-        encoderConfig: target.getEncoderConfig(),
-        passthrough: target.passthrough,
-      })),
-    }
-  }
-  finally {
-    // Holds a decoder and the source's read cache; skipping this leaks both,
-    // which compounds when several files are transcoded in a row.
-    await input.dispose()
-  }
-}
-
-function createDefaultTranscodeCanvas(width: number, height: number): HTMLCanvasElement | OffscreenCanvas {
-  if (typeof document !== 'undefined') {
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    return canvas
-  }
-  if (typeof OffscreenCanvas !== 'undefined')
-    return new OffscreenCanvas(width, height)
-  throw new Error('transcode: this runtime requires OffscreenCanvas or an injected createCanvas factory')
-}
-
 export interface DecodeThroughputOptions {
   /** Stop after this many frames; unset decodes the whole track. */
   maxFrames?: number
   decoder?: DecoderOptions
-  onProgress?: (progress: TranscodeProgress) => void
+  onProgress?: (progress: FrameProcessingProgress) => void
   signal?: AbortSignal
 }
 
@@ -599,7 +164,7 @@ export interface DecodeThroughput {
 }
 
 /**
- * Decode-only pass: the same loop `transcode()` runs, minus every encoder.
+ * Decode-only diagnostic, independent of the SDK's file conversion pipeline.
  *
  * Two uses. As a diagnostic it separates "the decoder is the bottleneck" from
  * "the per-frame draw/encode stage is" — the answer decides which optimisation
@@ -698,7 +263,7 @@ export interface EncoderThroughputOptions {
   latencyMode?: 'quality' | 'realtime'
   hardwareAcceleration?: AccelerationPreference
   decoder?: DecoderOptions
-  onProgress?: (progress: TranscodeProgress) => void
+  onProgress?: (progress: FrameProcessingProgress) => void
   signal?: AbortSignal
 }
 

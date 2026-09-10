@@ -126,10 +126,10 @@ function createAbortError() {
   return error
 }
 
-function restoreError(serialized: { name: string, message: string }) {
+function restoreError(serialized: { name: string, message: string, code?: string, stage?: string, renditionId?: string, sdkVersion?: string }) {
   const error = new Error(serialized.message)
   error.name = serialized.name
-  return error
+  return Object.assign(error, { code: serialized.code, stage: serialized.stage, renditionId: serialized.renditionId, sdkVersion: serialized.sdkVersion })
 }
 
 function errorMessage(error: unknown) {

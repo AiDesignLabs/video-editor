@@ -3,6 +3,8 @@ export type {
   CaptureCanvasStreamHandle,
   CaptureCanvasStreamOptions,
 } from './capture-canvas-stream'
+export { MediaConversionError, validateTranscodedMedia } from './conversion'
+export type { MediaConversionStage } from './conversion'
 export type {
   EncoderFormat,
   EncoderHandle,
@@ -39,12 +41,12 @@ export type {
   DecodeThroughputOptions,
   EncoderThroughput,
   EncoderThroughputOptions,
+  FrameProcessingProgress,
   Rendition,
   RenditionResult,
   TranscodeOptions,
   TranscodeProgress,
   TranscodeResult,
-  TranscodeStages,
   VideoStats,
 } from './transcode'
 export { trimVideo } from './trim-video'
@@ -53,4 +55,4 @@ export type {
   TrimVideoProgress,
   TrimVideoResult,
 } from './trim-video'
-export type { MediaWriteSink } from './types'
+export type { MediaFileSink, MediaFileWrite, MediaWriteSink } from './types'

@@ -35,7 +35,7 @@ describe('attachMediaProcessorWorker', () => {
     ]
     const processor: MediaProcessor = {
       async process(request) {
-        request.onProgress?.({ framesDone: 5, framesTotal: 10, ratio: 0.5, elapsedMs: 30 })
+        request.onProgress?.({ renditionId: 'video-h720-v1', renditionRatio: 0.5, completedRenditions: 0, totalRenditions: 1, ratio: 0.5, elapsedMs: 30 })
         return renditions
       },
     }
@@ -53,7 +53,7 @@ describe('attachMediaProcessorWorker', () => {
     expect(scope.messages[0]).toEqual({
       type: 'progress',
       requestId: 'request-1',
-      progress: { framesDone: 5, framesTotal: 10, ratio: 0.5, elapsedMs: 30 },
+      progress: { renditionId: 'video-h720-v1', renditionRatio: 0.5, completedRenditions: 0, totalRenditions: 1, ratio: 0.5, elapsedMs: 30 },
     })
     expect(scope.messages[1]).toEqual({ type: 'result', requestId: 'request-1', renditions })
     detach()
@@ -90,11 +90,11 @@ describe('attachMediaProcessorWorker', () => {
     const scope = new FakeWorkerScope()
     const processor: MediaProcessor = {
       async process(request) {
-        request.onProgress?.({ framesDone: 1, framesTotal: 100, ratio: 0.01, elapsedMs: 0 })
-        request.onProgress?.({ framesDone: 2, framesTotal: 100, ratio: 0.02, elapsedMs: 100 })
-        request.onProgress?.({ framesDone: 3, framesTotal: 100, ratio: 0.03, elapsedMs: 249 })
-        request.onProgress?.({ framesDone: 4, framesTotal: 100, ratio: 0.04, elapsedMs: 250 })
-        request.onProgress?.({ framesDone: 100, framesTotal: 100, ratio: 1, elapsedMs: 251 })
+        request.onProgress?.({ renditionId: 'video-h720-v1', renditionRatio: 0.01, completedRenditions: 0, totalRenditions: 1, ratio: 0.01, elapsedMs: 0 })
+        request.onProgress?.({ renditionId: 'video-h720-v1', renditionRatio: 0.02, completedRenditions: 0, totalRenditions: 1, ratio: 0.02, elapsedMs: 100 })
+        request.onProgress?.({ renditionId: 'video-h720-v1', renditionRatio: 0.03, completedRenditions: 0, totalRenditions: 1, ratio: 0.03, elapsedMs: 249 })
+        request.onProgress?.({ renditionId: 'video-h720-v1', renditionRatio: 0.04, completedRenditions: 0, totalRenditions: 1, ratio: 0.04, elapsedMs: 250 })
+        request.onProgress?.({ renditionId: 'video-h720-v1', renditionRatio: 1, completedRenditions: 1, totalRenditions: 1, ratio: 1, elapsedMs: 251 })
         return []
       },
     }
@@ -113,17 +113,17 @@ describe('attachMediaProcessorWorker', () => {
       {
         type: 'progress',
         requestId: 'request-with-progress',
-        progress: { framesDone: 1, framesTotal: 100, ratio: 0.01, elapsedMs: 0 },
+        progress: { renditionId: 'video-h720-v1', renditionRatio: 0.01, completedRenditions: 0, totalRenditions: 1, ratio: 0.01, elapsedMs: 0 },
       },
       {
         type: 'progress',
         requestId: 'request-with-progress',
-        progress: { framesDone: 4, framesTotal: 100, ratio: 0.04, elapsedMs: 250 },
+        progress: { renditionId: 'video-h720-v1', renditionRatio: 0.04, completedRenditions: 0, totalRenditions: 1, ratio: 0.04, elapsedMs: 250 },
       },
       {
         type: 'progress',
         requestId: 'request-with-progress',
-        progress: { framesDone: 100, framesTotal: 100, ratio: 1, elapsedMs: 251 },
+        progress: { renditionId: 'video-h720-v1', renditionRatio: 1, completedRenditions: 1, totalRenditions: 1, ratio: 1, elapsedMs: 251 },
       },
       { type: 'result', requestId: 'request-with-progress', renditions: [] },
     ])

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CodecSupportProbe, EncodeProbeSettings, LabHints, LabResult, RenditionSpec, SourceInfo } from './transcode-lab'
+import type { CodecSupportProbe, EncodeProbeSettings, LabHints, LabProgress, LabResult, RenditionSpec, SourceInfo } from './transcode-lab'
 import { computed, ref } from 'vue'
 import { inspectSource, probeCodecSupport, runDecodeOnly, runEncodeOnly, runLab } from './transcode-lab'
 
@@ -18,10 +18,10 @@ const result = ref<LabResult | null>(null)
 const error = ref<string | null>(null)
 const running = ref(false)
 const dragging = ref(false)
-const progress = ref({ framesDone: 0, framesTotal: 0, elapsedMs: 0 })
+const progress = ref<LabProgress>({ framesDone: 0, framesTotal: 0, elapsedMs: 0 })
 
 const mode = ref<Mode>('single')
-const hints = ref<LabHints>({ hardwareAcceleration: 'no-preference', realtimeEncoding: false, previewFirst: false, passthroughSameSize: true, pipelineDepth: 1 })
+const hints = ref<LabHints>({ hardwareAcceleration: 'no-preference', realtimeEncoding: false, previewFirst: false })
 const support = ref<CodecSupportProbe | null>(null)
 const encodeProbe = ref<EncodeProbeSettings>({ height: 720, videoBitrateKbps: 2500, keyFrameIntervalSec: 2, maxQueue: 4, framerate: 25 })
 const targetHeight = ref(360)
@@ -43,26 +43,6 @@ const specs = computed<RenditionSpec[]>(() => (
 
 let controller: AbortController | null = null
 
-/** Stage buckets as rows, largest first — the top row is the bottleneck. */
-const stageRows = computed(() => {
-  const stages = result.value?.stages
-  const frames = result.value?.source.frameCount ?? 0
-  if (!stages || !frames)
-    return []
-  const labelOf = (id: string) => specs.value.find(spec => spec.id === id)?.label ?? id
-  const rows = [
-    { label: '等待解码器', ms: stages.decodeWaitMs },
-    { label: '画进 canvas（全部档）', ms: stages.drawMs },
-    ...Object.entries(stages.captureMs).map(([id, ms]) => ({ label: `抓帧 new VideoFrame(canvas) · ${labelOf(id)}`, ms })),
-    ...Object.entries(stages.submitSyncMs).map(([id, ms]) => ({ label: `addFrame() 同步部分（主线程 CPU）· ${labelOf(id)}`, ms })),
-    ...Object.entries(stages.encodeWaitMs).map(([id, ms]) => ({ label: `等待编码器 · ${labelOf(id)}`, ms })),
-    { label: '其他（回调、记账）', ms: stages.otherMs },
-  ]
-  return rows
-    .map(row => ({ ...row, share: stages.totalMs > 0 ? row.ms / stages.totalMs : 0, perFrameMs: row.ms / frames }))
-    .sort((a, b) => b.ms - a.ms)
-})
-
 const copied = ref(false)
 
 /**
@@ -75,9 +55,6 @@ function buildReport() {
   if (!r)
     return null
   const round = (n: number, digits = 3) => Number(n.toFixed(digits))
-  const roundRecord = (record: Record<string, number>, digits = 0) =>
-    Object.fromEntries(Object.entries(record).map(([k, v]) => [k, round(v, digits)]))
-  const frames = r.source.frameCount || 1
   return {
     when: new Date().toISOString(),
     userAgent: navigator.userAgent,
@@ -99,31 +76,6 @@ function buildReport() {
       realtimeFactor: round(r.timing.realtimeFactor, 2),
     },
     heap: { peakBytes: r.heapPeakBytes, settledBytes: r.heapSettledBytes },
-    stages: r.stages
-      ? {
-          decodeWaitMs: round(r.stages.decodeWaitMs, 0),
-          drawMs: round(r.stages.drawMs, 0),
-          captureMs: roundRecord(r.stages.captureMs),
-          submitSyncMs: roundRecord(r.stages.submitSyncMs),
-          encodeWaitMs: roundRecord(r.stages.encodeWaitMs),
-          writeMs: roundRecord(r.stages.writeMs),
-          otherMs: round(r.stages.otherMs, 0),
-          totalMs: round(r.stages.totalMs, 0),
-          perFrameMs: {
-            decodeWait: round(r.stages.decodeWaitMs / frames),
-            draw: round(r.stages.drawMs / frames),
-            capture: roundRecord(Object.fromEntries(Object.entries(r.stages.captureMs).map(([k, v]) => [k, v / frames])), 3),
-            submitSync: roundRecord(Object.fromEntries(Object.entries(r.stages.submitSyncMs).map(([k, v]) => [k, v / frames])), 3),
-            encodeWait: roundRecord(Object.fromEntries(Object.entries(r.stages.encodeWaitMs).map(([k, v]) => [k, v / frames])), 3),
-          },
-        }
-      : null,
-    stageRows: stageRows.value.map(row => ({
-      label: row.label,
-      ms: round(row.ms, 0),
-      share: round(row.share, 4),
-      perFrameMs: round(row.perFrameMs, 3),
-    })),
     outputs: r.outputs.map(o => ({
       id: o.spec.id,
       label: o.spec.label,
@@ -134,9 +86,7 @@ function buildReport() {
       frameCount: o.frameCount,
       keyFrameCount: o.keyFrameCount,
       gopSec: o.gopSec === null ? null : round(o.gopSec, 3),
-      passthrough: o.passthrough,
       encoderConfig: o.encoderConfig ?? null,
-      writeMs: r.stages ? round(r.stages.writeMs[o.spec.id] ?? 0, 0) : null,
     })),
     encodeProbe: r.encodeProbe
       ? {
@@ -178,15 +128,17 @@ async function copyReport() {
 }
 
 const percent = computed(() => {
-  const { framesDone, framesTotal } = progress.value
+  if (progress.value.ratio !== undefined)
+    return progress.value.ratio * 100
+  const { framesDone = 0, framesTotal = 0 } = progress.value
   return framesTotal > 0 ? Math.min(100, (framesDone / framesTotal) * 100) : 0
 })
 
 const etaLabel = computed(() => {
-  const { framesDone, framesTotal, elapsedMs } = progress.value
-  if (!framesDone || !framesTotal)
+  const ratio = percent.value / 100
+  if (!ratio)
     return '—'
-  const remaining = ((elapsedMs / framesDone) * (framesTotal - framesDone)) / 1000
+  const remaining = (progress.value.elapsedMs / ratio * (1 - ratio)) / 1000
   return `${formatDuration(remaining)}`
 })
 
@@ -348,7 +300,7 @@ function download(output: NonNullable<typeof result.value>['outputs'][number]) {
           class="btn" :class="{ 'btn--on': mode === 'both' }" type="button"
           @click="mode = 'both'"
         >
-          双档：proxy 360p + preview 720p（一次解码）
+          双档：proxy 360p + preview 720p
         </button>
         <button
           class="btn" :class="{ 'btn--on': mode === 'decode-only' }" type="button"
@@ -382,23 +334,12 @@ function download(output: NonNullable<typeof result.value>['outputs'][number]) {
           </select>
         </label>
         <label class="check" :class="{ 'check--muted': mode === 'decode-only' }">
-          <input v-model="hints.realtimeEncoding" type="checkbox" :disabled="mode === 'decode-only'">
+          <input v-model="hints.realtimeEncoding" type="checkbox" :disabled="mode !== 'encode-only'">
           <span>latencyMode: realtime（编码器，<strong>可能丢帧</strong>）</span>
         </label>
         <label class="check" :class="{ 'check--muted': mode !== 'both' }">
           <input v-model="hints.previewFirst" type="checkbox" :disabled="mode !== 'both'">
-          <span>先 await preview 720p 再 proxy（换顺序，看等待是否跟着走）</span>
-        </label>
-        <label class="check" :class="{ 'check--muted': mode === 'decode-only' }">
-          <input v-model="hints.passthroughSameSize" type="checkbox" :disabled="mode === 'decode-only'">
-          <span><strong>同尺寸档直通</strong>：目标尺寸 = 源尺寸的档不过 canvas，把解码帧直接交给编码器</span>
-        </label>
-        <label class="check" :class="{ 'check--muted': mode === 'decode-only' || mode === 'encode-only' }">
-          <span><strong>add() 在途上限</strong>（1 = 每帧 await，mediabunny 封装在关键路径上）</span>
-          <input
-            v-model.number="hints.pipelineDepth" class="select" type="number" min="1" max="64" step="1"
-            :disabled="mode === 'decode-only' || mode === 'encode-only'"
-          >
+          <span>先生成 preview 720p</span>
         </label>
       </div>
 
@@ -442,17 +383,6 @@ function download(output: NonNullable<typeof result.value>['outputs'][number]) {
           取消
         </button>
       </div>
-      <p class="note">
-        仅转视频轨，不含音频 —— 音频大约再加 5~10%。
-        <template v-if="mode === 'both'">
-          双档模式下源文件只解码一次，两个编码器共用同一批解码帧 —— 这是上线形态。
-          跑完看下方「按环节」那张表。
-        </template>
-        <template v-if="mode === 'decode-only'">
-          只跑解码循环，不画 canvas、不编码。<strong>这个 fps 如果和完整跑接近，天花板就是解码器本身</strong>，
-          canvas / 编码器怎么调都没用；如果高出很多，说明每帧的画布 + 编码那一段才是要优化的地方。
-        </template>
-      </p>
     </section>
 
     <section v-if="running" class="panel">
@@ -460,7 +390,12 @@ function download(output: NonNullable<typeof result.value>['outputs'][number]) {
         <div class="bar__fill" :style="{ width: `${percent}%` }" />
       </div>
       <p class="progress-line">
-        {{ progress.framesDone.toLocaleString() }} / {{ progress.framesTotal.toLocaleString() }} 帧 ·
+        <template v-if="progress.ratio !== undefined">
+          {{ percent.toFixed(1) }}% · {{ progress.renditionId }} ·
+        </template>
+        <template v-else>
+          {{ progress.framesDone?.toLocaleString() }} / {{ progress.framesTotal?.toLocaleString() }} 帧 ·
+        </template>
         已用 {{ formatDuration(progress.elapsedMs / 1000) }} · 预计还需 {{ etaLabel }}
       </p>
     </section>
@@ -522,7 +457,6 @@ function download(output: NonNullable<typeof result.value>['outputs'][number]) {
         「解码吞吐」是源帧的处理速率。
         <template v-if="result.encodeProbe">
           本次绕开了 mediabunny：同一套解码帧、同一种在途限制，直接进原生 <code>VideoEncoder.encode()</code>，没有封装器。
-          把这里的「等待编码器 · 每帧」和双档表里 720p 的 1.86 ms 比 —— 相同就是 WebCodecs/编码器本身，明显更低就是 mediabunny 的封装链在吃时间。
         </template>
         <template v-else-if="result.outputs.length === 0">
           本次是仅解码，没有产出。
@@ -532,34 +466,6 @@ function download(output: NonNullable<typeof result.value>['outputs'][number]) {
         <summary>查看 JSON</summary>
         <pre class="json">{{ reportJson }}</pre>
       </details>
-    </section>
-
-    <section v-if="stageRows.length" class="panel">
-      <h2 class="panel__title">
-        时间都花在哪 · 按环节
-      </h2>
-      <table class="stages">
-        <thead>
-          <tr><th>环节</th><th>累计</th><th>占比</th><th>每帧</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in stageRows" :key="row.label" :class="{ 'is-top': row === stageRows[0] }">
-            <td>{{ row.label }}</td>
-            <td>{{ formatDuration(row.ms / 1000) }}</td>
-            <td>
-              <span class="share"><span class="share__fill" :style="{ width: `${row.share * 100}%` }" /></span>
-              {{ (row.share * 100).toFixed(1) }}%
-            </td>
-            <td>{{ row.perFrameMs.toFixed(2) }} ms</td>
-          </tr>
-        </tbody>
-      </table>
-      <p class="note">
-        循环是逐帧串行的（等解码 → 画 canvas → 交给编码器），所以各环节相加就是总时间，
-        <strong>最大的那一行就是瓶颈</strong>。「抓帧」是 <code>new VideoFrame(canvas)</code> 这次拷贝，
-        「等待编码器」是把帧交给编码器后被背压卡住的时间（mediabunny 允许 4 帧在途）；
-        多档时编码器并行跑，后 await 的那档看到的等待已经被前面的档重叠掉一部分，所以几档要合起来看。
-      </p>
     </section>
 
     <section v-for="output in result?.outputs ?? []" :key="output.spec.id" class="panel">
@@ -584,21 +490,11 @@ function download(output: NonNullable<typeof result.value>['outputs'][number]) {
           </dd>
         </div>
         <div><dt>关键帧数</dt><dd>{{ output.keyFrameCount.toLocaleString() }}</dd></div>
-        <div>
-          <dt>喂帧方式</dt>
-          <dd :class="output.passthrough ? 'is-good' : ''">
-            {{ output.passthrough ? '直通解码帧（无 canvas）' : 'canvas → VideoFrame' }}
-          </dd>
-        </div>
         <div v-if="output.encoderConfig">
           <dt>实际编码器配置</dt>
           <dd class="cfg">
             {{ output.encoderConfig.codec }} · {{ output.encoderConfig.hardwareAcceleration ?? 'no-preference' }} · {{ output.encoderConfig.latencyMode ?? 'quality' }}
           </dd>
-        </div>
-        <div v-if="result?.stages?.writeMs[output.spec.id] !== undefined">
-          <dt>封装写出耗时</dt>
-          <dd>{{ formatDuration((result!.stages!.writeMs[output.spec.id] ?? 0) / 1000) }}</dd>
         </div>
         <div>
           <dt>实测 GOP</dt>

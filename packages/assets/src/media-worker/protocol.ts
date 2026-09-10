@@ -32,5 +32,9 @@ export type MediaProcessorWorkerResponse
     error: {
       name: string
       message: string
+      code?: string
+      stage?: string
+      renditionId?: string
+      sdkVersion?: string
     }
   }

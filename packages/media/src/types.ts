@@ -6,3 +6,11 @@
  * `FileSystemWritableFileStream`, or the request side of an upload.
  */
 export type MediaWriteSink = WritableStream<Uint8Array>
+
+/** Positional file writes, directly compatible with FileSystemWritableFileStream. */
+export interface MediaFileWrite {
+  type: 'write'
+  position: number
+  data: Uint8Array<ArrayBuffer>
+}
+export type MediaFileSink = WritableStream<MediaFileWrite>

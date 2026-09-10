@@ -5,7 +5,7 @@ import { attachMediaProcessorWorker } from '../src/media-worker'
 
 const processor: MediaProcessor = {
   async process(request) {
-    request.onProgress?.({ framesDone: 1, framesTotal: 2, ratio: 0.5, elapsedMs: 5 })
+    request.onProgress?.({ renditionId: 'video-h720-v1', renditionRatio: 0.5, completedRenditions: 0, totalRenditions: 1, ratio: 0.5, elapsedMs: 5 })
     return request.profiles.map((profile, index) => ({
       profileId: profile.id,
       file: new File([`rendition-${index}`], `${profile.id}.mp4`, { type: 'video/mp4' }),

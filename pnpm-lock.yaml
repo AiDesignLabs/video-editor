@@ -116,6 +116,9 @@ catalogs:
     '@iconify-json/ri':
       specifier: ^1.2.10
       version: 1.2.10
+    '@mediabunny/aac-encoder':
+      specifier: 1.56.1
+      version: 1.56.1
     '@microsoft/api-extractor':
       specifier: ^7.59.0
       version: 7.59.0
@@ -183,8 +186,8 @@ catalogs:
       specifier: ^17.4.1
       version: 17.4.1
     mediabunny:
-      specifier: ^1.55.5
-      version: 1.55.5
+      specifier: 1.56.1
+      version: 1.56.1
     opfs-tools:
       specifier: ^0.7.4
       version: 0.7.4
@@ -346,9 +349,12 @@ importers:
 
   packages/media:
     dependencies:
+      '@mediabunny/aac-encoder':
+        specifier: 'catalog:'
+        version: 1.56.1(mediabunny@1.56.1)
       mediabunny:
         specifier: 'catalog:'
-        version: 1.55.5
+        version: 1.56.1
 
   packages/plugins:
     dependencies:
@@ -1099,6 +1105,11 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@mediabunny/aac-encoder@1.56.1':
+    resolution: {integrity: sha512-a+OY/BctP7zC4G/prHikooOVaoWXMD4+bUyEwHg2dtQiQdIwC6TDJdVYJu5dfrdSNOiAFkv1HKcYEeROdwMezg==}
+    peerDependencies:
+      mediabunny: ^1.0.0
 
   '@microsoft/api-extractor-model@7.33.11':
     resolution: {integrity: sha512-iDu1AtuRC2Z8XVs2SieZieVavF1FXPBX1C9pMexJh8Dx/Dd/3ZZ4nRQp/PU2Vk2rUHWuBz1wOyL4DcuhVnBXwg==}
@@ -3360,8 +3371,8 @@ packages:
   mdn-data@2.34.0:
     resolution: {integrity: sha512-OgIlLv0NxJKVW4GTSAoEgpRGd4F2XCqGinK0MsMlBCCS/Zcm2/LsbercNWNA7PeMMcjl75NnI97eqyo7zkdxWA==}
 
-  mediabunny@1.55.5:
-    resolution: {integrity: sha512-m0v6y8FGXiK+HKOc3AZqU+kJPLYsSKaLitmQNQIIHZKIGlTwQ34OF+X6Ul0K8iV4b03oPse10apwuoqbvmKeAA==}
+  mediabunny@1.56.1:
+    resolution: {integrity: sha512-DNOm0bRBmeOxJgCK/g3LxNWbxY5morTauNdlychujGmJ9L37ezVezkNoI1WtO2Xdb4WlWWJlYfIKnOEzd5phRw==}
 
   micromark-core-commonmark@2.0.3:
     resolution: {integrity: sha512-RDBrHEMSxVFLg6xvnXmb1Ayr2WzLAWjeSATAoxwKYJV94TeNavgoIdA0a9ytzDSVzBy2YKFK+emCPOEibLeCrg==}
@@ -5055,6 +5066,10 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@mediabunny/aac-encoder@1.56.1(mediabunny@1.56.1)':
+    dependencies:
+      mediabunny: 1.56.1
 
   '@microsoft/api-extractor-model@7.33.11(@types/node@26.4.1)':
     dependencies:
@@ -7381,7 +7396,7 @@ snapshots:
 
   mdn-data@2.34.0: {}
 
-  mediabunny@1.55.5:
+  mediabunny@1.56.1:
     dependencies:
       '@types/dom-mediacapture-transform': 0.1.12
       '@types/dom-webcodecs': 0.1.13

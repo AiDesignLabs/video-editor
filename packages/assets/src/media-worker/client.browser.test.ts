@@ -36,7 +36,7 @@ describe('worker media processor browser RPC', () => {
       onProgress: progress,
     })
 
-    expect(progress).toHaveBeenCalledWith({ framesDone: 1, framesTotal: 2, ratio: 0.5, elapsedMs: 5 })
+    expect(progress).toHaveBeenCalledWith({ renditionId: 'video-h720-v1', renditionRatio: 0.5, completedRenditions: 0, totalRenditions: 1, ratio: 0.5, elapsedMs: 5 })
     expect(renditions.map(rendition => ({
       profileId: rendition.profileId,
       name: rendition.file.name,

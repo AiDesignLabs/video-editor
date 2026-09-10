@@ -6,8 +6,8 @@
  * heap sampling, and re-reading each output to check the key-frame interval the
  * encoder actually produced.
  */
-import type { CodecSupportProbe, DecoderOptions, EncoderThroughput, Rendition, TranscodeStages, VideoStats } from '@video-editor/media'
-import { measureDecodeThroughput, measureEncoderThroughput, openMediaInput, probeCodecSupport, probeVideoStats, transcode } from '@video-editor/media'
+import type { CodecSupportProbe, DecoderOptions, EncoderThroughput, Rendition, VideoStats } from '@video-editor/media'
+import { measureDecodeThroughput, measureEncoderThroughput, openMediaInput, probeCodecSupport, probeVideoStats, transcode, validateTranscodedMedia } from '@video-editor/media'
 
 export type { CodecSupportProbe }
 export { probeCodecSupport }
@@ -41,8 +41,6 @@ export interface SourceInfo extends VideoStats {
 
 export interface RenditionOutput {
   spec: RenditionSpec
-  /** Frames bypassed the canvas for this rendition. */
-  passthrough: boolean
   /** The WebCodecs config the encoder was created with, if mediabunny reported it. */
   encoderConfig?: VideoEncoderConfig
   sizeBytes: number
@@ -74,15 +72,15 @@ export interface LabResult {
    * the top of a sawtooth; this approximates the live set.
    */
   heapSettledBytes: number | null
-  /** Absent for decode-only runs. */
-  stages?: TranscodeStages
   /** Present for raw-WebCodecs encode runs. */
   encodeProbe?: EncoderThroughput
 }
 
 export interface LabProgress {
-  framesDone: number
-  framesTotal: number
+  framesDone?: number
+  framesTotal?: number
+  ratio?: number
+  renditionId?: string
   elapsedMs: number
 }
 
@@ -94,12 +92,8 @@ export interface LabHints {
   hardwareAcceleration: AccelerationHint
   /** Applied to every encoder. Faster, but may drop frames. */
   realtimeEncoding: boolean
-  /** Await the preview encoder before the proxy one; isolates whether a wait belongs to one encoder or is shared. */
+  /** Convert the preview rendition before the proxy rendition. */
   previewFirst: boolean
-  /** Same-size renditions take the decoded frame directly, skipping the canvas. */
-  passthroughSameSize: boolean
-  /** Outstanding `addFrame()` calls allowed per rendition; 1 = await every call (mediabunny's muxing on the critical path). */
-  pipelineDepth: number
 }
 
 interface ChromeMemory { usedJSHeapSize: number }
@@ -249,29 +243,33 @@ export async function runLab(
   let heapPeak = readHeap()
 
   const ordered = hints.previewFirst ? [...specs].reverse() : specs
-  const transcodeResult = await transcode({
+  await transcode({
     source: file,
     renditions: ordered.map(spec => ({
       ...spec,
       ...(hints.hardwareAcceleration === 'no-preference' ? {} : { hardwareAcceleration: hints.hardwareAcceleration }),
-      ...(hints.realtimeEncoding ? { latencyMode: 'realtime' as const } : {}),
     })),
-    decoder: decoderHints(hints),
-    passthroughSameSize: hints.passthroughSameSize,
-    pipelineDepth: hints.pipelineDepth,
     async openSink(rendition) {
       const { handle, writable } = await openOutputFile(rendition.id)
       files.set(rendition.id, handle)
       return writable
     },
-    onProgress({ framesDone, framesTotal }) {
-      // Sampling every frame would itself distort the measurement.
-      if (framesDone % 30 !== 0)
-        return
+    async openFileSink(rendition) {
+      const { handle, writable } = await openOutputFile(rendition.id)
+      files.set(rendition.id, handle)
+      return writable
+    },
+    async validateOutput(rendition) {
+      const handle = files.get(rendition.id)
+      if (!handle)
+        throw new Error(`Missing conversion output ${rendition.id}`)
+      await validateTranscodedMedia(await handle.getFile(), rendition)
+    },
+    onProgress({ ratio, renditionId }) {
       const heap = readHeap()
       if (heap !== null && (heapPeak === null || heap > heapPeak))
         heapPeak = heap
-      onProgress({ framesDone, framesTotal, elapsedMs: performance.now() - startedAt })
+      onProgress({ ratio, renditionId, elapsedMs: performance.now() - startedAt })
     },
     signal,
   })
@@ -295,8 +293,6 @@ export async function runLab(
     const height = Math.max(2, Math.round(spec.height / 2) * 2)
     outputs.push({
       spec,
-      passthrough: transcodeResult.renditions.find(r => r.id === spec.id)?.passthrough ?? false,
-      encoderConfig: transcodeResult.renditions.find(r => r.id === spec.id)?.encoderConfig,
       sizeBytes: blob.size,
       width: Math.max(2, Math.round((source.width * (height / source.height)) / 2) * 2),
       height,
@@ -321,6 +317,5 @@ export async function runLab(
     },
     heapPeakBytes: heapPeak,
     heapSettledBytes: readHeap(),
-    stages: transcodeResult.stages,
   }
 }

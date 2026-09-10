@@ -253,10 +253,9 @@ export function createAssetService<TContext = unknown, TPrepared = unknown>(opti
         if (missingRequiredProfiles.length && !canProcessMedia)
           throw new AssetPersistenceUnavailableError('Required renditions are missing and no MediaProcessor worker is configured.')
         if (missingRequiredProfiles.length) {
-          for (const item of requiredProfileStatuses) {
-            if (item.status === 'queued')
-              item.status = 'processing'
-          }
+          const firstRequired = requiredProfileStatuses.find(item => item.status === 'queued')
+          if (firstRequired)
+            firstRequired.status = 'processing'
           notifyRequired('processing-required', 0)
           const processedRenditions = await processor().process({
             source: input.file,
@@ -264,8 +263,10 @@ export function createAssetService<TContext = unknown, TPrepared = unknown>(opti
             signal: abortController.signal,
             onProgress: (progress) => {
               for (const item of requiredProfileStatuses) {
-                if (item.status === 'processing')
-                  item.progress = progress.ratio
+                if (item.profileId === progress.renditionId) {
+                  item.status = progress.renditionRatio < 1 ? 'processing' : 'queued'
+                  item.progress = progress.renditionRatio
+                }
               }
               notifyRequired('processing-required', progress.ratio)
             },
