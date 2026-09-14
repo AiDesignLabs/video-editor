@@ -718,17 +718,26 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     if (loading)
       return loading
 
+    const generation = renderGeneration
     const promise = loadDisplay(segment)
     displayLoading.set(segment.id, promise)
 
-    const display = await promise
-    // Placeholders mark a failed load: show them this frame but do not cache,
-    // so the next render retries the real resource.
-    if (display && !isPlaceholderDisplay(display))
-      displayCache.set(segment.id, display)
-
-    displayLoading.delete(segment.id)
-    return display
+    try {
+      const display = await promise
+      if (rendererDestroyed || generation !== renderGeneration) {
+        discardStaleDisplay(segment.id, display)
+        return undefined
+      }
+      // Placeholders mark a failed load: show them this frame but do not cache,
+      // so the next render retries the real resource.
+      if (display && !isPlaceholderDisplay(display))
+        displayCache.set(segment.id, display)
+      return display
+    }
+    finally {
+      if (displayLoading.get(segment.id) === promise)
+        displayLoading.delete(segment.id)
+    }
   }
 
   function preloadUpcomingVideoDisplays(protocol: IVideoProtocol, atMs: number) {
@@ -761,7 +770,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     try {
       const display = await loadDisplay(segment)
       if (generation !== renderGeneration) {
-        discardStalePreloadedDisplay(segment.id, display)
+        discardStaleDisplay(segment.id, display)
         return
       }
       if (display && !displayCache.has(segment.id))
@@ -776,7 +785,7 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     }
   }
 
-  function discardStalePreloadedDisplay(segmentId: string, display: PixiDisplayObject | undefined) {
+  function discardStaleDisplay(segmentId: string, display: PixiDisplayObject | undefined) {
     const entry = videoEntries.get(segmentId)
     if (entry && entry.sprite === display) {
       destroyVideoEntry(entry)
@@ -872,6 +881,21 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
   }
 
   async function loadVideoSprite(segment: SegmentUnion & { type: 'video', url: string, reversed?: boolean }): Promise<Sprite | undefined> {
+    // Protocol changes can dispose inputs while their asynchronous loads are pending.
+    const generation = renderGeneration
+    const isStale = () => rendererDestroyed || generation !== renderGeneration
+    const acceptEntry = (entry: VideoEntry | undefined) => {
+      if (!entry)
+        return undefined
+      if (isStale()) {
+        destroyVideoEntry(entry)
+        entry.sprite.destroy()
+        entry.texture.destroy(true)
+        return undefined
+      }
+      videoEntries.set(segment.id, entry)
+      return entry.sprite
+    }
     const existing = videoEntries.get(segment.id)
     if (existing)
       return existing.sprite
@@ -887,26 +911,21 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         return undefined
       }
       const reversedEntry = await loadVideoSpriteViaDecoder(segment.url).catch((err) => {
-        console.error('[renderer] failed to load reversed video via decoder', segment.url, err)
+        if (!isStale())
+          console.error('[renderer] failed to load reversed video via decoder', segment.url, err)
         return undefined
       })
-      if (!reversedEntry)
-        return undefined
-      videoEntries.set(segment.id, reversedEntry)
-      return reversedEntry.sprite
+      return acceptEntry(reversedEntry)
     }
 
     void ensureMediaElementObjectUrl(segment.url)
     if (urlKey && decoderUnsupportedKeys.has(urlKey)) {
       const spriteFromElement = await loadVideoSpriteViaElement(segment.url).catch((err) => {
-        console.error('[renderer] failed to load video via <video>', segment.url, err)
+        if (!isStale())
+          console.error('[renderer] failed to load video via <video>', segment.url, err)
         return undefined
       })
-      if (spriteFromElement) {
-        videoEntries.set(segment.id, spriteFromElement)
-        return spriteFromElement.sprite
-      }
-      return undefined
+      return acceptEntry(spriteFromElement)
     }
 
     if (allowDecoder) {
@@ -916,6 +935,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         undefined,
         opts.videoFrameSchedule?.get(segment.id),
       ).catch((err) => {
+        if (isStale())
+          return undefined
         decoderLoadError = err
         if (!urlKey || !decoderErrorLoggedKeys.has(urlKey)) {
           if (urlKey)
@@ -924,10 +945,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         }
         return undefined
       })
-      if (spriteFromDecoder) {
-        videoEntries.set(segment.id, spriteFromDecoder)
-        return spriteFromDecoder.sprite
-      }
+      if (spriteFromDecoder)
+        return acceptEntry(spriteFromDecoder)
+      if (isStale())
+        return undefined
       if (isMediaResourceHttpError(decoderLoadError))
         return undefined
       if (opts.streamRemoteMedia) {
@@ -937,15 +958,11 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     }
 
     const spriteFromElement = await loadVideoSpriteViaElement(segment.url).catch((err) => {
-      console.error('[renderer] failed to load video via <video>', segment.url, err)
+      if (!isStale())
+        console.error('[renderer] failed to load video via <video>', segment.url, err)
       return undefined
     })
-    if (spriteFromElement) {
-      videoEntries.set(segment.id, spriteFromElement)
-      return spriteFromElement.sprite
-    }
-
-    return undefined
+    return acceptEntry(spriteFromElement)
   }
 
   async function updateVideoFrame(
@@ -1276,6 +1293,8 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
     reuse?: { sprite: Sprite, oldTexture?: Texture },
     frameSequence?: readonly number[],
   ): Promise<VideoEntry | undefined> {
+    const generation = renderGeneration
+    const isStale = () => rendererDestroyed || generation !== renderGeneration
     let file: CachedResourceFile | undefined
     if (shouldUseResourceManager(url)) {
       if (!opts.streamRemoteMedia)
@@ -1285,9 +1304,16 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
 
     const originFile = file ? await file.getOriginFile() : undefined
     const source = originFile ?? (opts.streamRemoteMedia ? url : await fetchMediaBlob(url))
+    if (isStale())
+      return undefined
     const handle = opts.streamRemoteMedia ? openStreamingMediaInput(source) : openMediaInput(source)
     try {
-      if (!(await handle.canDecodeVideo())) {
+      const canDecode = await handle.canDecodeVideo()
+      if (isStale()) {
+        handle.dispose()
+        return undefined
+      }
+      if (!canDecode) {
         handle.dispose()
         if (opts.streamRemoteMedia)
           throw new Error('Streaming preview requires a supported WebCodecs video decoder.')
@@ -1300,6 +1326,10 @@ export async function createRenderer(opts: RendererOptions): Promise<Renderer> {
         handle.prepareVideoFrameSequence(frameSequence)
 
       const { width, height } = await handle.meta({ includeFrameRate: false, includeDuration: false })
+      if (isStale()) {
+        handle.dispose()
+        return undefined
+      }
       const canvas = document.createElement('canvas')
       canvas.width = width || 1
       canvas.height = height || 1

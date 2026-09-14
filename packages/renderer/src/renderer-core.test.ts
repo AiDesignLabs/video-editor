@@ -20,6 +20,7 @@ const { audioManagerInstances, mediaInputHandles, mediaMockState, opfsState, res
   mediaMockState: {
     openError: false,
     drawFrameErrorName: undefined as string | undefined,
+    metadataGate: undefined as Promise<void> | undefined,
   },
   audioManagerInstances: [] as Array<{
     protocol: IVideoProtocol
@@ -66,15 +67,18 @@ vi.mock('@video-editor/media', () => ({
       throw new Error('mock media open failure')
     const handle = {
       source,
-      meta: vi.fn(async () => ({
-        durationMs: 1000,
-        width: 640,
-        height: 360,
-        audioSampleRate: 48000,
-        audioChanCount: 2,
-        hasVideo: true,
-        hasAudio: true,
-      })),
+      meta: vi.fn(async () => {
+        await mediaMockState.metadataGate
+        return {
+          durationMs: 1000,
+          width: 640,
+          height: 360,
+          audioSampleRate: 48000,
+          audioChanCount: 2,
+          hasVideo: true,
+          hasAudio: true,
+        }
+      }),
       canDecodeVideo: vi.fn(async () => true),
       canDecodeAudio: vi.fn(async () => true),
       drawFrame: vi.fn(async () => {
@@ -752,6 +756,141 @@ describe('createRenderer video segment preloading', () => {
       expect(resourceAdd).not.toHaveBeenCalled()
     }
     finally {
+      renderer.destroy()
+      restore()
+    }
+  })
+
+  it.each(['replace', 'remove', 'destroy'] as const)('discards a pending decoder failure after %s', async (action) => {
+    mediaInputHandles.length = 0
+    const { restore } = stubVideoRenderGlobals()
+    const gate = Promise.withResolvers<void>()
+    mediaMockState.metadataGate = gate.promise
+    const segment = createVideoSegment('old-video', 0, 1000)
+    const protocol = ref<IVideoProtocol>({
+      id: 'pending-video',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [{ trackId: 'main', trackType: 'frames', isMain: true, children: [segment] }],
+    })
+    const onMediaError = vi.fn()
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as unknown as NonNullable<Parameters<typeof createRenderer>[0]['app']>,
+      manualRender: true,
+      warmUpResources: false,
+      streamRemoteMedia: true,
+      onMediaError,
+    })
+    try {
+      const pending = renderer.renderAt(0)
+      await vi.waitFor(() => expect(mediaInputHandles[0]?.meta).toHaveBeenCalled())
+      if (action === 'destroy')
+        renderer.destroy()
+      else
+        protocol.value = { ...protocol.value, tracks: action === 'remove' ? [] : [{ trackId: 'main', trackType: 'frames', isMain: true, children: [{ ...segment, url: 'https://example.com/new-video.mp4' }] }] }
+      expect(mediaInputHandles[0]?.dispose).toHaveBeenCalledTimes(1)
+      mediaMockState.metadataGate = undefined
+      gate.reject(Object.assign(new Error('Input has been disposed.'), { name: 'InputDisposedError' }))
+      await pending
+      expect(onMediaError).not.toHaveBeenCalled()
+      expect(errorLog).not.toHaveBeenCalled()
+      if (action === 'replace') {
+        await renderer.renderAt(0)
+        expect(mediaInputHandles.at(-1)?.source).toBe('https://example.com/new-video.mp4')
+        expect(mediaInputHandles.at(-1)?.drawFrame).toHaveBeenCalled()
+      }
+    }
+    finally {
+      mediaMockState.metadataGate = undefined
+      gate.resolve()
+      if (action !== 'destroy')
+        renderer.destroy()
+      errorLog.mockRestore()
+      restore()
+    }
+  })
+
+  it('still reports a decoder failure belonging to the current protocol', async () => {
+    mediaInputHandles.length = 0
+    const { restore } = stubVideoRenderGlobals()
+    const gate = Promise.withResolvers<void>()
+    mediaMockState.metadataGate = gate.promise
+    const onMediaError = vi.fn()
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const segment = createVideoSegment('current-video', 0, 1000)
+    const renderer = await createRenderer({
+      protocol: {
+        id: 'current-failure',
+        version: '1.0.0',
+        width: 1280,
+        height: 720,
+        fps: 30,
+        tracks: [{ trackId: 'main', trackType: 'frames', isMain: true, children: [segment] }],
+      },
+      app: createMockApp() as unknown as NonNullable<Parameters<typeof createRenderer>[0]['app']>,
+      manualRender: true,
+      warmUpResources: false,
+      streamRemoteMedia: true,
+      onMediaError,
+    })
+    try {
+      const pending = renderer.renderAt(0)
+      await vi.waitFor(() => expect(mediaInputHandles[0]?.meta).toHaveBeenCalled())
+      const error = Object.assign(new Error('Input has been disposed.'), { name: 'InputDisposedError' })
+      gate.reject(error)
+      await pending
+      expect(onMediaError).toHaveBeenCalledWith(error)
+      expect(errorLog).toHaveBeenCalledWith('[renderer] failed to load video via decoder', segment.url, error)
+    }
+    finally {
+      mediaMockState.metadataGate = undefined
+      gate.resolve()
+      renderer.destroy()
+      errorLog.mockRestore()
+      restore()
+    }
+  })
+
+  it('does not cache a stale successful decoder load under a reused segment id', async () => {
+    mediaInputHandles.length = 0
+    const { restore } = stubVideoRenderGlobals()
+    const gate = Promise.withResolvers<void>()
+    mediaMockState.metadataGate = gate.promise
+    const segment = createVideoSegment('reused-id', 0, 1000)
+    const protocol = ref<IVideoProtocol>({
+      id: 'pending-success',
+      version: '1.0.0',
+      width: 1280,
+      height: 720,
+      fps: 30,
+      tracks: [{ trackId: 'main', trackType: 'frames', isMain: true, children: [segment] }],
+    })
+    const renderer = await createRenderer({
+      protocol,
+      app: createMockApp() as unknown as NonNullable<Parameters<typeof createRenderer>[0]['app']>,
+      manualRender: true,
+      warmUpResources: false,
+      streamRemoteMedia: true,
+    })
+    try {
+      const pending = renderer.renderAt(0)
+      await vi.waitFor(() => expect(mediaInputHandles[0]?.meta).toHaveBeenCalled())
+      protocol.value = { ...protocol.value, tracks: [{ trackId: 'main', trackType: 'frames', isMain: true, children: [{ ...segment, url: 'https://example.com/replacement.mp4' }] }] }
+      mediaMockState.metadataGate = undefined
+      gate.resolve()
+      await pending
+      await renderer.renderAt(0)
+      expect(mediaInputHandles.at(-1)?.source).toBe('https://example.com/replacement.mp4')
+      expect(mediaInputHandles.at(-1)?.drawFrame).toHaveBeenCalled()
+      expect(mediaInputHandles[0]?.drawFrame).not.toHaveBeenCalled()
+    }
+    finally {
+      mediaMockState.metadataGate = undefined
+      gate.resolve()
       renderer.destroy()
       restore()
     }
