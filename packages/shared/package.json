@@ -1,7 +1,7 @@
 {
   "name": "@video-editor/shared",
   "type": "module",
-  "version": "1.0.0-beta.7",
+  "version": "1.1.0-beta.1",
   "description": "video editor shared libs",
   "author": "",
   "license": "ISC",
