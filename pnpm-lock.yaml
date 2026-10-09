@@ -176,6 +176,9 @@ catalogs:
     eslint-plugin-format:
       specifier: ^2.0.1
       version: 2.0.1
+    gl-transitions:
+      specifier: ^1.71.0
+      version: 1.71.0
     idb:
       specifier: ^8.0.3
       version: 8.0.3
@@ -191,6 +194,9 @@ catalogs:
     opfs-tools:
       specifier: ^0.7.4
       version: 0.7.4
+    pixi-filters:
+      specifier: ^6.1.5
+      version: 6.1.5
     pixi.js:
       specifier: ^8.20.1
       version: 8.20.1
@@ -410,6 +416,9 @@ importers:
       opfs-tools:
         specifier: 'catalog:'
         version: 0.7.4
+      pixi-filters:
+        specifier: 'catalog:'
+        version: 6.1.5(pixi.js@8.20.1)
       pixi.js:
         specifier: 'catalog:'
         version: 8.20.1
@@ -417,6 +426,9 @@ importers:
       '@vue/reactivity':
         specifier: 'catalog:'
         version: 3.5.42
+      gl-transitions:
+        specifier: 'catalog:'
+        version: 1.71.0
 
   packages/shared: {}
 
@@ -1740,6 +1752,9 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
+  '@types/gradient-parser@0.1.5':
+    resolution: {integrity: sha512-r7K3NkJz3A95WkVVmjs0NcchhHstC2C/VIYNX4JC6tieviUNo774FFeOHjThr3Vw/WCeMP9kAT77MKbIRlO/4w==}
+
   '@types/hast@3.0.5':
     resolution: {integrity: sha512-rp/ezSWaD1m44dPKICGhiskI13nVr7qTloFwDa/IYkhhf5nzwP+zIQcIJh3WIFSBOy/H1PzB40jPjMDksN4F+g==}
 
@@ -2997,6 +3012,9 @@ packages:
   github-slugger@2.0.0:
     resolution: {integrity: sha512-IaOQ9puYtjrkq7Y0Ygl9KDZnrf/aiUJYUpVf89y8kyaxbRG7Y1SrX/jaumrv81vc61+kiMempujsM3Yw7w5qcw==}
 
+  gl-transitions@1.71.0:
+    resolution: {integrity: sha512-fpCpeT5B0vQOAu1/XuTmOIWD3dJoMIuedmYdPqK/oGHMz8vexJzsCXVo8TQZVo7G2irAYhdhq+9wWtohj/IjZQ==}
+
   glob-parent@5.1.2:
     resolution: {integrity: sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow==}
     engines: {node: '>= 6'}
@@ -3682,6 +3700,11 @@ packages:
   picomatch@4.0.7:
     resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
+
+  pixi-filters@6.1.5:
+    resolution: {integrity: sha512-Ewb/J+kxAbaNN+0/ATJbglAJG+skGJfh7BIDP3ILIDdD6wWk1p0pGa25pVf1T8hGBOQSUNVAmwwJBwkj+cyLLA==}
+    peerDependencies:
+      pixi.js: '>=8.0.0-0'
 
   pixi.js@8.20.1:
     resolution: {integrity: sha512-akLVBMLvQbaEViqsmVraK0Njer1q4Q4lm4iNKuzvBiFrV8q+6/+HluJN3sWIwO663IBeQtUUS/CaXFJZs6ffXQ==}
@@ -5487,6 +5510,8 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
+  '@types/gradient-parser@0.1.5': {}
+
   '@types/hast@3.0.5':
     dependencies:
       '@types/unist': 3.0.3
@@ -6990,6 +7015,8 @@ snapshots:
 
   github-slugger@2.0.0: {}
 
+  gl-transitions@1.71.0: {}
+
   glob-parent@5.1.2:
     dependencies:
       is-glob: 4.0.3
@@ -7854,6 +7881,11 @@ snapshots:
   picomatch@4.0.3: {}
 
   picomatch@4.0.7: {}
+
+  pixi-filters@6.1.5(pixi.js@8.20.1):
+    dependencies:
+      '@types/gradient-parser': 0.1.5
+      pixi.js: 8.20.1
 
   pixi.js@8.20.1:
     dependencies:

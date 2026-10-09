@@ -1,13 +1,26 @@
 import { describe, expect, it, vi } from 'vitest'
+import { readFilterUniforms } from './effect-registry'
+import { createSegmentFilterCache } from './segment-filter-cache'
+import { getTransitionDefinition, listTransitionDefinitions, TRANSITION_UNIFORM_GROUP } from './transition-registry'
+import { BUILT_IN_TRANSITIONS } from './transitions'
 
 vi.mock('pixi.js', async () => (await import('../../test/pixi-mock')).createPixiMock())
 
-import { readFilterUniforms } from './effect-registry'
-import { createSegmentFilterCache } from './segment-filter-cache'
-import { getTransitionDefinition, TRANSITION_UNIFORM_GROUP } from './transition-registry'
-import { BUILT_IN_TRANSITIONS } from './transitions'
-
 describe('built-in transitions', () => {
+  it('ships a broad catalog of shader transitions', () => {
+    const definitions = listTransitionDefinitions()
+    expect(definitions.length).toBeGreaterThanOrEqual(17)
+    expect(definitions.map(definition => definition.id)).toEqual(expect.arrayContaining([
+      'radial',
+      'diamond',
+      'dissolve',
+      'blinds-vertical',
+      'angular',
+      'doorway',
+    ]))
+    expect(definitions.every(definition => definition.fragment || definition.build)).toBe(true)
+  })
+
   it('registers every built-in under its id and label', () => {
     for (const definition of BUILT_IN_TRANSITIONS) {
       expect(getTransitionDefinition(definition.id)).toBe(definition)

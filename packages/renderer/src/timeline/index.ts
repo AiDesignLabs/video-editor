@@ -13,13 +13,11 @@ export type {
   ComposeRunner,
   ComposeRunnerEvaluateOptions,
 } from './compose-runner'
-export {
-  createEmptyEvaluatorState,
-  evaluateTimelinePlan,
-} from './evaluator'
+export { definitionLabelKey, resolveDefinitionLabel } from './definition-label'
 
 export type {
   EffectDefinition,
+  EffectDefinitionKind,
   EffectFilterOptions,
   EffectUniformDeclaration,
   ShaderEffectContext,
@@ -29,22 +27,17 @@ export {
   EFFECT_UNIFORM_GROUP,
   getEffectDefinition,
   listEffectDefinitions,
+  listFilterDefinitions,
+  listVisualEffectDefinitions,
   registerEffect,
   structuralKeyForEffect,
   unregisterEffect,
 } from './effect-registry'
-export { cubicBezierEase, findKeyframeTrack, sampleFrames, sampleKeyframes, sampleSegmentKeyframe, sampleVisualKeyframes } from './keyframes'
 export {
-  computePaletteMatrix,
-  computePalettePostUniforms,
-  createPalettePostFilter,
-  PALETTE_NEUTRAL,
-  paletteNeedsPostShader,
-  paletteStructuralKey,
-  paletteToColorMatrix,
-  updatePaletteColorMatrixFilter,
-  updatePalettePostFilter,
-} from './palette-filter'
+  createEmptyEvaluatorState,
+  evaluateTimelinePlan,
+} from './evaluator'
+export { cubicBezierEase, findKeyframeTrack, sampleFrames, sampleKeyframes, sampleSegmentKeyframe, sampleVisualKeyframes } from './keyframes'
 export {
   CHROMA_KEY_UNIFORM_GROUP,
   computeChromaKeyUniforms,
@@ -58,15 +51,28 @@ export {
   updateMaskFilter,
 } from './mask-chroma'
 export type { ChromaKeyUniforms, MaskUniforms } from './mask-chroma'
+export {
+  computePaletteMatrix,
+  computePalettePostUniforms,
+  createPalettePostFilter,
+  PALETTE_NEUTRAL,
+  paletteNeedsPostShader,
+  paletteStructuralKey,
+  paletteToColorMatrix,
+  updatePaletteColorMatrixFilter,
+  updatePalettePostFilter,
+} from './palette-filter'
 export { createPixiFiltersFromVisualEffects, resolveEffectDefinition } from './pixi-effects'
-export { createSegmentFilterCache } from './segment-filter-cache'
-export type { SegmentAppearanceInput, SegmentFilterCache, SegmentFilterCacheDeps, SegmentFilterEntry, SegmentTransitionInput } from './segment-filter-cache'
+export { createPresetPreview } from './preset-preview'
+export type { PresetPreview, PresetPreviewDefinition, PresetPreviewKind, PresetPreviewOptions, PresetPreviewRenderOptions } from './preset-preview'
 export { createPreviewRunner } from './preview-runner'
-
 export type {
   CreatePreviewRunnerOptions,
   PreviewRunner,
 } from './preview-runner'
+export { createSegmentFilterCache } from './segment-filter-cache'
+
+export type { SegmentAppearanceInput, SegmentFilterCache, SegmentFilterCacheDeps, SegmentFilterEntry, SegmentTransitionInput } from './segment-filter-cache'
 export {
   buildTransitionFilters,
   getTransitionDefinition,

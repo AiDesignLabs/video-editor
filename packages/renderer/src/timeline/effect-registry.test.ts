@@ -1,12 +1,12 @@
+import type { MockBlurFilter, MockColorMatrixFilter, MockFilter } from '../../test/pixi-mock'
 import type { VisualTrackFilterParam } from './types'
 import { describe, expect, it, vi } from 'vitest'
-
-vi.mock('pixi.js', async () => (await import('../../test/pixi-mock')).createPixiMock())
-
-import { MOCK_DEFAULT_FILTER_VERT, MockBlurFilter, MockColorMatrixFilter, MockFilter } from '../../test/pixi-mock'
-import { buildEffectFilters, getEffectDefinition, registerEffect, structuralKeyForEffect, unregisterEffect } from './effect-registry'
+import { MOCK_DEFAULT_FILTER_VERT } from '../../test/pixi-mock'
+import { buildEffectFilters, getEffectDefinition, listFilterDefinitions, listVisualEffectDefinitions, registerEffect, structuralKeyForEffect, unregisterEffect } from './effect-registry'
 import { createPixiFiltersFromVisualEffects, resolveEffectDefinition } from './pixi-effects'
 import { createSegmentFilterCache } from './segment-filter-cache'
+
+vi.mock('pixi.js', async () => (await import('../../test/pixi-mock')).createPixiMock())
 
 function filterParam(patch: Partial<VisualTrackFilterParam>): VisualTrackFilterParam {
   return {
@@ -20,10 +20,25 @@ function filterParam(patch: Partial<VisualTrackFilterParam>): VisualTrackFilterP
 }
 
 describe('effect registry', () => {
+  it('keeps filter and visual-effect catalogs separate', () => {
+    const filters = listFilterDefinitions()
+    const effects = listVisualEffectDefinitions()
+    const filterIds = new Set(filters.map(definition => definition.id))
+
+    expect(filters.map(definition => definition.id)).toEqual(expect.arrayContaining(['grayscale', 'cinematic', 'blur', 'sharpen', 'bloom', 'glow-pro']))
+    expect(effects.map(definition => definition.id)).toEqual(expect.arrayContaining(['pulse-blur', 'pulse-glow', 'glitch', 'crt', 'shockwave']))
+    expect(effects.every(definition => !filterIds.has(definition.id))).toBe(true)
+    expect(filters.every(definition => definition.kind !== 'effect')).toBe(true)
+    expect(effects.every(definition => definition.kind !== 'filter')).toBe(true)
+  })
+
   it('resolves built-in definitions by canonical id', () => {
     expect(getEffectDefinition(filterParam({ filterId: 'grayscale' }))).toBeDefined()
     expect(getEffectDefinition(filterParam({ filterId: 'blur' }))).toBeDefined()
+    expect(getEffectDefinition({ segmentType: 'effect', segmentId: 'fx-1', effectId: 'pulse-blur', name: 'Pulse Blur' })).toBeDefined()
     expect(getEffectDefinition(filterParam({ filterId: 'nope' }))).toBeUndefined()
+    expect(getEffectDefinition(filterParam({ filterId: 'pulse-glow' }))).toBeUndefined()
+    expect(getEffectDefinition({ segmentType: 'effect', segmentId: 'fx-1', effectId: 'grayscale', name: 'Grayscale' })).toBeUndefined()
   })
 
   it('prefers registered definitions over legacy name matching', () => {
@@ -97,9 +112,9 @@ describe('glsl convenience path', () => {
   })
 
   it('defaults structuralKey to the definition id', () => {
-    const definition = getEffectDefinition(filterParam({ filterId: 'blur' }))!
-    expect(structuralKeyForEffect(definition, filterParam({ filterId: 'blur', intensity: 0.1 }))).toBe('blur')
-    expect(structuralKeyForEffect(definition, filterParam({ filterId: 'blur', intensity: 0.9 }))).toBe('blur')
+    const definition = getEffectDefinition(filterParam({ filterId: 'grayscale' }))!
+    expect(structuralKeyForEffect(definition, filterParam({ filterId: 'grayscale', intensity: 0.1 }))).toBe('grayscale')
+    expect(structuralKeyForEffect(definition, filterParam({ filterId: 'grayscale', intensity: 0.9 }))).toBe('grayscale')
   })
 })
 
@@ -178,15 +193,16 @@ describe('segment filter cache update path', () => {
 
     const first = cache.resolve('seg-gray', [grayParam(0.25)], undefined, { timeMs: 0, sourceTimeMs: 0 })
     const matrix = first[0] as unknown as MockColorMatrixFilter
-    expect(matrix.calls.slice(-2)).toEqual([['reset', undefined], ['grayscale', 0.25]])
+    expect(matrix.calls.slice(-2)).toEqual([['reset', undefined], ['saturate', -0.25]])
 
     cache.resolve('seg-gray', [grayParam(0.75)], undefined, { timeMs: 16, sourceTimeMs: 16 })
-    expect(matrix.calls.slice(-2)).toEqual([['reset', undefined], ['grayscale', 0.75]])
+    expect(matrix.calls.slice(-2)).toEqual([['reset', undefined], ['saturate', -0.75]])
   })
 
   it('routes legacy name matches through the same definitions', () => {
     const definition = resolveEffectDefinition(filterParam({ filterId: 'not-registered', name: '梦幻模糊 blur' }))
     expect(definition?.id).toBe('blur')
+    expect(resolveEffectDefinition({ segmentType: 'effect', segmentId: 'fx-legacy', effectId: 'gaussian-blur', name: 'Gaussian Blur' })?.id).toBe('pulse-blur')
     expect(resolveEffectDefinition(filterParam({ filterId: 'nope', name: '???' }))?.id).toBe('legacy:desaturate')
   })
 

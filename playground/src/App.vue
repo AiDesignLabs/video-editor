@@ -2,19 +2,20 @@
 import type { ProjectMeta, SegmentAssetBinding } from '@video-editor/protocol'
 import type { ExportTask, Renderer } from '@video-editor/renderer'
 import type { IAudioSegment, IEffectSegment, IFilterSegment, IImageFramesSegment, IKeyframeProperty, IStickerSegment, ITextSegment, ITransform, IVideoFramesSegment, IVideoProtocol, SegmentUnion, TrackUnion } from '@video-editor/shared'
-import type { SegmentUpdater, TransitionEditPayload } from '@video-editor/ui'
+import type { EffectPresetPreviewContext, SegmentUpdater, TransitionEditPayload } from '@video-editor/ui'
 import type { Ref } from 'vue'
 import type { ExportSettings } from './export-options'
 import type { GizmoTransformPatch } from './gizmo/types'
 import { createEditorCore } from '@video-editor/editor-core'
 import { createMediaAssetCatalog, createProjectStore, generateThumbnails } from '@video-editor/protocol'
-import { createExportTask, createRenderer, listEffectDefinitions, listTransitionDefinitions } from '@video-editor/renderer'
+import { createExportTask, createPresetPreview, createRenderer, definitionLabelKey, listFilterDefinitions, listTransitionDefinitions, listVisualEffectDefinitions } from '@video-editor/renderer'
 import { CanvasSizePanel, createDefaultToolbarActions, mergeToolbarActions, PropertyInspector, VideoEditorTimeline } from '@video-editor/ui'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, unref, watch } from 'vue'
 import AssetPanel from './AssetPanel.vue'
 import { toComposeOptions } from './export-options'
 import ExportDialog from './ExportDialog.vue'
 import CanvasGizmo from './gizmo/CanvasGizmo.vue'
+import { placePresetPreview } from './preset-preview-position'
 import { clearBootCache, readBootCache, writeBootCache } from './project-boot'
 import ProjectMenu from './ProjectMenu.vue'
 
@@ -56,8 +57,8 @@ const initialProtocol: IVideoProtocol = {
         {
           id: 'effect-1',
           segmentType: 'effect',
-          effectId: 'blur',
-          name: '模糊',
+          effectId: 'pulse-blur',
+          name: '动态模糊',
           startTime: 13000,
           endTime: 16000,
         },
@@ -1094,9 +1095,90 @@ onBeforeUnmount(() => {
  * Presets offered by the filter/effect designer. `@video-editor/ui` cannot
  * depend on the renderer, so the host resolves the registry and passes it down.
  */
-const effectPresets = computed(() => listEffectDefinitions()
+const filterPresets = computed(() => listFilterDefinitions()
+  .map(definition => ({ id: definition.id, label: definition.label, labelKey: definitionLabelKey(definition), labels: definition.labels })))
+
+const effectPresets = computed(() => listVisualEffectDefinitions()
   .filter(definition => !definition.id.startsWith('legacy:'))
-  .map(definition => ({ id: definition.id, label: definition.label })))
+  .map(definition => ({ id: definition.id, label: definition.label, labelKey: definitionLabelKey(definition), labels: definition.labels })))
+
+let activePresetPreviewCleanup: (() => void) | undefined
+
+function mountPresetPreview(definition: { id: string, label: string }, kind: 'filter' | 'effect' | 'transition', anchor: HTMLElement) {
+  activePresetPreviewCleanup?.()
+  const definitions = kind === 'filter' ? listFilterDefinitions() : kind === 'effect' ? listVisualEffectDefinitions() : listTransitionDefinitions()
+  const presetDefinition = definitions.find(item => item.id === definition.id)
+  if (!presetDefinition)
+    throw new Error(`Preset preview is unavailable: ${definition.id}`)
+  const picker = anchor.closest('.pi-effect, .transition-card') ?? anchor
+  const position = placePresetPreview(picker.getBoundingClientRect(), anchor.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight })
+  if (!position)
+    return
+  const popover = document.createElement('div')
+  popover.className = 'preset-preview-popover'
+  popover.setAttribute('role', 'tooltip')
+  popover.setAttribute('aria-label', definition.label)
+  const viewport = document.createElement('div')
+  viewport.className = 'preset-preview-popover__viewport'
+  const canvas = document.createElement('canvas')
+  const status = document.createElement('span')
+  status.className = 'preset-preview-popover__status'
+  status.textContent = 'Loading preview…'
+  viewport.append(canvas, status)
+  const title = document.createElement('div')
+  title.className = 'preset-preview-popover__title'
+  title.textContent = definition.label
+  popover.append(viewport, title)
+  Object.assign(popover.style, { left: `${position.left}px`, top: `${position.top}px`, width: `${position.width}px` })
+  document.body.append(popover)
+  let disposed = false
+  let preview: Awaited<ReturnType<typeof createPresetPreview>> | undefined
+  const cleanup = () => {
+    if (disposed)
+      return
+    disposed = true
+    preview?.destroy()
+    popover.remove()
+    window.removeEventListener('resize', cleanup)
+    window.removeEventListener('scroll', cleanup, true)
+    if (activePresetPreviewCleanup === cleanup)
+      activePresetPreviewCleanup = undefined
+  }
+  window.addEventListener('resize', cleanup)
+  window.addEventListener('scroll', cleanup, true)
+  activePresetPreviewCleanup = cleanup
+  void (async () => {
+    try {
+      const created = await createPresetPreview({ canvas, width: 320, height: 180 })
+      if (disposed) {
+        created.destroy()
+        return
+      }
+      preview = created
+      preview.render(presetDefinition, { kind, intensity: 0.8 })
+      status.remove()
+    }
+    catch (error) {
+      preview?.destroy()
+      if (!disposed) {
+        status.textContent = 'Preview unavailable'
+        console.error('[playground] preset preview failed', error)
+      }
+    }
+  })()
+  return cleanup
+}
+
+onBeforeUnmount(() => activePresetPreviewCleanup?.())
+
+function previewPreset(context: EffectPresetPreviewContext) {
+  return mountPresetPreview(context.preset, context.kind, context.anchor)
+}
+
+function previewTransition(event: Event, option: { id: string, label: string }) {
+  const anchor = event.currentTarget as HTMLElement
+  return mountPresetPreview(option, 'transition', anchor)
+}
 
 // --- canvas size -----------------------------------------------------------
 const canvasSizeError = ref<string | null>(null)
@@ -1260,7 +1342,7 @@ function formatPhaseTime(ms: number) {
 
 const DEFAULT_TRANSITION_DURATION_MS = 500
 // Shader transitions are registered by the renderer; the picker just lists them.
-const transitionOptions = listTransitionDefinitions().map(def => ({ id: def.id, label: def.label }))
+const transitionOptions = listTransitionDefinitions().map(def => ({ id: def.id, label: def.label, labelKey: definitionLabelKey(def), labels: def.labels }))
 
 const transitionDialog = reactive({
   open: false,
@@ -1366,8 +1448,8 @@ function handleAddSegmentClick(data: {
     case 'effect': {
       const newSegment: Omit<IEffectSegment, 'id'> = {
         segmentType: 'effect',
-        effectId: 'blur',
-        name: '模糊',
+        effectId: 'pulse-blur',
+        name: '动态模糊',
         startTime: 0,
         endTime: duration,
       }
@@ -1484,8 +1566,9 @@ function handleAddSegmentClick(data: {
           class="side__inspector"
           :segment="selectedSegment"
           :current-time-ms="currentTimeMs"
-          :filter-presets="effectPresets"
+          :filter-presets="filterPresets"
           :effect-presets="effectPresets"
+          :preview-preset="previewPreset"
           @update:segment="handleInspectorUpdate"
           @interaction-start="handleInspectorInteractionStart"
           @interaction-end="handleInspectorInteractionEnd"
@@ -1544,6 +1627,10 @@ function handleAddSegmentClick(data: {
             :key="option.id"
             class="transition-option"
             :class="{ 'transition-option--active': option.id === transitionDialog.transitionId }"
+            @mouseenter="previewTransition($event, option)"
+            @focus="previewTransition($event, option)"
+            @blur="activePresetPreviewCleanup?.()"
+            @mouseleave="activePresetPreviewCleanup?.()"
             @click="transitionDialog.transitionId = option.id"
           >
             {{ option.label }}

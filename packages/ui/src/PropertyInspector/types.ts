@@ -15,4 +15,14 @@ export type SegmentUpdater = (draft: SegmentUnion) => void
 export interface EffectPreset {
   id: string
   label: string
+  labelKey?: string
+  labels?: Record<string, string>
 }
+
+export interface EffectPresetPreviewContext {
+  preset: EffectPreset
+  kind: 'filter' | 'effect'
+  anchor: HTMLElement
+}
+
+export type EffectPresetPreview = (context: EffectPresetPreviewContext) => void | (() => void)

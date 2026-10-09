@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { IChromaKey, IFillMode, IKeyframeProperty, IMask, IPalette, ITextBasic, ITransform, SegmentUnion } from '@video-editor/shared'
 import type { DeepReadonly } from 'vue'
-import type { EffectPreset, SegmentUpdater } from './types'
+import type { EffectPreset, EffectPresetPreview, SegmentUpdater } from './types'
 import { computed, onBeforeUnmount } from 'vue'
 import NumberField from './NumberField.vue'
 import ChromaKeySection from './sections/ChromaKeySection.vue'
@@ -22,6 +22,7 @@ const props = defineProps<{
   filterPresets?: EffectPreset[]
   /** Selectable presets for effect segments, supplied by the host. */
   effectPresets?: EffectPreset[]
+  previewPreset?: EffectPresetPreview
 }>()
 
 const emit = defineEmits<{
@@ -412,6 +413,7 @@ function removeTextLine(index: number) {
         :name="segment.name"
         :intensity="segment.intensity ?? 1"
         :presets="filterPresets"
+        :preview="previewPreset"
         @change-preset="setEffectPreset"
         @change-intensity="setIntensity"
       />
@@ -423,6 +425,7 @@ function removeTextLine(index: number) {
         :preset-id="segment.effectId"
         :name="segment.name"
         :presets="effectPresets"
+        :preview="previewPreset"
         @change-preset="setEffectPreset"
       />
 

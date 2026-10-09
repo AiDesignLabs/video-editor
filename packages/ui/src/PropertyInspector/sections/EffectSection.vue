@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { EffectPreset } from '../types'
-import { computed } from 'vue'
+import type { EffectPreset, EffectPresetPreview } from '../types'
+import { computed, onBeforeUnmount } from 'vue'
 import NumberField from '../NumberField.vue'
 
 defineOptions({ name: 'PropertyInspectorEffectSection' })
@@ -19,11 +19,13 @@ const props = withDefaults(defineProps<{
    * host supplies these — the playground passes `listEffectDefinitions()`.
    */
   presets?: EffectPreset[]
+  preview?: EffectPresetPreview
 }>(), {
   presetId: '',
   name: '',
   intensity: 1,
   presets: () => [],
+  preview: undefined,
 })
 
 const emit = defineEmits<{
@@ -49,6 +51,21 @@ const unknownPreset = computed<EffectPreset | null>(() => {
 const visiblePresets = computed(() => (
   unknownPreset.value ? [unknownPreset.value, ...props.presets] : props.presets
 ))
+
+let stopPreview: (() => void) | undefined
+
+function startPreview(event: Event, preset: EffectPreset) {
+  stopPreview?.()
+  const cleanup = props.preview?.({ preset, kind: props.kind, anchor: event.currentTarget as HTMLElement })
+  stopPreview = typeof cleanup === 'function' ? cleanup : undefined
+}
+
+function endPreview() {
+  stopPreview?.()
+  stopPreview = undefined
+}
+
+onBeforeUnmount(endPreview)
 
 function isSelected(preset: EffectPreset) {
   return preset.id === props.presetId
@@ -77,6 +94,10 @@ function isSelected(preset: EffectPreset) {
         :aria-checked="isSelected(preset)"
         :title="preset.label"
         @click="emit('changePreset', preset)"
+        @mouseenter="startPreview($event, preset)"
+        @mouseleave="endPreview"
+        @focus="startPreview($event, preset)"
+        @blur="endPreview"
       >
         {{ preset.label }}
       </button>

@@ -13,7 +13,7 @@ import 'uno.css'
 export { CANVAS_SIZE_PRESETS, formatAspectRatio, matchPreset, orientationOf } from './CanvasSizePanel/presets'
 export type { CanvasSizePreset } from './CanvasSizePanel/presets'
 
-export type { EffectPreset, SegmentUpdater } from './PropertyInspector/types'
+export type { EffectPreset, EffectPresetPreview, EffectPresetPreviewContext, SegmentUpdater } from './PropertyInspector/types'
 
 export {
   createDefaultToolbarActions,

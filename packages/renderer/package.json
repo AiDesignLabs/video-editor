@@ -13,12 +13,14 @@
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
+    "THIRD_PARTY_NOTICES.md",
     "dist"
   ],
   "scripts": {
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run --config ./vitest.config.ts"
+    "test": "vitest run --config ./vitest.config.ts",
+    "test:browser": "vitest run --config ./vitest.browser.config.ts"
   },
   "peerDependencies": {
     "@vue/reactivity": "catalog:"
@@ -28,9 +30,11 @@
     "@video-editor/protocol": "workspace:*",
     "@video-editor/shared": "workspace:*",
     "opfs-tools": "catalog:",
+    "pixi-filters": "catalog:",
     "pixi.js": "catalog:"
   },
   "devDependencies": {
-    "@vue/reactivity": "catalog:"
+    "@vue/reactivity": "catalog:",
+    "gl-transitions": "catalog:"
   }
 }

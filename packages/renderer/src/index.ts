@@ -36,9 +36,12 @@ export type { PlaybackStatistics } from './playback-statistics'
 
 export { createRenderer } from './renderer-core'
 export type { Renderer, RendererOptions } from './renderer-core'
+export { createPresetPreview } from './timeline'
+export type { PresetPreview, PresetPreviewDefinition, PresetPreviewKind, PresetPreviewOptions, PresetPreviewRenderOptions } from './timeline'
+export { definitionLabelKey, resolveDefinitionLabel } from './timeline'
 
-export { listEffectDefinitions, registerEffect, unregisterEffect } from './timeline'
-export type { EffectDefinition, ShaderEffectContext, VisualEffectParam } from './timeline'
+export { buildEffectFilters, listEffectDefinitions, listFilterDefinitions, listVisualEffectDefinitions, registerEffect, unregisterEffect } from './timeline'
+export type { EffectDefinition, EffectDefinitionKind, ShaderEffectContext, VisualEffectParam } from './timeline'
 
-export { listTransitionDefinitions, registerTransition, unregisterTransition } from './timeline'
+export { buildTransitionFilters, listTransitionDefinitions, registerTransition, unregisterTransition, updateTransitionFilters } from './timeline'
 export type { TransitionDefinition, TransitionRenderContext } from './timeline'

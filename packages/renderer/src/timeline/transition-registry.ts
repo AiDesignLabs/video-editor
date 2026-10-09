@@ -29,6 +29,10 @@ export interface TransitionRenderContext {
 export interface TransitionDefinition {
   id: string
   label: string
+  /** Stable business-facing translation key. Defaults to `id` when omitted. */
+  labelKey?: string
+  /** Optional renderer-owned labels; the host may supply its own dictionary. */
+  labels?: Record<string, string>
   /**
    * Convenience path: GLSL fragment applied per display. MUST start with
    * `precision highp float;` — pixi's default filter vertex shader declares

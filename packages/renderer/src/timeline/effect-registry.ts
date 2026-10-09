@@ -30,6 +30,9 @@ export interface EffectFilterOptions {
 /** Uniform group name used by the GLSL convenience path. */
 export const EFFECT_UNIFORM_GROUP = 'uEffect'
 
+/** User-facing category used to keep colour filters separate from visual effects. */
+export type EffectDefinitionKind = 'filter' | 'effect'
+
 /**
  * A registered effect/filter implementation, keyed by the protocol's
  * effectId/filterId. Unknown ids fall back to legacy name matching in
@@ -43,6 +46,12 @@ export const EFFECT_UNIFORM_GROUP = 'uEffect'
 export interface EffectDefinition {
   id: string
   label: string
+  /** Stable business-facing translation key. Defaults to `id` when omitted. */
+  labelKey?: string
+  /** Optional renderer-owned labels; the host may supply its own dictionary. */
+  labels?: Record<string, string>
+  /** Picker category. Omit for a custom definition that should be available in both pickers. */
+  kind?: EffectDefinitionKind
   /** Convenience path: GLSL fragment (samples `uTexture` at `vTextureCoord`). */
   fragment?: string
   /** Optional custom vertex shader; defaults to pixi's `defaultFilterVert`. */
@@ -74,11 +83,26 @@ export function unregisterEffect(id: string): boolean {
 
 export function getEffectDefinition(param: VisualEffectParam): EffectDefinition | undefined {
   const id = param.segmentType === 'filter' ? param.filterId : param.effectId
-  return registry.get(id)
+  const definition = registry.get(id)
+  if (!definition)
+    return undefined
+  const requestedKind = param.segmentType === 'filter' ? 'filter' : 'effect'
+  return definition.kind && definition.kind !== requestedKind ? undefined : definition
 }
 
+/** Backwards-compatible full registry list. Use category-specific lists for UI pickers. */
 export function listEffectDefinitions(): EffectDefinition[] {
   return [...registry.values()]
+}
+
+/** Built-ins and custom definitions intended for colour/image adjustment. */
+export function listFilterDefinitions(): EffectDefinition[] {
+  return [...registry.values()].filter(definition => definition.kind !== 'effect')
+}
+
+/** Built-ins and custom definitions intended for visible overlays/distortions. */
+export function listVisualEffectDefinitions(): EffectDefinition[] {
+  return [...registry.values()].filter(definition => definition.kind !== 'filter')
 }
 
 /** Structural identity of an effect instance: stable across animated params. */
