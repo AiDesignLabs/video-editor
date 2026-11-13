@@ -32,6 +32,8 @@ export type {
   RenderCanvasToVideoProgress,
   RenderCanvasToVideoResult,
 } from './render-canvas-to-video'
+export { separateVideoAudio } from './separate-video-audio'
+export type { SeparatedVideoAudio } from './separate-video-audio'
 export { avcHighCodecString, measureDecodeThroughput, measureEncoderThroughput, probeCodecSupport, probeVideoStats, transcode } from './transcode'
 export type {
   AccelerationPreference,
